@@ -9,7 +9,7 @@ This repository is **separate from Factory23**. Both the future standalone Sales
 - PHP 8.3+ / Laravel 13
 - Laravel Sanctum (API tokens)
 - MySQL
-- Redis client prepared (Predis) for future queues
+- Redis (Predis) for cache/queue/session in production
 
 ## Local setup
 
@@ -34,19 +34,30 @@ curl http://127.0.0.1:8001/api/v1/health
 Expected:
 
 ```json
-{"status":"ok","service":"sales-engine"}
+{ "status": "ok", "service": "sales-engine" }
 ```
+
+## Production
+
+| Item       | Value                                                           |
+| ---------- | --------------------------------------------------------------- |
+| Public API | https://api.salesengine.thefactory23.com                        |
+| Health     | https://api.salesengine.thefactory23.com/api/v1/health          |
+| Deploy     | Push to `main` → GitHub Actions → DOKS namespace `sales-engine` |
+
+Full runbook (DNS, MySQL, secrets, Cloudflare, first cutover): **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)**
 
 ## Documentation
 
-| File | Purpose |
-|------|---------|
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Product/architecture decisions |
-| [docs/FRONTEND_INTEGRATION.md](docs/FRONTEND_INTEGRATION.md) | Living API contract for frontend wiring (fill as endpoints are built) |
+| File                                                         | Purpose                                 |
+| ------------------------------------------------------------ | --------------------------------------- |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)                 | Product/architecture decisions          |
+| [docs/FRONTEND_INTEGRATION.md](docs/FRONTEND_INTEGRATION.md) | Living API contract for frontend wiring |
+| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)                     | Production deploy + CI prerequisites    |
 
 ## Current status
 
-**Installation & scaffold only.** Domain service folders exist as stubs. Product APIs (ICP, discovery, scoring, outreach, CRM sync) are **not** implemented yet — that is the next backend plan.
+Scaffold + **production deploy/CI** ready. Domain service folders exist as stubs. Product APIs (ICP, discovery, scoring, outreach, CRM sync) are **not** implemented yet — that is the next backend plan.
 
 ## Relation to Factory23
 

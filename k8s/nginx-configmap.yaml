@@ -1,0 +1,77 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-config
+  namespace: sales-engine
+  labels:
+    app.kubernetes.io/name: sales-engine
+    app.kubernetes.io/component: nginx-config
+data:
+  default.conf: |
+    server {
+        listen 80;
+        server_name _;
+        root /var/www/html/public;
+        index index.php index.html;
+
+        access_log /dev/stdout;
+        error_log  /dev/stderr warn;
+
+        client_max_body_size 32M;
+
+        add_header X-Frame-Options "SAMEORIGIN" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-XSS-Protection "1; mode=block" always;
+        add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+        location / {
+            try_files $uri $uri/ /index.php?$query_string;
+        }
+
+        fastcgi_hide_header X-Powered-By;
+
+        location ~ \.php$ {
+            include             fastcgi_params;
+            fastcgi_index       index.php;
+            fastcgi_pass        127.0.0.1:9000;
+            fastcgi_hide_header X-Powered-By;
+            fastcgi_param       SCRIPT_FILENAME $document_root$fastcgi_script_name;
+            fastcgi_param       PATH_INFO       $fastcgi_path_info;
+            fastcgi_connect_timeout 60s;
+            fastcgi_send_timeout    120s;
+            fastcgi_read_timeout    120s;
+            fastcgi_buffer_size     128k;
+            fastcgi_buffers         4 256k;
+            fastcgi_busy_buffers_size 256k;
+        }
+
+        location ~ /\.ht {
+            deny all;
+        }
+
+        location = /favicon.ico {
+            access_log off;
+            log_not_found off;
+        }
+
+        location = /robots.txt {
+            access_log off;
+            log_not_found off;
+        }
+    }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: php-custom-ini
+  namespace: sales-engine
+  labels:
+    app.kubernetes.io/name: sales-engine
+    app.kubernetes.io/component: php-config
+data:
+  99-custom.ini: |
+    memory_limit = 256M
+    upload_max_filesize = 32M
+    post_max_size = 32M
+    max_execution_time = 120
+    expose_php = Off

@@ -3,6 +3,7 @@
 .env
 .env.backup
 .env.production
+k8s/secret.yaml
 .phpactor.json
 .phpunit.result.cache
 /.codex

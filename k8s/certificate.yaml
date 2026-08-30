@@ -1,0 +1,25 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# TLS Certificate for api.salesengine.thefactory23.com
+# Uses the existing cluster issuer letsencrypt-prod (shared with Factory23).
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: api-salesengine-thefactory23-com-tls
+  namespace: sales-engine
+  labels:
+    app.kubernetes.io/name: sales-engine
+    app.kubernetes.io/component: tls
+spec:
+  secretName: api-salesengine-thefactory23-com-tls
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+    group: cert-manager.io
+  dnsNames:
+    - api.salesengine.thefactory23.com
+  privateKey:
+    algorithm: RSA
+    encoding: PKCS1
+    size: 2048
+  renewBefore: 720h

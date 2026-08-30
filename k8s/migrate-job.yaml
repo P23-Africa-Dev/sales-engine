@@ -1,0 +1,65 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Laravel Migration Job — run before rolling the backend Deployment.
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: laravel-migrate
+  namespace: sales-engine
+  labels:
+    app.kubernetes.io/name: laravel-migrate
+    app.kubernetes.io/component: migration
+    app.kubernetes.io/part-of: sales-engine
+spec:
+  ttlSecondsAfterFinished: 86400
+  backoffLimit: 3
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels:
+        app: laravel-migrate
+        app.kubernetes.io/name: laravel-migrate
+        app.kubernetes.io/component: migration
+    spec:
+      restartPolicy: Never
+      imagePullSecrets:
+        - name: do-registry
+      containers:
+        - name: migrate
+          image: registry.digitalocean.com/con-reg/sales-engine-api:latest
+          imagePullPolicy: Always
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              mkdir -p storage/framework/cache/data \
+                       storage/framework/sessions \
+                       storage/framework/views \
+                       storage/logs
+              php artisan config:clear
+              php artisan config:cache
+              php artisan migrate --force --no-interaction
+          env:
+            - name: CACHE_STORE
+              value: array
+            - name: SESSION_DRIVER
+              value: array
+            - name: QUEUE_CONNECTION
+              value: sync
+            - name: LOG_CHANNEL
+              value: stderr
+          envFrom:
+            - configMapRef:
+                name: sales-engine-config
+            - secretRef:
+                name: sales-engine-secret
+          resources:
+            requests:
+              cpu: "10m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+          securityContext:
+            allowPrivilegeEscalation: false

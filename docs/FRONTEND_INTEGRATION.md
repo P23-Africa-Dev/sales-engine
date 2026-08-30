@@ -7,11 +7,11 @@
 
 ## 1. Environments
 
-| Environment | Base URL                | Notes                           |
-| ----------- | ----------------------- | ------------------------------- |
-| Local       | `http://127.0.0.1:8001` | `php artisan serve --port=8001` |
-| Staging     | _TBD_                   |                                 |
-| Production  | _TBD_                   |                                 |
+| Environment | Base URL                                   | Notes                           |
+| ----------- | ------------------------------------------ | ------------------------------- |
+| Local       | `http://127.0.0.1:8001`                    | `php artisan serve --port=8001` |
+| Staging     | _TBD_                                      |                                 |
+| Production  | `https://api.salesengine.thefactory23.com` | DOKS namespace `sales-engine`   |
 
 API prefix for all JSON routes: **`/api/v1`**
 
@@ -159,6 +159,7 @@ Configure via `CORS_ALLOWED_ORIGINS` in `.env` when middleware is wired.
 
 ## 7. Changelog
 
-| Date       | Change                                                                         |
-| ---------- | ------------------------------------------------------------------------------ |
-| 2026-08-30 | Scaffold created. Health endpoint only. Auth and product APIs not implemented. |
+| Date       | Change                                                                                            |
+| ---------- | ------------------------------------------------------------------------------------------------- |
+| 2026-08-30 | Scaffold created. Health endpoint only. Auth and product APIs not implemented.                    |
+| 2026-08-30 | Production base URL set to `https://api.salesengine.thefactory23.com`. Deploy/CI manifests added. |

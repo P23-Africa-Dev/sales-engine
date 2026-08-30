@@ -1,0 +1,16 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: sales-engine
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - redis-pvc.yaml
+  - redis-deployment.yaml
+  - redis-service.yaml
+  - nginx-configmap.yaml
+  - backend-service.yaml
+  - backend-deployment.yaml
+  - migrate-job.yaml
+  - certificate.yaml
+  - ingress.yaml
+# secret.yaml is applied manually (never committed). See secret.example.yaml.
