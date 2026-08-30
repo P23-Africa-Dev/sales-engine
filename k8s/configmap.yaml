@@ -53,5 +53,14 @@ data:
   # Explicit view compiled path avoids realpath() returning false on fresh containers
   VIEW_COMPILED_PATH: "/var/www/html/storage/framework/views"
 
-  # ── Future Factory23 integration (not wired yet) ──────────────────────────────
+  # ── Factory23 + LLM / discovery (non-secret) ────────────────────────────────
   FACTORY23_API_URL: "https://api.thefactory23.com"
+  FACTORY23_CRM_SYNC_ENABLED: "false"
+  GLM_BASE_URL: "https://open.bigmodel.cn/api/paas/v4"
+  GLM_CHAT_MODEL: "glm-4-flash"
+  GLM_EXTRACT_MODEL: "glm-4-flash"
+  GLM_SCORE_MODEL: "glm-4-air"
+  GLM_OUTREACH_MODEL: "glm-4-flash"
+  SERPER_BASE_URL: "https://google.serper.dev"
+  MONO_BASE_URL: "https://api.withmono.com"
+  FYLINGS_BASE_URL: "https://api.fylings.com"

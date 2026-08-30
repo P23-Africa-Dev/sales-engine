@@ -1,21 +1,21 @@
 # Frontend Integration Contract
 
-> **Living document.** Fill endpoint rows as the Sales Engine backend implementation plan ships them.  
-> Both the standalone Sales Engine frontend and the Factory23 embedded Sales Engine UI should use this file as the source of truth for API wiring.
+Source of truth for wiring the standalone Sales Engine UI and the Factory23 embedded `/sales-engine` page.
+
+**Base URL (production):** `https://api.salesengine.thefactory23.com`  
+**API prefix:** `/api/v1`  
+**Auth:** Sanctum Bearer token (except health + register/login/exchange)
 
 ---
 
 ## 1. Environments
 
-| Environment | Base URL                                   | Notes                           |
-| ----------- | ------------------------------------------ | ------------------------------- |
-| Local       | `http://127.0.0.1:8001`                    | `php artisan serve --port=8001` |
-| Staging     | _TBD_                                      |                                 |
-| Production  | `https://api.salesengine.thefactory23.com` | DOKS namespace `sales-engine`   |
+| Environment | Base URL | Notes |
+| ----------- | -------- | ----- |
+| Local | `http://127.0.0.1:8001` | `php artisan serve --port=8001` |
+| Production | `https://api.salesengine.thefactory23.com` | DOKS `sales-engine` |
 
-API prefix for all JSON routes: **`/api/v1`**
-
-Example health check:
+Health:
 
 ```http
 GET /api/v1/health
@@ -25,141 +25,263 @@ GET /api/v1/health
 { "status": "ok", "service": "sales-engine" }
 ```
 
-Laravel also exposes `GET /up` as framework health (not product-specific).
-
 ---
 
-## 2. Auth model (planned — not implemented yet)
+## 2. Auth
 
-### 2.1 Native Sales Engine signup / login
+### Headers (authenticated routes)
 
-- Email + password against this API
-- Response issues a **Sanctum personal access token**
-- Frontend sends: `Authorization: Bearer {token}`
+| Header | Required | Description |
+| ------ | -------- | ----------- |
+| `Authorization` | Yes | `Bearer {sanctum_token}` |
+| `Accept` | Yes | `application/json` |
+| `Content-Type` | On writes | `application/json` |
+| `X-Organization-Id` | Recommended | Org id when user belongs to multiple orgs. If omitted, first membership is used. |
 
-### 2.2 Continue with Factory23
+### 2.1 Native register
 
-- Used when opening SE inside Factory23 (first visit) or from standalone “Continue with Factory23”
-- Factory23 issues a short-lived assertion → this API verifies → creates/links SE user + org → returns **SE** Sanctum token
-- After linking, both UIs use the **SE token** for Sales Engine APIs
-
-### 2.3 Headers (planned)
-
-| Header                       | Required                   | Description                                                |
-| ---------------------------- | -------------------------- | ---------------------------------------------------------- |
-| `Authorization`              | Yes (except health/public) | `Bearer {sanctum_token}`                                   |
-| `Accept`                     | Yes                        | `application/json`                                         |
-| `Content-Type`               | On writes                  | `application/json`                                         |
-| Organization / tenant header | TBD                        | May be path/query `organization_id` — decide in logic plan |
-
----
-
-## 3. Clients that will call this API
-
-| Client                                 | How it authenticates                    |
-| -------------------------------------- | --------------------------------------- |
-| Standalone SE Next.js app              | Native login or Continue with Factory23 |
-| Factory23 Next.js `/sales-engine` page | Continue with Factory23 (preferred)     |
-
-Neither client should call Factory23 CRM APIs for Sales Engine discovery data. Discovery lives here.
-
----
-
-## 4. Error format (Laravel JSON convention)
-
-Typical validation error:
+```http
+POST /api/v1/auth/register
+```
 
 ```json
 {
-    "message": "The given data was invalid.",
-    "errors": {
-        "email": ["The email field is required."]
-    }
+  "name": "Ada Lovelace",
+  "email": "ada@example.com",
+  "password": "Password1!",
+  "password_confirmation": "Password1!",
+  "organization_name": "Analytical Engines"
 }
 ```
 
-Unauthenticated: HTTP `401`. Forbidden: HTTP `403`. Not found: HTTP `404`.
+**201** → `{ token, token_type, user, organization }`
 
-Exact envelope may be normalized in the logic plan — update this section when finalized.
+### 2.2 Native login
 
----
+```http
+POST /api/v1/auth/login
+```
 
-## 5. Endpoint inventory
+```json
+{ "email": "ada@example.com", "password": "Password1!" }
+```
 
-Fill as features are implemented. Leave blank until ready.
+**200** → `{ token, token_type, user, organization }`  
+**401** → invalid credentials
 
-### 5.1 System
+### 2.3 Me / logout
 
-| Method | Path             | Auth | Status   | Description    |
-| ------ | ---------------- | ---- | -------- | -------------- |
-| GET    | `/api/v1/health` | No   | **Live** | Service health |
+```http
+GET /api/v1/auth/me
+POST /api/v1/auth/logout
+```
 
-### 5.2 Auth
+### 2.4 Continue with Factory23
 
-| Method | Path | Auth | Status  | Description                        |
-| ------ | ---- | ---- | ------- | ---------------------------------- |
-|        |      |      | Planned | Register                           |
-|        |      |      | Planned | Login                              |
-|        |      |      | Planned | Logout / revoke token              |
-|        |      |      | Planned | Continue with Factory23 (exchange) |
-|        |      |      | Planned | Me / current user                  |
+**Sequence**
 
-### 5.3 Organizations
+1. User is logged into Factory23.
+2. F23 (management) calls:
 
-| Method | Path | Auth | Status  | Description                |
-| ------ | ---- | ---- | ------- | -------------------------- |
-|        |      |      | Planned | List / create / switch org |
+```http
+POST /api/v1/admin/sales-engine/assertion
+Authorization: Bearer {f23_token}
+```
 
-### 5.4 ICP
+Optional body: `{ "company_id": 123 }`
 
-| Method | Path | Auth | Status  | Description                    |
-| ------ | ---- | ---- | ------- | ------------------------------ |
-|        |      |      | Planned | List ICP profiles              |
-|        |      |      | Planned | Create / update / activate ICP |
+**200** → `{ data: { assertion, expires_in: 60, exchange_url } }`
 
-### 5.5 Discovery / Research
+3. Frontend (or F23 BFF) exchanges on Sales Engine:
 
-| Method | Path | Auth | Status  | Description                   |
-| ------ | ---- | ---- | ------- | ----------------------------- |
-|        |      |      | Planned | Run discovery / chat research |
-|        |      |      | Planned | Job status / results          |
+```http
+POST /api/v1/auth/factory23/exchange
+```
 
-### 5.6 Companies / Leads (SE CRM)
+```json
+{ "assertion": "<jwt>" }
+```
 
-| Method | Path | Auth | Status  | Description                  |
-| ------ | ---- | ---- | ------- | ---------------------------- |
-|        |      |      | Planned | List / get companies & leads |
-|        |      |      | Planned | Pipeline stage updates       |
+**200** → SE `{ token, token_type, user, organization }`
 
-### 5.7 Outreach
+4. All subsequent SE calls use the **SE** Bearer token + optional `X-Organization-Id`.
 
-| Method | Path | Auth | Status  | Description                 |
-| ------ | ---- | ---- | ------- | --------------------------- |
-|        |      |      | Planned | Sequences / send / activity |
-
-### 5.8 Factory23 CRM Sync
-
-| Method | Path | Auth | Status  | Description             |
-| ------ | ---- | ---- | ------- | ----------------------- |
-|        |      |      | Planned | Enable / disable sync   |
-|        |      |      | Planned | Sync status / conflicts |
+Shared secret: F23 `SALES_ENGINE_JWT_SECRET` ≡ SE `FACTORY23_JWT_SECRET` (HS256, ~60s TTL).
 
 ---
 
-## 6. CORS (planned)
+## 3. Organizations
 
-Local origins expected later:
-
-- `http://localhost:3000`
-- `http://127.0.0.1:3000`
-
-Configure via `CORS_ALLOWED_ORIGINS` in `.env` when middleware is wired.
+| Method | Path | Notes |
+| ------ | ---- | ----- |
+| GET | `/organizations` | Memberships for current user |
+| POST | `/organizations` | `{ name }` — caller becomes owner |
+| GET | `/organizations/current` | Resolved via `X-Organization-Id` or default |
 
 ---
 
-## 7. Changelog
+## 4. ICP profiles
 
-| Date       | Change                                                                                            |
-| ---------- | ------------------------------------------------------------------------------------------------- |
-| 2026-08-30 | Scaffold created. Health endpoint only. Auth and product APIs not implemented.                    |
-| 2026-08-30 | Production base URL set to `https://api.salesengine.thefactory23.com`. Deploy/CI manifests added. |
+Shapes match UI `IcpProfile` / `IcpConfig` (camelCase in `config`).
+
+**Config fields:** `profileName`, `description`, `industries[]`, `companySizes[]`, `revenueRanges[]`, `territories[]`, `decisionMakers[]`, `minMatchScore`, `autoSyncCrm`, `enrichContactDetails`, `customPrompt`
+
+| Method | Path | Behavior |
+| ------ | ---- | -------- |
+| GET | `/icp-profiles` | List for current org |
+| GET | `/icp-profiles/active` | Single active or `data: null` |
+| POST | `/icp-profiles` | First profile auto-activates |
+| GET | `/icp-profiles/{id}` | |
+| PATCH | `/icp-profiles/{id}` | Partial name/description/config merge |
+| DELETE | `/icp-profiles/{id}` | If active deleted, next profile activated |
+| POST | `/icp-profiles/{id}/activate` | Exactly one active per org |
+| POST | `/icp-profiles/{id}/duplicate` | Inactive copy named `{name} (Copy)` |
+
+**Resource example**
+
+```json
+{
+  "id": "1",
+  "name": "Tier-1 FMCG",
+  "description": "...",
+  "isActive": true,
+  "leadCount": 12,
+  "lastUpdated": "2026-08-30T12:00:00+00:00",
+  "config": { "industries": ["FMCG & Retail"], "minMatchScore": 75, "autoSyncCrm": true }
+}
+```
+
+---
+
+## 5. Chat
+
+Intents: `freeform` | `quick_research` | `generate_leads` | `create_outreach`
+
+```http
+POST /api/v1/chat/sessions
+{ "title": "optional" }
+```
+
+```http
+GET /api/v1/chat/sessions/{id}/messages
+POST /api/v1/chat/sessions/{id}/messages
+{ "body": "Find distributors in Lagos", "intent": "generate_leads" }
+```
+
+**Assistant message** may include:
+
+```json
+{
+  "role": "assistant",
+  "body": "...",
+  "leads": [{ "id": 1, "name": "...", "source": "serper", "score": 82, "summary": "..." }]
+}
+```
+
+`generate_leads` / `quick_research` require an active ICP and run discovery synchronously.
+
+---
+
+## 6. Discovery
+
+```http
+POST /api/v1/discovery/runs
+{ "query": "FMCG distributors Lagos", "intent": "generate_leads", "limit": 8 }
+```
+
+```http
+GET /api/v1/discovery/runs/{id}
+```
+
+Stages example: `analyzing_brief` → `searching_sources` → `extracting` → `compiling_results`
+
+Enabled live sources (when keyed): Serper, Mono, Fylings. Stubs (no-op until keyed/implemented): Apollo, Hunter, YouTube, X, Reddit, Meta.
+
+---
+
+## 7. Companies & leads
+
+```http
+GET /api/v1/companies
+GET /api/v1/companies/{id}
+GET /api/v1/leads?stage=new&limit=50
+```
+
+---
+
+## 8. Metrics & outreach
+
+```http
+GET /api/v1/metrics
+GET /api/v1/dashboard
+```
+
+```json
+{
+  "data": {
+    "leads_discovered": 0,
+    "companies_cached": 0,
+    "qualified_leads": 0,
+    "outreach_drafts": 0,
+    "pipeline": { "new": 0, "contacted": 0, "engaged": 0, "qualified": 0, "won": 0, "lost": 0 }
+  }
+}
+```
+
+```http
+GET /api/v1/outreach/recent
+POST /api/v1/outreach/draft
+{ "prompt": "...", "channel": "email" }
+```
+
+WhatsApp: drafts only. `send: true` is rejected unless contact has `whatsapp_opt_in` + `whatsapp_opt_in_at`, and outbound send is not enabled in v1.
+
+---
+
+## 9. SE CRM
+
+Stages: `new` → `contacted` → `engaged` → `qualified` → `won` | `lost`
+
+```http
+GET /api/v1/crm/pipeline
+PATCH /api/v1/crm/leads/{id}
+{ "stage": "qualified" }
+```
+
+---
+
+## 10. Factory23 integration
+
+```http
+GET /api/v1/integrations/factory23/status
+POST /api/v1/integrations/factory23/crm-sync
+{ "enabled": true, "run": true }
+```
+
+Optional push of **qualified** SE leads to F23 CRM when `FACTORY23_CRM_SYNC_ENABLED` / org flag + `FACTORY23_API_URL` + `FACTORY23_API_TOKEN` are set.
+
+---
+
+## 11. Errors
+
+Validation:
+
+```json
+{
+  "message": "The given data was invalid.",
+  "errors": { "email": ["The email field is required."] }
+}
+```
+
+Auth: **401**. Forbidden org: **403**. Missing active ICP for discovery: **422**.
+
+---
+
+## 12. Clients
+
+| Client | Auth |
+| ------ | ---- |
+| Standalone SE Next.js | Native or Continue with F23 |
+| Factory23 `/sales-engine` | Continue with F23 → SE token |
+
+Do not call Factory23 CRM for discovery data — discovery lives on this API.

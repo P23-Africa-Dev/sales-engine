@@ -14,8 +14,9 @@ return Application::configure(basePath: dirname(__DIR__))
         apiPrefix: 'api/v1',
     )
     ->withMiddleware(function (Middleware $middleware): void {
-        // Future: Sanctum stateful domains / CORS for standalone SE + Factory23 frontends.
-        // Allowed origins will be driven by CORS_ALLOWED_ORIGINS in .env when wired.
+        $middleware->alias([
+            'org.resolve' => \App\Http\Middleware\ResolveOrganization::class,
+        ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(

@@ -107,6 +107,9 @@ jobs:
       - name: Run PHP syntax check
         run: find app config routes -name "*.php" -print0 | xargs -0 php -l | grep -v "No syntax errors" || true
 
+      - name: Run test suite
+        run: php artisan test
+
       - name: Health route smoke (artisan)
         run: |
           php artisan route:list --path=api/v1/health | grep -q health
