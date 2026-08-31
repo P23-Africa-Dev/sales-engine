@@ -10,10 +10,10 @@ Source of truth for wiring the standalone Sales Engine UI and the Factory23 embe
 
 ## 1. Environments
 
-| Environment | Base URL | Notes |
-| ----------- | -------- | ----- |
-| Local | `http://127.0.0.1:8001` | `php artisan serve --port=8001` |
-| Production | `https://api.salesengine.thefactory23.com` | DOKS `sales-engine` |
+| Environment | Base URL                                   | Notes                           |
+| ----------- | ------------------------------------------ | ------------------------------- |
+| Local       | `http://127.0.0.1:8001`                    | `php artisan serve --port=8001` |
+| Production  | `https://api.salesengine.thefactory23.com` | DOKS `sales-engine`             |
 
 Health:
 
@@ -31,11 +31,11 @@ GET /api/v1/health
 
 ### Headers (authenticated routes)
 
-| Header | Required | Description |
-| ------ | -------- | ----------- |
-| `Authorization` | Yes | `Bearer {sanctum_token}` |
-| `Accept` | Yes | `application/json` |
-| `Content-Type` | On writes | `application/json` |
+| Header              | Required    | Description                                                                      |
+| ------------------- | ----------- | -------------------------------------------------------------------------------- |
+| `Authorization`     | Yes         | `Bearer {sanctum_token}`                                                         |
+| `Accept`            | Yes         | `application/json`                                                               |
+| `Content-Type`      | On writes   | `application/json`                                                               |
 | `X-Organization-Id` | Recommended | Org id when user belongs to multiple orgs. If omitted, first membership is used. |
 
 ### 2.1 Native register
@@ -46,11 +46,11 @@ POST /api/v1/auth/register
 
 ```json
 {
-  "name": "Ada Lovelace",
-  "email": "ada@example.com",
-  "password": "Password1!",
-  "password_confirmation": "Password1!",
-  "organization_name": "Analytical Engines"
+    "name": "Ada Lovelace",
+    "email": "ada@example.com",
+    "password": "Password1!",
+    "password_confirmation": "Password1!",
+    "organization_name": "Analytical Engines"
 }
 ```
 
@@ -78,21 +78,34 @@ POST /api/v1/auth/logout
 
 ### 2.4 Continue with Factory23
 
+**Important:** Factory23 Sanctum tokens are **not** accepted on Sales Engine protected routes. You must exchange for an **SE** token first. See **§2.5** if you see **401** on `/icp-profiles`.
+
 **Sequence**
 
-1. User is logged into Factory23.
-2. F23 (management) calls:
+1. User is logged into Factory23 (F23 token in memory / `localStorage`).
+2. F23 issues a short-lived JWT assertion:
+
+**Management** (owner / admin / supervisor):
 
 ```http
 POST /api/v1/admin/sales-engine/assertion
 Authorization: Bearer {f23_token}
 ```
 
+**Agents:**
+
+```http
+POST /api/v1/agent/sales-engine/assertion
+Authorization: Bearer {f23_token}
+```
+
 Optional body: `{ "company_id": 123 }`
 
-**200** → `{ data: { assertion, expires_in: 60, exchange_url } }`
+**200** (F23 envelope) → `data.assertion`, `data.expires_in` (60), `data.exchange_url`
 
-3. Frontend (or F23 BFF) exchanges on Sales Engine:
+**503** → F23 `SALES_ENGINE_JWT_SECRET` not configured.
+
+3. Exchange on Sales Engine (no F23 token on this call):
 
 ```http
 POST /api/v1/auth/factory23/exchange
@@ -104,19 +117,30 @@ POST /api/v1/auth/factory23/exchange
 
 **200** → SE `{ token, token_type, user, organization }`
 
-4. All subsequent SE calls use the **SE** Bearer token + optional `X-Organization-Id`.
+4. All subsequent SE calls use the **SE** Bearer token + optional `X-Organization-Id` (from `organization.id`).
 
 Shared secret: F23 `SALES_ENGINE_JWT_SECRET` ≡ SE `FACTORY23_JWT_SECRET` (HS256, ~60s TTL).
+
+**Factory23 embedded UI:** see [`factory23 fullstack/docs/SALES_ENGINE_FRONTEND.md`](../../factory23 fullstack/docs/SALES_ENGINE_FRONTEND.md).
+
+### 2.5 Troubleshooting 401 (wrong token)
+
+| You called                                          | With token                               | Result             |
+| --------------------------------------------------- | ---------------------------------------- | ------------------ |
+| `api.salesengine.thefactory23.com/.../icp-profiles` | F23 `539\|…`                             | **401** — expected |
+| Same                                                | SE token from `/auth/factory23/exchange` | **200/201**        |
+
+Fix: implement assertion → exchange; store SE token separately (e.g. `sales_engine_token`). Never reuse `apiRequest()` from Factory23 for Sales Engine URLs.
 
 ---
 
 ## 3. Organizations
 
-| Method | Path | Notes |
-| ------ | ---- | ----- |
-| GET | `/organizations` | Memberships for current user |
-| POST | `/organizations` | `{ name }` — caller becomes owner |
-| GET | `/organizations/current` | Resolved via `X-Organization-Id` or default |
+| Method | Path                     | Notes                                       |
+| ------ | ------------------------ | ------------------------------------------- |
+| GET    | `/organizations`         | Memberships for current user                |
+| POST   | `/organizations`         | `{ name }` — caller becomes owner           |
+| GET    | `/organizations/current` | Resolved via `X-Organization-Id` or default |
 
 ---
 
@@ -126,28 +150,32 @@ Shapes match UI `IcpProfile` / `IcpConfig` (camelCase in `config`).
 
 **Config fields:** `profileName`, `description`, `industries[]`, `companySizes[]`, `revenueRanges[]`, `territories[]`, `decisionMakers[]`, `minMatchScore`, `autoSyncCrm`, `enrichContactDetails`, `customPrompt`
 
-| Method | Path | Behavior |
-| ------ | ---- | -------- |
-| GET | `/icp-profiles` | List for current org |
-| GET | `/icp-profiles/active` | Single active or `data: null` |
-| POST | `/icp-profiles` | First profile auto-activates |
-| GET | `/icp-profiles/{id}` | |
-| PATCH | `/icp-profiles/{id}` | Partial name/description/config merge |
-| DELETE | `/icp-profiles/{id}` | If active deleted, next profile activated |
-| POST | `/icp-profiles/{id}/activate` | Exactly one active per org |
-| POST | `/icp-profiles/{id}/duplicate` | Inactive copy named `{name} (Copy)` |
+| Method | Path                           | Behavior                                  |
+| ------ | ------------------------------ | ----------------------------------------- |
+| GET    | `/icp-profiles`                | List for current org                      |
+| GET    | `/icp-profiles/active`         | Single active or `data: null`             |
+| POST   | `/icp-profiles`                | First profile auto-activates              |
+| GET    | `/icp-profiles/{id}`           |                                           |
+| PATCH  | `/icp-profiles/{id}`           | Partial name/description/config merge     |
+| DELETE | `/icp-profiles/{id}`           | If active deleted, next profile activated |
+| POST   | `/icp-profiles/{id}/activate`  | Exactly one active per org                |
+| POST   | `/icp-profiles/{id}/duplicate` | Inactive copy named `{name} (Copy)`       |
 
 **Resource example**
 
 ```json
 {
-  "id": "1",
-  "name": "Tier-1 FMCG",
-  "description": "...",
-  "isActive": true,
-  "leadCount": 12,
-  "lastUpdated": "2026-08-30T12:00:00+00:00",
-  "config": { "industries": ["FMCG & Retail"], "minMatchScore": 75, "autoSyncCrm": true }
+    "id": "1",
+    "name": "Tier-1 FMCG",
+    "description": "...",
+    "isActive": true,
+    "leadCount": 12,
+    "lastUpdated": "2026-08-30T12:00:00+00:00",
+    "config": {
+        "industries": ["FMCG & Retail"],
+        "minMatchScore": 75,
+        "autoSyncCrm": true
+    }
 }
 ```
 
@@ -172,9 +200,17 @@ POST /api/v1/chat/sessions/{id}/messages
 
 ```json
 {
-  "role": "assistant",
-  "body": "...",
-  "leads": [{ "id": 1, "name": "...", "source": "serper", "score": 82, "summary": "..." }]
+    "role": "assistant",
+    "body": "...",
+    "leads": [
+        {
+            "id": 1,
+            "name": "...",
+            "source": "serper",
+            "score": 82,
+            "summary": "..."
+        }
+    ]
 }
 ```
 
@@ -218,13 +254,20 @@ GET /api/v1/dashboard
 
 ```json
 {
-  "data": {
-    "leads_discovered": 0,
-    "companies_cached": 0,
-    "qualified_leads": 0,
-    "outreach_drafts": 0,
-    "pipeline": { "new": 0, "contacted": 0, "engaged": 0, "qualified": 0, "won": 0, "lost": 0 }
-  }
+    "data": {
+        "leads_discovered": 0,
+        "companies_cached": 0,
+        "qualified_leads": 0,
+        "outreach_drafts": 0,
+        "pipeline": {
+            "new": 0,
+            "contacted": 0,
+            "engaged": 0,
+            "qualified": 0,
+            "won": 0,
+            "lost": 0
+        }
+    }
 }
 ```
 
@@ -268,8 +311,8 @@ Validation:
 
 ```json
 {
-  "message": "The given data was invalid.",
-  "errors": { "email": ["The email field is required."] }
+    "message": "The given data was invalid.",
+    "errors": { "email": ["The email field is required."] }
 }
 ```
 
@@ -279,9 +322,18 @@ Auth: **401**. Forbidden org: **403**. Missing active ICP for discovery: **422**
 
 ## 12. Clients
 
-| Client | Auth |
-| ------ | ---- |
-| Standalone SE Next.js | Native or Continue with F23 |
-| Factory23 `/sales-engine` | Continue with F23 → SE token |
+| Client                    | Auth                                                                   |
+| ------------------------- | ---------------------------------------------------------------------- |
+| Standalone SE Next.js     | Native or Continue with F23                                            |
+| Factory23 `/sales-engine` | Continue with F23 → SE token (see F23 `docs/SALES_ENGINE_FRONTEND.md`) |
 
 Do not call Factory23 CRM for discovery data — discovery lives on this API.
+
+---
+
+## 13. Changelog
+
+| Date       | Change                                                                |
+| ---------- | --------------------------------------------------------------------- |
+| 2026-08-31 | Agent assertion path; 401 troubleshooting; link to F23 frontend guide |
+| 2026-08-30 | Initial API contract                                                  |

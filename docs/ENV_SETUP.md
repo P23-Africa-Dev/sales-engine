@@ -6,12 +6,12 @@ Step-by-step keys for local and DigitalOcean Kubernetes (`sales-engine` namespac
 
 ## 1. Core app (always)
 
-| Variable | Where | Notes |
-| -------- | ----- | ----- |
-| `APP_KEY` | Secret | `php artisan key:generate --show` |
-| `APP_URL` | ConfigMap | `https://api.salesengine.thefactory23.com` |
-| `DB_*` | ConfigMap + Secret password | Managed MySQL DB `sales_engine` |
-| `REDIS_*` | ConfigMap | In-cluster `redis-service` |
+| Variable  | Where                       | Notes                                      |
+| --------- | --------------------------- | ------------------------------------------ |
+| `APP_KEY` | Secret                      | `php artisan key:generate --show`          |
+| `APP_URL` | ConfigMap                   | `https://api.salesengine.thefactory23.com` |
+| `DB_*`    | ConfigMap + Secret password | Managed MySQL DB `sales_engine`            |
+| `REDIS_*` | ConfigMap                   | In-cluster `redis-service`                 |
 
 ---
 
@@ -21,14 +21,14 @@ Step-by-step keys for local and DigitalOcean Kubernetes (`sales-engine` namespac
 2. Create an API key.
 3. Set:
 
-| Variable | Default | Purpose |
-| -------- | ------- | ------- |
-| `GLM_API_KEY` | — | Required for LLM features |
-| `GLM_BASE_URL` | `https://open.bigmodel.cn/api/paas/v4` | |
-| `GLM_CHAT_MODEL` | `glm-4-flash` | Chat narration |
-| `GLM_EXTRACT_MODEL` | `glm-4-flash` | Snippet → company JSON |
-| `GLM_SCORE_MODEL` | `glm-4-air` | ICP fit scores |
-| `GLM_OUTREACH_MODEL` | `glm-4-flash` | Drafts |
+| Variable             | Default                                | Purpose                   |
+| -------------------- | -------------------------------------- | ------------------------- |
+| `GLM_API_KEY`        | —                                      | Required for LLM features |
+| `GLM_BASE_URL`       | `https://open.bigmodel.cn/api/paas/v4` |                           |
+| `GLM_CHAT_MODEL`     | `glm-4-flash`                          | Chat narration            |
+| `GLM_EXTRACT_MODEL`  | `glm-4-flash`                          | Snippet → company JSON    |
+| `GLM_SCORE_MODEL`    | `glm-4-air`                            | ICP fit scores            |
+| `GLM_OUTREACH_MODEL` | `glm-4-flash`                          | Drafts                    |
 
 Without `GLM_API_KEY`, discovery still works with heuristic extract/score; freeform chat is limited.
 
@@ -64,39 +64,50 @@ If missing, adapters stay disabled; product still runs on Serper + GLM.
 
 Generate a long random secret (e.g. `openssl rand -hex 32`).
 
-| App | Variable |
-| --- | -------- |
-| Sales Engine | `FACTORY23_JWT_SECRET` |
-| Factory23 | `SALES_ENGINE_JWT_SECRET` (or `FACTORY23_JWT_SECRET`) |
+| App          | Variable                                              |
+| ------------ | ----------------------------------------------------- |
+| Sales Engine | `FACTORY23_JWT_SECRET`                                |
+| Factory23    | `SALES_ENGINE_JWT_SECRET` (or `FACTORY23_JWT_SECRET`) |
 
 Also on SE:
 
-| Variable | Purpose |
-| -------- | ------- |
-| `FACTORY23_API_URL` | Base for CRM push / docs (`https://api.thefactory23.com`) |
-| `FACTORY23_API_TOKEN` | Sanctum/token for optional CRM push |
-| `FACTORY23_CRM_SYNC_ENABLED` | `true`/`false` global gate |
+| Variable                     | Purpose                                                   |
+| ---------------------------- | --------------------------------------------------------- |
+| `FACTORY23_API_URL`          | Base for CRM push / docs (`https://api.thefactory23.com`) |
+| `FACTORY23_API_TOKEN`        | Sanctum/token for optional CRM push                       |
+| `FACTORY23_CRM_SYNC_ENABLED` | `true`/`false` global gate                                |
 
 On Factory23:
 
-| Variable | Purpose |
-| -------- | ------- |
-| `SALES_ENGINE_API_URL` | Default `https://api.salesengine.thefactory23.com` |
+| Variable                  | Purpose                                                                              |
+| ------------------------- | ------------------------------------------------------------------------------------ |
+| `SALES_ENGINE_API_URL`    | Default `https://api.salesengine.thefactory23.com` (in `factory23-config` ConfigMap) |
+| `SALES_ENGINE_JWT_SECRET` | **Required in `factory23-secret`** — same value as SE `FACTORY23_JWT_SECRET`         |
 
-Assertion issuer: `POST /api/v1/admin/sales-engine/assertion` (management auth).
+Assertion endpoints:
 
----
+- Management: `POST /api/v1/admin/sales-engine/assertion`
+- Agents: `POST /api/v1/agent/sales-engine/assertion`
+
+After updating `factory23-secret`:
+
+```bash
+kubectl apply -f k8s/secret.yaml -n factory23
+kubectl rollout restart deployment/backend deployment/queue-worker deployment/scheduler -n factory23
+```
+
+Frontend guide: `factory23 fullstack/docs/SALES_ENGINE_FRONTEND.md`.
 
 ## 6. Stub providers (optional — disabled until keyed)
 
-| Variable | Adapter |
-| -------- | ------- |
-| `APOLLO_API_KEY` | Apollo |
-| `HUNTER_API_KEY` | Hunter |
-| `YOUTUBE_API_KEY` | YouTube |
-| `X_BEARER_TOKEN` | X |
-| `REDDIT_CLIENT_ID` / `REDDIT_CLIENT_SECRET` / `REDDIT_USER_AGENT` | Reddit |
-| `META_ACCESS_TOKEN` / `META_APP_ID` / `META_APP_SECRET` | Meta Pages |
+| Variable                                                          | Adapter    |
+| ----------------------------------------------------------------- | ---------- |
+| `APOLLO_API_KEY`                                                  | Apollo     |
+| `HUNTER_API_KEY`                                                  | Hunter     |
+| `YOUTUBE_API_KEY`                                                 | YouTube    |
+| `X_BEARER_TOKEN`                                                  | X          |
+| `REDDIT_CLIENT_ID` / `REDDIT_CLIENT_SECRET` / `REDDIT_USER_AGENT` | Reddit     |
+| `META_ACCESS_TOKEN` / `META_APP_ID` / `META_APP_SECRET`           | Meta Pages |
 
 Stubs implement the interface but return empty hits until full integration.
 
