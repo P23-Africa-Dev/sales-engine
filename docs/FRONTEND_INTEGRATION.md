@@ -185,15 +185,23 @@ Shapes match UI `IcpProfile` / `IcpConfig` (camelCase in `config`).
 
 Intents: `freeform` | `quick_research` | `generate_leads` | `create_outreach`
 
+| Intent            | Behavior                                                                         |
+| ----------------- | -------------------------------------------------------------------------------- |
+| `freeform`        | GLM chat with session history                                                    |
+| `quick_research`  | Multi-query research synthesis; `meta.research` with sources; no leads persisted |
+| `generate_leads`  | Lead discovery (limit 12, minMatchScore filter); inline leads with `crm_synced`  |
+| `create_outreach` | Outreach draft; `meta.outreach`; uses session leads when available               |
+
 ```http
 POST /api/v1/chat/sessions
 { "title": "optional" }
 ```
 
 ```http
+GET /api/v1/chat/sessions/current
 GET /api/v1/chat/sessions/{id}/messages
 POST /api/v1/chat/sessions/{id}/messages
-{ "body": "Find distributors in Lagos", "intent": "generate_leads" }
+{ "body": "Find distributors in Lagos", "intent": "generate_leads", "timezone": "Africa/Lagos" }
 ```
 
 **Assistant message** may include:
@@ -202,19 +210,39 @@ POST /api/v1/chat/sessions/{id}/messages
 {
     "role": "assistant",
     "body": "...",
+    "intent": "generate_leads",
     "leads": [
         {
             "id": 1,
             "name": "...",
             "source": "serper",
             "score": 82,
-            "summary": "..."
+            "summary": "...",
+            "crm_synced": false,
+            "f23_lead_id": null
         }
-    ]
+    ],
+    "meta": {
+        "research": { "sub_queries": [], "sources": [] },
+        "outreach": {
+            "channel": "email",
+            "subject": "...",
+            "body": "...",
+            "sent": false
+        }
+    }
 }
 ```
 
-`generate_leads` / `quick_research` require an active ICP and run discovery synchronously.
+`quick_research`, `generate_leads`, and `create_outreach` require an active ICP.
+
+**CRM push (per lead):**
+
+```http
+POST /api/v1/leads/{id}/sync-to-crm
+POST /api/v1/leads/sync-to-crm
+{ "lead_ids": [1, 2, 3] }
+```
 
 ---
 

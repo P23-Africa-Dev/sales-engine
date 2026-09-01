@@ -11,6 +11,8 @@ use App\Services\Discovery\DiscoveryOrchestrator;
 use App\Services\Icp\IcpProfileService;
 use App\Services\Llm\GlmClient;
 use App\Services\Outreach\OutreachDraftService;
+use App\Services\Research\ResearchOrchestrator;
+use App\Support\TimeGreeting;
 use InvalidArgumentException;
 
 class ChatService
@@ -20,6 +22,7 @@ class ChatService
     public function __construct(
         private readonly GlmClient $glm,
         private readonly DiscoveryOrchestrator $discovery,
+        private readonly ResearchOrchestrator $research,
         private readonly IcpProfileService $icps,
         private readonly OutreachDraftService $outreach,
     ) {}
@@ -36,6 +39,16 @@ class ChatService
         ]);
     }
 
+    public function latestSessionForUser(Organization $organization, User $user): ?ChatSession
+    {
+        return ChatSession::query()
+            ->where('organization_id', $organization->id)
+            ->where('user_id', $user->id)
+            ->whereHas('messages')
+            ->latest('updated_at')
+            ->first();
+    }
+
     /**
      * @return array{user_message: ChatMessage, assistant_message: ChatMessage, discovery_run_id?: int|null}
      */
@@ -45,6 +58,7 @@ class ChatService
         User $user,
         string $body,
         string $intent = 'freeform',
+        ?string $clientTimezone = null,
     ): array {
         if (! in_array($intent, self::INTENTS, true)) {
             throw new InvalidArgumentException('Invalid intent.');
@@ -69,7 +83,19 @@ class ChatService
         $meta = ['intent' => $intent];
         $discoveryRunId = null;
 
-        if (in_array($intent, ['quick_research', 'generate_leads'], true) && $icp) {
+        if ($intent === 'quick_research' && $icp) {
+            $result = $this->research->run(
+                $organization,
+                $icp,
+                $user,
+                $body,
+                $session->id,
+            );
+            $discoveryRunId = $result['run']->id;
+            $meta['discovery_run_id'] = $discoveryRunId;
+            $meta['research'] = $result['research'];
+            $assistantBody = $result['narrative'];
+        } elseif ($intent === 'generate_leads' && $icp) {
             $result = $this->discovery->run(
                 $organization,
                 $icp,
@@ -77,18 +103,19 @@ class ChatService
                 $body,
                 $intent,
                 $session->id,
+                12,
             );
             $leads = $result['leads'];
             $discoveryRunId = $result['run']->id;
             $meta['discovery_run_id'] = $discoveryRunId;
-            $assistantBody = $this->narrateDiscovery($organization, $icp, $body, $leads, $intent);
+            $assistantBody = $this->narrateDiscovery($organization, $icp, $body, $leads, $intent, $clientTimezone);
         } elseif ($intent === 'create_outreach' && $icp) {
-            $draft = $this->outreach->draftFromPrompt($organization, $icp, $body);
+            $draft = $this->outreach->draftFromPrompt($organization, $icp, $body, $clientTimezone, $session->id);
             $assistantBody = $draft['body'];
             $meta['outreach'] = $draft;
             $leads = $draft['leads'] ?? [];
         } else {
-            $assistantBody = $this->freeformReply($organization, $icp, $session, $body);
+            $assistantBody = $this->freeformReply($organization, $icp, $session, $body, $user, $clientTimezone);
         }
 
         $assistantMessage = ChatMessage::query()->create([
@@ -104,6 +131,8 @@ class ChatService
             $session->update(['title' => mb_substr($body, 0, 80)]);
         }
 
+        $session->touch();
+
         return [
             'user_message' => $userMessage,
             'assistant_message' => $assistantMessage,
@@ -111,18 +140,18 @@ class ChatService
         ];
     }
 
-    private function narrateDiscovery(Organization $organization, IcpProfile $icp, string $query, array $leads, string $intent): string
+    private function narrateDiscovery(Organization $organization, IcpProfile $icp, string $query, array $leads, string $intent, ?string $clientTimezone = null): string
     {
         $count = count($leads);
         if (! $this->glm->isConfigured()) {
             return $count > 0
-                ? "Found {$count} leads matching ICP \"{$icp->name}\" for: {$query}."
-                : "No leads found yet for ICP \"{$icp->name}\". Try refining territories or industries.";
+                ? "Found {$count} qualified leads matching ICP \"{$icp->name}\" for: {$query}."
+                : "No leads met the match threshold for ICP \"{$icp->name}\". Try refining territories or industries.";
         }
 
         try {
             return $this->glm->chat([
-                ['role' => 'system', 'content' => 'You are Sales Engine. Summarize discovery results briefly for a sales team. Mention ICP name and top leads.'],
+                ['role' => 'system', 'content' => 'You are Sales Engine. Summarize ranked lead prospects for a sales team. Emphasize match quality, score, and recommended next actions. Mention ICP name and top leads. '.TimeGreeting::promptContext($clientTimezone)],
                 ['role' => 'user', 'content' => json_encode([
                     'intent' => $intent,
                     'icp' => $icp->name,
@@ -131,11 +160,11 @@ class ChatService
                 ], JSON_UNESCAPED_UNICODE)],
             ], 'chat', $organization);
         } catch (\Throwable) {
-            return "Found {$count} leads for \"{$icp->name}\".";
+            return "Found {$count} qualified leads for \"{$icp->name}\".";
         }
     }
 
-    private function freeformReply(Organization $organization, ?IcpProfile $icp, ChatSession $session, string $body): string
+    private function freeformReply(Organization $organization, ?IcpProfile $icp, ChatSession $session, string $body, User $user, ?string $clientTimezone = null): string
     {
         if (! $this->glm->isConfigured()) {
             return 'Sales Engine is ready. Configure GLM_API_KEY for full chat, or use generate_leads / quick_research intents once Serper (and optional registries) are keyed.';
@@ -151,9 +180,17 @@ class ChatService
 
         $history[] = ['role' => 'user', 'content' => $body];
 
+        $firstName = trim(explode(' ', trim($user->name ?? ''), 2)[0] ?? '');
+
         array_unshift($history, [
             'role' => 'system',
-            'content' => 'You are Sales Engine, a B2B lead discovery assistant for African markets. Active ICP: '.($icp?->name ?? 'none').'.',
+            'content' => implode(' ', array_filter([
+                'You are Sales Engine, a B2B lead discovery assistant for African markets.',
+                'Active ICP: '.($icp?->name ?? 'none').'.',
+                TimeGreeting::promptContext($clientTimezone),
+                $firstName !== '' ? "User's first name: {$firstName}. Use it naturally when greeting." : null,
+                'When the user greets you (hello, hi, etc.), reply with the appropriate time-of-day greeting above — never the wrong period.',
+            ])),
         ]);
 
         try {

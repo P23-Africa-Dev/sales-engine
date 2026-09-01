@@ -6,9 +6,13 @@ use App\Models\Lead;
 use App\Models\Organization;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use InvalidArgumentException;
 
 class CrmSyncService
 {
+    /** @var array<string, string> */
+    private array $defaultStatusByCompany = [];
+
     public function isConfigured(): bool
     {
         return trim((string) config('services.factory23.api_url')) !== ''
@@ -51,34 +55,14 @@ class CrmSyncService
         $pushed = 0;
         $skipped = 0;
         $errors = [];
-        $base = rtrim((string) config('services.factory23.api_url'), '/');
 
         foreach ($leads as $lead) {
             try {
-                $response = Http::timeout(20)
-                    ->withToken((string) config('services.factory23.api_token'))
-                    ->post($base.'/api/v1/crm/leads', [
-                        'name' => $lead->name,
-                        'source' => 'sales_engine',
-                        'score' => $lead->score,
-                        'summary' => $lead->summary,
-                        'company_id' => $organization->f23_company_id,
-                        'external_id' => (string) $lead->id,
-                    ]);
-
-                if ($response->successful()) {
-                    $lead->update([
-                        'f23_lead_id' => (string) ($response->json('data.id') ?? $response->json('id') ?? ''),
-                        'synced_to_f23_at' => now(),
-                    ]);
-                    $pushed++;
-                } else {
-                    $skipped++;
-                    $errors[] = "Lead {$lead->id}: HTTP ".$response->status();
-                }
+                $this->pushLead($organization, $lead);
+                $pushed++;
             } catch (\Throwable $e) {
                 $skipped++;
-                $errors[] = "Lead {$lead->id}: ".$e->getMessage();
+                $errors[] = "Lead {$lead->id}: " . $e->getMessage();
                 Log::warning('F23 CRM sync failed', ['lead_id' => $lead->id, 'error' => $e->getMessage()]);
             }
         }
@@ -91,5 +75,127 @@ class CrmSyncService
         $organization->update(['factory23_crm_sync_enabled' => $enabled]);
 
         return $organization->fresh();
+    }
+
+    public function canSync(Organization $organization): bool
+    {
+        if (! $this->isConfigured()) {
+            return false;
+        }
+
+        if (! config('services.factory23.crm_sync_enabled') && ! $organization->factory23_crm_sync_enabled) {
+            return false;
+        }
+
+        return filled($organization->f23_company_id);
+    }
+
+    /**
+     * Push a single lead to Factory23 CRM (any stage).
+     *
+     * @return array{synced: bool, f23_lead_id: ?string, already_synced?: bool}
+     */
+    public function pushLead(Organization $organization, Lead $lead): array
+    {
+        if (filled($lead->synced_to_f23_at) && filled($lead->f23_lead_id)) {
+            return [
+                'synced' => true,
+                'f23_lead_id' => (string) $lead->f23_lead_id,
+                'already_synced' => true,
+            ];
+        }
+
+        if (! $this->canSync($organization)) {
+            throw new InvalidArgumentException('CRM sync is disabled or Factory23 is not linked for this organization.');
+        }
+
+        $base = rtrim((string) config('services.factory23.api_url'), '/');
+
+        $response = Http::timeout(20)
+            ->withToken((string) config('services.factory23.api_token'))
+            ->post($base . '/api/v1/crm/leads', $this->buildLeadPayload($organization, $lead));
+
+        if (! $response->successful()) {
+            $message = (string) ($response->json('message') ?? 'Unknown error');
+            Log::warning('F23 CRM single lead sync failed', [
+                'lead_id' => $lead->id,
+                'status' => $response->status(),
+                'message' => $message,
+            ]);
+            throw new InvalidArgumentException('Failed to push lead to CRM (HTTP ' . $response->status() . '): ' . $message);
+        }
+
+        $f23LeadId = (string) ($response->json('data.lead.id') ?? $response->json('data.id') ?? $response->json('id') ?? '');
+
+        $lead->update([
+            'f23_lead_id' => $f23LeadId,
+            'synced_to_f23_at' => now(),
+        ]);
+
+        return [
+            'synced' => true,
+            'f23_lead_id' => $f23LeadId,
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function buildLeadPayload(Organization $organization, Lead $lead): array
+    {
+        return [
+            'name' => $lead->name,
+            'source' => 'sales_engine',
+            'status' => $this->resolveDefaultLeadStatus($organization),
+            'priority' => 'medium',
+            'company_id' => $organization->f23_company_id,
+            'next_action' => filled($lead->summary) ? mb_substr((string) $lead->summary, 0, 255) : null,
+            'meta' => array_filter([
+                'sales_engine_lead_id' => $lead->id,
+                'score' => $lead->score,
+                'summary' => $lead->summary,
+            ]),
+        ];
+    }
+
+    private function resolveDefaultLeadStatus(Organization $organization): string
+    {
+        $companyId = (string) $organization->f23_company_id;
+        if ($companyId !== '' && isset($this->defaultStatusByCompany[$companyId])) {
+            return $this->defaultStatusByCompany[$companyId];
+        }
+
+        $fallbacks = ['new_lead', 'newly_lead', 'contacted', 'qualified'];
+        $base = rtrim((string) config('services.factory23.api_url'), '/');
+
+        $response = Http::timeout(10)
+            ->withToken((string) config('services.factory23.api_token'))
+            ->get($base . '/api/v1/crm/labels', [
+                'company_id' => $organization->f23_company_id,
+            ]);
+
+        $status = null;
+        if ($response->successful()) {
+            $items = $response->json('data.items') ?? [];
+            if (is_array($items)) {
+                foreach ($items as $item) {
+                    $slug = is_array($item) ? ($item['slug'] ?? null) : null;
+                    if (is_string($slug) && $slug !== '') {
+                        $status = $slug;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if ($status === null) {
+            $status = $fallbacks[0];
+        }
+
+        if ($companyId !== '') {
+            $this->defaultStatusByCompany[$companyId] = $status;
+        }
+
+        return $status;
     }
 }

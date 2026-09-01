@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\V1\DiscoveryController;
 use App\Http\Controllers\Api\V1\HealthController;
 use App\Http\Controllers\Api\V1\IcpProfileController;
 use App\Http\Controllers\Api\V1\IntegrationController;
+use App\Http\Controllers\Api\V1\LeadSyncController;
 use App\Http\Controllers\Api\V1\MetricsController;
 use App\Http\Controllers\Api\V1\OrganizationController;
 use App\Http\Controllers\Api\V1\OutreachController;
@@ -47,6 +48,7 @@ Route::middleware(['auth:sanctum', 'org.resolve'])->group(function () {
     Route::post('/icp-profiles/{id}/duplicate', [IcpProfileController::class, 'duplicate']);
 
     Route::post('/chat/sessions', [ChatController::class, 'storeSession']);
+    Route::get('/chat/sessions/current', [ChatController::class, 'currentSession']);
     Route::get('/chat/sessions/{id}/messages', [ChatController::class, 'messages']);
     Route::post('/chat/sessions/{id}/messages', [ChatController::class, 'postMessage'])
         ->middleware('throttle:30,1');
@@ -58,6 +60,8 @@ Route::middleware(['auth:sanctum', 'org.resolve'])->group(function () {
     Route::get('/companies', [CompanyController::class, 'index']);
     Route::get('/companies/{id}', [CompanyController::class, 'show']);
     Route::get('/leads', [CompanyController::class, 'leads']);
+    Route::post('/leads/{id}/sync-to-crm', [LeadSyncController::class, 'syncToCrm']);
+    Route::post('/leads/sync-to-crm', [LeadSyncController::class, 'syncBatch']);
 
     Route::get('/metrics', [MetricsController::class, 'index']);
     Route::get('/dashboard', [MetricsController::class, 'index']);

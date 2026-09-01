@@ -37,6 +37,28 @@ class ChatController extends Controller
         ], 201);
     }
 
+    public function currentSession(Request $request): JsonResponse
+    {
+        $session = $this->chat->latestSessionForUser(
+            OrgContext::require(),
+            $request->user(),
+        );
+
+        if (! $session) {
+            return response()->json(['data' => null]);
+        }
+
+        return response()->json([
+            'data' => [
+                'id' => $session->id,
+                'title' => $session->title,
+                'icp_profile_id' => $session->icp_profile_id,
+                'created_at' => $session->created_at?->toIso8601String(),
+                'updated_at' => $session->updated_at?->toIso8601String(),
+            ],
+        ]);
+    }
+
     public function messages(int $id): JsonResponse
     {
         $session = $this->ownedSession($id);
@@ -53,6 +75,7 @@ class ChatController extends Controller
         $data = $request->validate([
             'body' => ['required', 'string', 'max:10000'],
             'intent' => ['nullable', 'string', 'in:freeform,quick_research,generate_leads,create_outreach'],
+            'timezone' => ['nullable', 'string', 'max:64'],
         ]);
 
         try {
@@ -62,6 +85,7 @@ class ChatController extends Controller
                 $request->user(),
                 $data['body'],
                 $data['intent'] ?? 'freeform',
+                $data['timezone'] ?? null,
             );
         } catch (InvalidArgumentException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
@@ -80,6 +104,7 @@ class ChatController extends Controller
     {
         return ChatSession::query()
             ->where('organization_id', OrgContext::require()->id)
+            ->where('user_id', request()->user()->id)
             ->where('id', $id)
             ->firstOrFail();
     }

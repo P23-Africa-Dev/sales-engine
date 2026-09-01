@@ -14,6 +14,7 @@ use App\Services\Discovery\DTO\IcpBrief;
 use App\Services\Discovery\DTO\RawDiscoveryHit;
 use App\Services\Discovery\DTO\SearchContext;
 use App\Services\Extraction\ExtractionService;
+use App\Services\Integrations\Factory23\CrmSyncService;
 use App\Services\Scoring\ScoringService;
 use Illuminate\Support\Collection;
 
@@ -25,6 +26,7 @@ class DiscoveryOrchestrator
         private readonly CompanyCacheService $cache,
         private readonly ExtractionService $extraction,
         private readonly ScoringService $scoring,
+        private readonly CrmSyncService $crmSync,
     ) {}
 
     /**
@@ -78,6 +80,10 @@ class DiscoveryOrchestrator
                     'provider' => $hit->provider,
                 ]), $brief, $organization);
 
+                if ($intent === 'generate_leads' && $scores['priority_score'] < $brief->minMatchScore) {
+                    continue;
+                }
+
                 $company = $this->cache->upsertFromHit($organization, $hit, [
                     'name' => $extracted['name'] ?? $hit->name,
                     'sector' => $extracted['sector'] ?? $hit->sector,
@@ -115,7 +121,14 @@ class DiscoveryOrchestrator
                 ]);
 
                 if ($brief->autoSyncCrm && $scores['priority_score'] >= $brief->minMatchScore) {
-                    // Already in SE CRM as stage=new; optional F23 push is separate.
+                    try {
+                        if ($this->crmSync->canSync($organization)) {
+                            $this->crmSync->pushLead($organization, $lead);
+                            $lead->refresh();
+                        }
+                    } catch (\Throwable) {
+                        // Auto-sync is best-effort; lead remains in SE CRM.
+                    }
                 }
 
                 $companies->push($company);
@@ -125,6 +138,8 @@ class DiscoveryOrchestrator
                     'source' => $lead->source,
                     'score' => (int) round((float) $lead->score),
                     'summary' => $lead->summary,
+                    'crm_synced' => filled($lead->synced_to_f23_at),
+                    'f23_lead_id' => $lead->f23_lead_id,
                 ];
             }
 

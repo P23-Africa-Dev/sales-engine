@@ -69,6 +69,17 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Default User-Facing Timezone
+    |--------------------------------------------------------------------------
+    |
+    | Used for time-of-day greetings when the client does not send a timezone.
+    |
+    */
+
+    'user_timezone' => env('APP_USER_TIMEZONE', 'Africa/Lagos'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Application Locale Configuration
     |--------------------------------------------------------------------------
     |

@@ -55,7 +55,7 @@ data:
 
   # ── Factory23 + LLM / discovery (non-secret) ────────────────────────────────
   FACTORY23_API_URL: "https://api.thefactory23.com"
-  FACTORY23_CRM_SYNC_ENABLED: "false"
+  FACTORY23_CRM_SYNC_ENABLED: "true"
   GLM_BASE_URL: "https://open.bigmodel.cn/api/paas/v4"
   GLM_CHAT_MODEL: "glm-4-flash"
   GLM_EXTRACT_MODEL: "glm-4-flash"

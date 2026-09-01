@@ -2,12 +2,15 @@
 
 namespace App\Services\Outreach;
 
+use App\Models\ChatMessage;
 use App\Models\CompanyContact;
 use App\Models\IcpProfile;
 use App\Models\Lead;
 use App\Models\Organization;
 use App\Models\OutreachActivity;
+use App\Support\TimeGreeting;
 use App\Services\Llm\GlmClient;
+use Illuminate\Support\Collection;
 use InvalidArgumentException;
 
 class OutreachDraftService
@@ -15,25 +18,24 @@ class OutreachDraftService
     public function __construct(private readonly GlmClient $glm) {}
 
     /**
-     * @return array{channel: string, subject?: string|null, body: string, leads?: list<array>}
+     * @return array{channel: string, subject?: string|null, body: string, sent: bool, leads?: list<array>, target_lead_ids: list<int>}
      */
-    public function draftFromPrompt(Organization $organization, IcpProfile $icp, string $prompt): array
-    {
+    public function draftFromPrompt(
+        Organization $organization,
+        IcpProfile $icp,
+        string $prompt,
+        ?string $clientTimezone = null,
+        ?int $chatSessionId = null,
+    ): array {
         $channel = str_contains(mb_strtolower($prompt), 'whatsapp') ? 'whatsapp' : 'email';
 
         if ($channel === 'whatsapp') {
-            // Never auto-send; drafting only. Opt-in gate for any future send path.
             $this->assertWhatsAppNotAutoSent();
         }
 
-        $leads = Lead::query()
-            ->where('organization_id', $organization->id)
-            ->where('icp_profile_id', $icp->id)
-            ->orderByDesc('score')
-            ->limit(3)
-            ->get();
+        $leads = $this->resolveLeads($organization, $icp, $chatSessionId);
 
-        $body = $this->compose($organization, $icp, $prompt, $channel, $leads->all());
+        $body = $this->compose($organization, $icp, $prompt, $channel, $leads->all(), $clientTimezone);
 
         foreach ($leads as $lead) {
             OutreachActivity::query()->create([
@@ -55,19 +57,62 @@ class OutreachDraftService
             'subject' => $channel === 'email' ? 'Introduction — '.$icp->name : null,
             'body' => $body,
             'sent' => false,
+            'target_lead_ids' => $leads->pluck('id')->map(fn ($id) => (int) $id)->all(),
             'leads' => $leads->map(fn (Lead $l) => [
                 'id' => $l->id,
                 'name' => $l->name,
                 'source' => $l->source,
                 'score' => (int) round((float) $l->score),
                 'summary' => $l->summary,
+                'crm_synced' => filled($l->synced_to_f23_at),
+                'f23_lead_id' => $l->f23_lead_id,
             ])->all(),
         ];
     }
 
     /**
-     * Send path guard — WhatsApp must never send without contact opt-in.
+     * @return Collection<int, Lead>
      */
+    private function resolveLeads(Organization $organization, IcpProfile $icp, ?int $chatSessionId): Collection
+    {
+        if ($chatSessionId) {
+            $message = ChatMessage::query()
+                ->where('chat_session_id', $chatSessionId)
+                ->where('role', 'assistant')
+                ->whereNotNull('leads')
+                ->orderByDesc('id')
+                ->first();
+
+            if ($message && is_array($message->leads) && count($message->leads) > 0) {
+                $ids = collect($message->leads)
+                    ->pluck('id')
+                    ->filter(fn ($id) => is_numeric($id))
+                    ->map(fn ($id) => (int) $id)
+                    ->all();
+
+                if ($ids !== []) {
+                    $sessionLeads = Lead::query()
+                        ->where('organization_id', $organization->id)
+                        ->whereIn('id', $ids)
+                        ->orderByDesc('score')
+                        ->limit(3)
+                        ->get();
+
+                    if ($sessionLeads->isNotEmpty()) {
+                        return $sessionLeads;
+                    }
+                }
+            }
+        }
+
+        return Lead::query()
+            ->where('organization_id', $organization->id)
+            ->where('icp_profile_id', $icp->id)
+            ->orderByDesc('score')
+            ->limit(3)
+            ->get();
+    }
+
     public function assertCanSendWhatsApp(?CompanyContact $contact): void
     {
         if (! $contact || ! $contact->whatsapp_opt_in || ! $contact->whatsapp_opt_in_at) {
@@ -83,19 +128,20 @@ class OutreachDraftService
     /**
      * @param  list<Lead>  $leads
      */
-    private function compose(Organization $organization, IcpProfile $icp, string $prompt, string $channel, array $leads): string
+    private function compose(Organization $organization, IcpProfile $icp, string $prompt, string $channel, array $leads, ?string $clientTimezone = null): string
     {
         if (! $this->glm->isConfigured()) {
             $names = collect($leads)->pluck('name')->implode(', ');
+            $greeting = TimeGreeting::phrase($clientTimezone);
 
-            return "Hi — following up regarding {$icp->name}. ".($names ? "Relevant accounts: {$names}. " : '').trim($prompt);
+            return "{$greeting} — following up regarding {$icp->name}. ".($names ? "Relevant accounts: {$names}. " : '').trim($prompt);
         }
 
         try {
             return $this->glm->chat([
                 [
                     'role' => 'system',
-                    'content' => "Draft a concise {$channel} outreach message. Do not claim the message was sent. Professional tone for African B2B.",
+                    'content' => "Draft a concise {$channel} outreach message for the user's specific request. Do not claim the message was sent. Professional tone for African B2B. ".TimeGreeting::promptContext($clientTimezone).' Reference the provided lead context when relevant.',
                 ],
                 [
                     'role' => 'user',
