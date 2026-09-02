@@ -4,9 +4,9 @@ namespace Tests\Unit\Integrations;
 
 use App\Models\Lead;
 use App\Models\Organization;
+use App\Services\Integrations\Factory23\CrmSyncException;
 use App\Services\Integrations\Factory23\CrmSyncService;
 use Illuminate\Support\Facades\Http;
-use InvalidArgumentException;
 use Tests\TestCase;
 
 class CrmSyncServiceTest extends TestCase
@@ -36,6 +36,39 @@ class CrmSyncServiceTest extends TestCase
 
     public function test_push_lead_throws_when_sync_disabled(): void
     {
+        config([
+            'services.factory23.api_url' => 'https://api.example.com',
+            'services.factory23.api_token' => 'token',
+            'services.factory23.crm_sync_enabled' => false,
+        ]);
+
+        [, $org] = $this->actingAsOrgMember();
+        $org->update(['factory23_crm_sync_enabled' => false]);
+        $lead = Lead::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'Co',
+            'stage' => 'new',
+            'score' => 70,
+        ]);
+
+        $service = app(CrmSyncService::class);
+
+        try {
+            $service->pushLead($org, $lead);
+            $this->fail('Expected CrmSyncException');
+        } catch (CrmSyncException $e) {
+            $this->assertSame(CrmSyncService::REASON_SYNC_DISABLED, $e->reason);
+        }
+    }
+
+    public function test_push_lead_throws_when_not_linked(): void
+    {
+        config([
+            'services.factory23.api_url' => 'https://api.example.com',
+            'services.factory23.api_token' => 'token',
+            'services.factory23.crm_sync_enabled' => true,
+        ]);
+
         [, $org] = $this->actingAsOrgMember();
         $lead = Lead::query()->create([
             'organization_id' => $org->id,
@@ -46,8 +79,42 @@ class CrmSyncServiceTest extends TestCase
 
         $service = app(CrmSyncService::class);
 
-        $this->expectException(InvalidArgumentException::class);
-        $service->pushLead($org, $lead);
+        try {
+            $service->pushLead($org, $lead);
+            $this->fail('Expected CrmSyncException');
+        } catch (CrmSyncException $e) {
+            $this->assertSame(CrmSyncService::REASON_NOT_LINKED, $e->reason);
+        }
+    }
+
+    public function test_sync_block_reason_sync_disabled_when_org_not_enabled(): void
+    {
+        config([
+            'services.factory23.api_url' => 'https://api.example.com',
+            'services.factory23.api_token' => 'token',
+            'services.factory23.crm_sync_enabled' => false,
+        ]);
+
+        [, $org] = $this->actingAsOrgMember();
+        $org->update(['f23_company_id' => 42, 'factory23_crm_sync_enabled' => false]);
+
+        $service = app(CrmSyncService::class);
+        $this->assertSame(CrmSyncService::REASON_SYNC_DISABLED, $service->syncBlockReason($org));
+    }
+
+    public function test_sync_block_reason_not_configured(): void
+    {
+        config([
+            'services.factory23.api_url' => '',
+            'services.factory23.api_token' => '',
+            'services.factory23.crm_sync_enabled' => true,
+        ]);
+
+        [, $org] = $this->actingAsOrgMember();
+        $org->update(['f23_company_id' => 42]);
+
+        $service = app(CrmSyncService::class);
+        $this->assertSame(CrmSyncService::REASON_NOT_CONFIGURED, $service->syncBlockReason($org));
     }
 
     public function test_push_lead_posts_to_factory23(): void

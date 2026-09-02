@@ -4,11 +4,11 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use App\Models\Lead;
+use App\Services\Integrations\Factory23\CrmSyncException;
 use App\Services\Integrations\Factory23\CrmSyncService;
 use App\Support\OrgContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use InvalidArgumentException;
 
 class LeadSyncController extends Controller
 {
@@ -24,8 +24,11 @@ class LeadSyncController extends Controller
 
         try {
             $result = $this->crmSync->pushLead($org, $lead);
-        } catch (InvalidArgumentException $e) {
-            return response()->json(['message' => $e->getMessage()], 422);
+        } catch (CrmSyncException $e) {
+            return response()->json([
+                'message' => $e->getMessage(),
+                'reason' => $e->reason,
+            ], 422);
         }
 
         $lead->refresh();
@@ -67,8 +70,8 @@ class LeadSyncController extends Controller
                 );
                 $lead->refresh();
                 $results[count($results) - 1]['save_status'] = $lead->save_status;
-            } catch (InvalidArgumentException $e) {
-                $errors[] = "Lead {$leadId}: ".$e->getMessage();
+            } catch (CrmSyncException $e) {
+                $errors[] = "Lead {$leadId}: " . $e->getMessage();
             }
         }
 

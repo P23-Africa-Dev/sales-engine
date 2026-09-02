@@ -108,6 +108,10 @@ class AuthService
                 $organization->update(['f23_company_id' => $companyId]);
             }
 
+            if ($companyId && filled($organization->f23_company_id) && config('services.factory23.crm_sync_enabled')) {
+                $organization->update(['factory23_crm_sync_enabled' => true]);
+            }
+
             if (! OrganizationUser::query()->where('organization_id', $organization->id)->where('user_id', $user->id)->exists()) {
                 $this->attachOwner($organization, $user);
             }

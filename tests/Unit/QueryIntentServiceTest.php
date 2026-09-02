@@ -22,6 +22,12 @@ class QueryIntentServiceTest extends TestCase
         $this->assertSame(QueryIntentService::TARGET_PEOPLE, $result['target']);
         $this->assertSame(10, $result['limit']);
         $this->assertTrue($this->service->isListiclePeopleQuery('create leads for the top 10 wealthiest men'));
+        $this->assertTrue($this->service->isFactualRankingQuery('create leads for the top 10 wealthiest men'));
+    }
+
+    public function test_all_of_these_top_ten_detected_as_factual_ranking(): void
+    {
+        $this->assertTrue($this->service->isFactualRankingQuery('create a lead for all of these top 10 wealthiest men'));
     }
 
     public function test_company_query_stays_companies(): void

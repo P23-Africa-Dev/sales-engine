@@ -14,6 +14,8 @@ use App\Services\Discovery\DTO\IcpBrief;
 use App\Services\Discovery\DTO\RawDiscoveryHit;
 use App\Services\Discovery\DTO\SearchContext;
 use App\Services\Discovery\QueryIntentService;
+use App\Services\Discovery\PersonNameValidator;
+use App\Services\Discovery\FactualListSynthesizer;
 use App\Services\Extraction\ExtractionService;
 use App\Services\Scoring\ScoringService;
 use Illuminate\Support\Collection;
@@ -27,6 +29,8 @@ class DiscoveryOrchestrator
         private readonly ExtractionService $extraction,
         private readonly ScoringService $scoring,
         private readonly QueryIntentService $queryIntent,
+        private readonly PersonNameValidator $personNameValidator,
+        private readonly FactualListSynthesizer $factualListSynthesizer,
     ) {}
 
     /**
@@ -87,72 +91,35 @@ class DiscoveryOrchestrator
             $this->updateProgress($run, 2, $sourcesChecked, 0);
 
             $this->appendStage($run, 'extracting');
+            $isAuthoritativeQuery = $brief->isAuthoritativePeopleQuery();
             $leadsPayload = [];
             $companies = collect();
             $candidatesFound = 0;
-            $seenNames = [];
 
-            /** @var RawDiscoveryHit $hit */
-            foreach ($hits->unique(fn (RawDiscoveryHit $h) => mb_strtolower($h->name)) as $hit) {
-                if (count($leadsPayload) >= $effectiveLimit) {
-                    break;
-                }
-
-                $extractions = $this->extraction->extractMany($hit, $brief, $organization);
-
-                foreach ($extractions as $extracted) {
-                    if (count($leadsPayload) >= $effectiveLimit) {
-                        break 2;
-                    }
-
-                    $displayName = trim((string) ($extracted['person_name'] ?? $extracted['name'] ?? $hit->name));
-                    $nameKey = mb_strtolower($displayName);
-
-                    if ($displayName === '' || mb_strtolower($displayName) === mb_strtolower($brief->name)) {
-                        continue;
-                    }
-
-                    if (isset($seenNames[$nameKey])) {
-                        continue;
-                    }
-
-                    $fromListicle = (bool) ($extracted['from_listicle'] ?? false);
-                    if (! $fromListicle && $this->queryIntent->looksLikeArticleTitle($displayName)) {
-                        continue;
-                    }
-
-                    $scores = $this->scoring->score(array_merge($extracted, [
-                        'name' => $displayName,
-                        'source' => $hit->source,
-                        'provider' => $hit->provider,
-                    ]), $brief, $organization);
-
-                    $scores = $this->applyScorePenalties($scores, $displayName, $brief, $extracted, $fromListicle);
-
-                    $icpRecommended = $scores['icp_fit_score'] >= $brief->minMatchScore;
-                    $queryMatch = ($scores['query_relevance_score'] ?? 0) >= 50;
-
-                    if ($intent === 'generate_leads' && ! $hasUserQuery && $scores['priority_score'] < $brief->minMatchScore) {
-                        continue;
-                    }
-
-                    $leadPayload = $this->createLeadFromExtraction(
-                        $organization,
-                        $icp,
-                        $hit,
-                        $extracted,
-                        $displayName,
-                        $scores,
-                        $icpRecommended,
-                        $queryMatch,
-                    );
-
-                    $seenNames[$nameKey] = true;
-                    $companies->push($leadPayload['company']);
-                    $leadsPayload[] = $leadPayload['payload'];
-                    $candidatesFound++;
-                    $this->updateProgress($run, 3, $sourcesChecked, $candidatesFound);
-                }
+            if ($isAuthoritativeQuery) {
+                [$leadsPayload, $companies, $candidatesFound] = $this->processAuthoritativePeopleQuery(
+                    $organization,
+                    $icp,
+                    $brief,
+                    $hits,
+                    $intent,
+                    $hasUserQuery,
+                    $effectiveLimit,
+                    $sourcesChecked,
+                    $run,
+                );
+            } else {
+                [$leadsPayload, $companies, $candidatesFound] = $this->processStandardQuery(
+                    $organization,
+                    $icp,
+                    $brief,
+                    $hits,
+                    $intent,
+                    $hasUserQuery,
+                    $effectiveLimit,
+                    $sourcesChecked,
+                    $run,
+                );
             }
 
             $leadsPayload = $this->sortLeadsPayload($leadsPayload);
@@ -195,6 +162,260 @@ class DiscoveryOrchestrator
             ])
             ->values()
             ->all();
+    }
+
+    /**
+     * @param  Collection<int, RawDiscoveryHit>  $hits
+     * @return array{0: list<array<string, mixed>>, 1: Collection, 2: int}
+     */
+    private function processAuthoritativePeopleQuery(
+        Organization $organization,
+        IcpProfile $icp,
+        IcpBrief $brief,
+        Collection $hits,
+        string $intent,
+        bool $hasUserQuery,
+        int $effectiveLimit,
+        int $sourcesChecked,
+        DiscoveryRun $run,
+    ): array {
+        $candidates = [];
+        $seenNames = [];
+
+        /** @var RawDiscoveryHit $hit */
+        foreach ($hits->unique(fn (RawDiscoveryHit $h) => mb_strtolower($h->name.($h->url ?? ''))) as $hit) {
+            $extractions = $this->extraction->extractMany($hit, $brief, $organization);
+
+            foreach ($extractions as $extracted) {
+                $displayName = trim((string) ($extracted['person_name'] ?? $extracted['name'] ?? ''));
+                $nameKey = mb_strtolower($displayName);
+
+                if ($displayName === '' || mb_strtolower($displayName) === mb_strtolower($brief->name)) {
+                    continue;
+                }
+
+                if (isset($seenNames[$nameKey])) {
+                    continue;
+                }
+
+                if (! $this->personNameValidator->isValidPersonName($displayName, $extracted)) {
+                    continue;
+                }
+
+                $seenNames[$nameKey] = true;
+                $candidates[] = ['hit' => $hit, 'extracted' => $extracted];
+            }
+        }
+
+        $candidates = $this->factualListSynthesizer->synthesize($organization, $brief, $candidates, $effectiveLimit);
+
+        return $this->finalizeCandidates(
+            $organization,
+            $icp,
+            $brief,
+            $candidates,
+            $intent,
+            $hasUserQuery,
+            $effectiveLimit,
+            $sourcesChecked,
+            $run,
+            true,
+        );
+    }
+
+    /**
+     * @param  Collection<int, RawDiscoveryHit>  $hits
+     * @return array{0: list<array<string, mixed>>, 1: Collection, 2: int}
+     */
+    private function processStandardQuery(
+        Organization $organization,
+        IcpProfile $icp,
+        IcpBrief $brief,
+        Collection $hits,
+        string $intent,
+        bool $hasUserQuery,
+        int $effectiveLimit,
+        int $sourcesChecked,
+        DiscoveryRun $run,
+    ): array {
+        $candidates = [];
+        $seenNames = [];
+
+        /** @var RawDiscoveryHit $hit */
+        foreach ($hits->unique(fn (RawDiscoveryHit $h) => mb_strtolower($h->name)) as $hit) {
+            if (count($candidates) >= $effectiveLimit * 2) {
+                break;
+            }
+
+            $extractions = $this->extraction->extractMany($hit, $brief, $organization);
+
+            foreach ($extractions as $extracted) {
+                $displayName = trim((string) ($extracted['person_name'] ?? $extracted['name'] ?? $hit->name));
+                $nameKey = mb_strtolower($displayName);
+
+                if ($displayName === '' || mb_strtolower($displayName) === mb_strtolower($brief->name)) {
+                    continue;
+                }
+
+                if (isset($seenNames[$nameKey])) {
+                    continue;
+                }
+
+                $fromListicle = (bool) ($extracted['from_listicle'] ?? false);
+                if ($brief->isPeopleSearch() && ! $this->personNameValidator->isValidPersonName($displayName, $extracted)) {
+                    continue;
+                }
+
+                if (! $fromListicle && $this->queryIntent->looksLikeArticleTitle($displayName)) {
+                    continue;
+                }
+
+                $seenNames[$nameKey] = true;
+                $candidates[] = ['hit' => $hit, 'extracted' => $extracted];
+            }
+        }
+
+        return $this->finalizeCandidates(
+            $organization,
+            $icp,
+            $brief,
+            $candidates,
+            $intent,
+            $hasUserQuery,
+            $effectiveLimit,
+            $sourcesChecked,
+            $run,
+            false,
+        );
+    }
+
+    /**
+     * @param  list<array{hit: RawDiscoveryHit, extracted: array<string, mixed>}>  $candidates
+     * @return array{0: list<array<string, mixed>>, 1: Collection, 2: int}
+     */
+    private function finalizeCandidates(
+        Organization $organization,
+        IcpProfile $icp,
+        IcpBrief $brief,
+        array $candidates,
+        string $intent,
+        bool $hasUserQuery,
+        int $effectiveLimit,
+        int $sourcesChecked,
+        DiscoveryRun $run,
+        bool $factualQuery,
+    ): array {
+        $leadsPayload = [];
+        $companies = collect();
+        $candidatesFound = 0;
+        $scoredCandidates = [];
+
+        foreach ($candidates as $candidate) {
+            $hit = $candidate['hit'];
+            $extracted = $candidate['extracted'];
+            $displayName = trim((string) ($extracted['person_name'] ?? $extracted['name'] ?? $hit->name));
+            $fromListicle = (bool) ($extracted['from_listicle'] ?? false);
+
+            $scores = $this->scoring->score(array_merge($extracted, [
+                'name' => $displayName,
+                'source' => $hit->source,
+                'provider' => $hit->provider,
+                'authoritative_source' => $this->isAuthoritativeUrl($hit->url),
+            ]), $brief, $organization);
+
+            $scores = $this->applyScorePenalties($scores, $displayName, $brief, $extracted, $fromListicle);
+
+            $scoredCandidates[] = compact('hit', 'extracted', 'displayName', 'fromListicle', 'scores');
+        }
+
+        usort($scoredCandidates, function (array $a, array $b): int {
+            return ($b['scores']['priority_score'] ?? 0) <=> ($a['scores']['priority_score'] ?? 0);
+        });
+
+        foreach ($scoredCandidates as $candidate) {
+            if (count($leadsPayload) >= $effectiveLimit) {
+                break;
+            }
+
+            $scores = $candidate['scores'];
+            $displayName = $candidate['displayName'];
+            $extracted = $candidate['extracted'];
+            $hit = $candidate['hit'];
+            $fromListicle = $candidate['fromListicle'];
+
+            $icpRecommended = $scores['icp_fit_score'] >= $brief->minMatchScore;
+            $queryMatch = $this->resolveQueryMatch(
+                $hasUserQuery,
+                $factualQuery,
+                $fromListicle,
+                $displayName,
+                $extracted,
+                $scores,
+            );
+
+            if ($intent === 'generate_leads' && ! $hasUserQuery && $scores['priority_score'] < $brief->minMatchScore) {
+                continue;
+            }
+
+            $leadPayload = $this->createLeadFromExtraction(
+                $organization,
+                $icp,
+                $hit,
+                $extracted,
+                $displayName,
+                $scores,
+                $icpRecommended,
+                $queryMatch,
+            );
+
+            $companies->push($leadPayload['company']);
+            $leadsPayload[] = $leadPayload['payload'];
+            $candidatesFound++;
+            $this->updateProgress($run, 3, $sourcesChecked, $candidatesFound);
+        }
+
+        return [$leadsPayload, $companies, $candidatesFound];
+    }
+
+    /**
+     * @param  array<string, mixed>  $extracted
+     * @param  array{icp_fit_score: float, intent_score: float, priority_score: float, query_relevance_score: float, rationale: string}  $scores
+     */
+    private function resolveQueryMatch(
+        bool $hasUserQuery,
+        bool $factualQuery,
+        bool $fromListicle,
+        string $displayName,
+        array $extracted,
+        array $scores,
+    ): bool {
+        if (! $hasUserQuery) {
+            return ($scores['query_relevance_score'] ?? 0) >= 50;
+        }
+
+        if ($factualQuery && $this->personNameValidator->isValidPersonName($displayName, $extracted)) {
+            return true;
+        }
+
+        if ($fromListicle && $this->personNameValidator->isValidPersonName($displayName, $extracted)) {
+            return true;
+        }
+
+        return ($scores['query_relevance_score'] ?? 0) >= 50;
+    }
+
+    private function isAuthoritativeUrl(?string $url): bool
+    {
+        if (! filled($url)) {
+            return false;
+        }
+
+        $host = mb_strtolower((string) parse_url($url, PHP_URL_HOST));
+
+        return str_contains($host, 'forbes.com')
+            || str_contains($host, 'bloomberg.com')
+            || str_contains($host, 'wikipedia.org')
+            || str_contains($host, 'visualcapitalist.com');
     }
 
     /**
@@ -268,6 +489,9 @@ class DiscoveryOrchestrator
                 'source' => $lead->source,
                 'score' => (int) round((float) $lead->score),
                 'summary' => $lead->summary,
+                'title' => $extracted['title'] ?? null,
+                'company' => $extracted['company'] ?? null,
+                'source_url' => $extracted['linkedin_url'] ?? $hit->url,
                 'save_status' => $lead->save_status,
                 'crm_synced' => filled($lead->synced_to_f23_at),
                 'f23_lead_id' => $lead->f23_lead_id,

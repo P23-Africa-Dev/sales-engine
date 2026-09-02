@@ -39,6 +39,8 @@ class AppServiceProvider extends ServiceProvider
                 extraction: $app->make(ExtractionService::class),
                 scoring: $app->make(ScoringService::class),
                 queryIntent: $app->make(\App\Services\Discovery\QueryIntentService::class),
+                personNameValidator: $app->make(\App\Services\Discovery\PersonNameValidator::class),
+                factualListSynthesizer: $app->make(\App\Services\Discovery\FactualListSynthesizer::class),
             );
         });
 

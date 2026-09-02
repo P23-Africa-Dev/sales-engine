@@ -51,7 +51,10 @@ class AuthTest extends TestCase
 
     public function test_factory23_exchange_upserts_user(): void
     {
-        config(['services.factory23.jwt_secret' => 'test-secret-key-at-least-32-bytes-long!!']);
+        config([
+            'services.factory23.jwt_secret' => 'test-secret-key-at-least-32-bytes-long!!',
+            'services.factory23.crm_sync_enabled' => true,
+        ]);
 
         $assertion = JWT::encode([
             'sub' => 'f23-user-1',
@@ -68,7 +71,8 @@ class AuthTest extends TestCase
 
         $response->assertOk()
             ->assertJsonPath('user.email', 'f23@example.com')
-            ->assertJsonPath('organization.f23_company_id', 'f23-co-9');
+            ->assertJsonPath('organization.f23_company_id', 'f23-co-9')
+            ->assertJsonPath('organization.factory23_crm_sync_enabled', true);
 
         $this->assertDatabaseHas('external_identities', [
             'provider' => 'factory23',

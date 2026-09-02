@@ -63,9 +63,18 @@ readonly class IcpBrief
         return trim($this->query) !== '';
     }
 
+    public function isAuthoritativePeopleQuery(): bool
+    {
+        return app(QueryIntentService::class)->isAuthoritativePeopleQuery($this->query);
+    }
+
     public function searchQuery(): string
     {
         if (trim($this->query) !== '') {
+            if ($this->isAuthoritativePeopleQuery()) {
+                return trim($this->query).' Forbes Bloomberg billionaires richest people world ranking list';
+            }
+
             if ($this->isPeopleSearch()) {
                 return trim($this->query).' site:linkedin.com/in OR "CEO" OR "founder" OR "partnership"';
             }

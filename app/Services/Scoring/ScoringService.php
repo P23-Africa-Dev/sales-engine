@@ -41,7 +41,7 @@ class ScoringService
             $result = $this->glm->chatJson([
                 [
                     'role' => 'system',
-                    'content' => 'Score lead relevance. Return JSON: icp_fit_score (0-100), intent_score (0-100), query_relevance_score (0-100), priority_score (0-100), rationale (string). Score query relevance to the user\'s words first. ICP fit is advisory — results that answer the query but fall outside ICP industries/territories should still have high query_relevance_score.',
+                    'content' => 'Score lead relevance. Return JSON: icp_fit_score (0-100), intent_score (0-100), query_relevance_score (0-100), priority_score (0-100), rationale (string). Score query relevance to the user\'s words first. ICP fit is advisory — results that answer the query but fall outside ICP industries/territories should still have high query_relevance_score. Boost query_relevance_score when authoritative_source is true.',
                 ],
                 [
                     'role' => 'user',
@@ -66,6 +66,13 @@ class ScoringService
 
             if ($hasUserQuery) {
                 $priority = min(95, ($queryRelevance * 0.65) + ($icpFit * 0.35));
+            }
+
+            if (! empty($companyPayload['authoritative_source'])) {
+                $queryRelevance = min(95, $queryRelevance + 15);
+                if ($hasUserQuery) {
+                    $priority = min(95, ($queryRelevance * 0.65) + ($icpFit * 0.35));
+                }
             }
 
             return [

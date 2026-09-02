@@ -34,6 +34,9 @@ class SerperDiscoveryAdapter implements DiscoverySourceInterface
 
         $query = $brief->searchQuery();
         $baseUrl = rtrim((string) config('services.serper.base_url'), '/');
+        $resultLimit = $brief->isAuthoritativePeopleQuery()
+            ? min(15, max($ctx->limit, 10))
+            : min(10, $ctx->limit);
 
         try {
             $response = Http::timeout(30)
@@ -43,7 +46,7 @@ class SerperDiscoveryAdapter implements DiscoverySourceInterface
                 ])
                 ->post($baseUrl.'/search', [
                     'q' => $query,
-                    'num' => min(10, $ctx->limit),
+                    'num' => $resultLimit,
                 ]);
 
             ApiUsage::query()->create([
@@ -63,7 +66,7 @@ class SerperDiscoveryAdapter implements DiscoverySourceInterface
 
             $organic = $response->json('organic') ?? [];
 
-            return collect($organic)
+            $hits = collect($organic)
                 ->map(function (array $item) use ($brief) {
                     $title = (string) ($item['title'] ?? 'Unknown');
                     $url = $item['link'] ?? null;
@@ -86,7 +89,7 @@ class SerperDiscoveryAdapter implements DiscoverySourceInterface
                         return false;
                     }
 
-                    $allowListicle = $brief->isPeopleSearch() || $brief->isListiclePeopleQuery();
+                    $allowListicle = $brief->isPeopleSearch() || $brief->isListiclePeopleQuery() || $brief->isAuthoritativePeopleQuery();
 
                     if (! $allowListicle && $this->queryIntent->isListicleUrl($h->url)) {
                         return false;
@@ -97,8 +100,13 @@ class SerperDiscoveryAdapter implements DiscoverySourceInterface
                     }
 
                     return true;
-                })
-                ->values();
+                });
+
+            if ($brief->isAuthoritativePeopleQuery()) {
+                $hits = $this->rankAuthoritativeHits($hits);
+            }
+
+            return $hits->values();
         } catch (\Throwable $e) {
             Log::warning('Serper search exception', ['error' => $e->getMessage()]);
 
@@ -120,5 +128,39 @@ class SerperDiscoveryAdapter implements DiscoverySourceInterface
         $name = preg_replace('/\s*[|\-–].*$/u', '', $title) ?: $title;
 
         return trim((string) $name);
+    }
+
+    /**
+     * @param  Collection<int, RawDiscoveryHit>  $hits
+     * @return Collection<int, RawDiscoveryHit>
+     */
+    private function rankAuthoritativeHits(Collection $hits): Collection
+    {
+        $authoritativeDomains = [
+            'forbes.com',
+            'bloomberg.com',
+            'wikipedia.org',
+            'visualcapitalist.com',
+            'statista.com',
+            'cnbc.com',
+            'reuters.com',
+        ];
+
+        return $hits->sortByDesc(function (RawDiscoveryHit $hit) use ($authoritativeDomains): int {
+            $host = mb_strtolower((string) parse_url((string) $hit->url, PHP_URL_HOST));
+            $score = 0;
+
+            foreach ($authoritativeDomains as $index => $domain) {
+                if (str_contains($host, $domain)) {
+                    $score += 100 - $index;
+                }
+            }
+
+            if (preg_match('/\b(top|richest|wealthiest|billionaires?)\b/u', mb_strtolower($hit->name.' '.($hit->snippet ?? '')))) {
+                $score += 20;
+            }
+
+            return $score;
+        })->values();
     }
 }

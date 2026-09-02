@@ -149,7 +149,10 @@ class DiscoveryTest extends TestCase
 
         $leads = $response->json('data.leads');
         $this->assertNotEmpty($leads);
-        $this->assertSame('Bernard Arnault', $leads[0]['name']);
+        $names = array_column($leads, 'name');
+        $this->assertContains('Bernard Arnault', $names);
+        $this->assertContains('Elon Musk', $names);
+        $this->assertTrue($leads[0]['query_match']);
     }
 
     public function test_whatsapp_send_requires_opt_in(): void

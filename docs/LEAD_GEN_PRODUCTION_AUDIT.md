@@ -42,6 +42,10 @@ SELECT COUNT(*) FROM leads WHERE company_id = ? AND source = 'sales_engine' AND 
 
 ## Integration checklist
 
-- `GET /api/v1/integrations/factory23/status` → `configured`, `linked`, `organization_enabled`
-- Org has `f23_company_id` set
+- `GET /api/v1/integrations/factory23/status` → `configured`, `linked`, `can_sync`, `block_reason`, `block_message`
+- Org has `f23_company_id` set (auto-set on Factory23 exchange when JWT includes `company_id`)
+- `factory23_crm_sync_enabled` auto-enabled on exchange when global sync is on
 - `FACTORY23_CRM_SYNC_ENABLED` or org-level sync enabled for Save to CRM
+- `FACTORY23_API_TOKEN` present in K8s secret (required for `configured: true`)
+- Backfill unlinked orgs: `php artisan organizations:backfill-f23-link` (use `--dry-run` first)
+- After deploy, user may need one re-login to refresh org link if created before linking logic

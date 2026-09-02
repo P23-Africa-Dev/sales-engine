@@ -390,18 +390,27 @@ class ChatService
         }
 
         try {
+            $publicLeads = array_map(fn (array $lead) => array_filter([
+                'name' => $lead['name'] ?? '',
+                'score' => $lead['score'] ?? 0,
+                'summary' => $lead['summary'] ?? '',
+                'title' => $lead['title'] ?? null,
+                'company' => $lead['company'] ?? null,
+                'icp_recommended' => (bool) ($lead['icp_recommended'] ?? false),
+            ]), $leads);
+
             $narrative = $this->glm->chat([
-                ['role' => 'system', 'content' => 'You are Sales Engine. Summarize ranked lead prospects for a sales team. Use sequential numbering (1, 2, 3...) — never repeat "1." for every item. Use each lead\'s actual name field — never substitute the ICP profile name as a lead name. Emphasize match quality, score, and recommended next actions. Tell the user they can review cards below and save selected leads to CRM. When some leads are outside the user\'s ICP, mention that clearly but still present all results. '.TimeGreeting::promptContext($clientTimezone)],
+                ['role' => 'system', 'content' => 'You are Sales Engine. Summarize ranked lead prospects for a sales team. Use sequential numbering (1, 2, 3...) — never repeat "1." for every item. Use each lead\'s actual name field — never substitute the ICP profile name as a lead name. Write in plain prose: name, role/company if known, and why they matter. Do NOT include internal fields like Match Quality, Query Match, ICP Fit Score, or Recommended Next Action. Tell the user they can review cards below and save selected leads to CRM. When some leads are outside the user\'s ICP, mention that clearly but still present all results. '.TimeGreeting::promptContext($clientTimezone)],
                 ['role' => 'user', 'content' => json_encode([
                     'intent' => $intent,
                     'icp' => $icp->name,
                     'query' => $query,
-                    'leads' => $leads,
+                    'leads' => $publicLeads,
                     'icp_recommended_count' => $icpRecommendedCount,
                 ], JSON_UNESCAPED_UNICODE)],
             ], 'chat', $organization);
 
-            return rtrim($narrative).$advisoryNote;
+            return rtrim($this->fixRepeatedNumbering($narrative)).$advisoryNote;
         } catch (\Throwable) {
             return "Found {$count} leads for your search.{$advisoryNote}";
         }
@@ -424,6 +433,17 @@ class ChatService
         $outside = $total - $icpRecommendedCount;
 
         return " {$icpRecommendedCount} of {$total} align with your ICP \"{$icp->name}\"; {$outside} answer your search but may be outside your profile. Save any leads you want from the cards below.";
+    }
+
+    private function fixRepeatedNumbering(string $text): string
+    {
+        $counter = 0;
+
+        return preg_replace_callback('/^\s*1\.\s+/m', function () use (&$counter): string {
+            $counter++;
+
+            return " {$counter}. ";
+        }, $text) ?? $text;
     }
 
     private function freeformReply(Organization $organization, ?IcpProfile $icp, ChatSession $session, string $body, User $user, ?string $clientTimezone = null): string

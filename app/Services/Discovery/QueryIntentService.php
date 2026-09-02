@@ -27,14 +27,41 @@ class QueryIntentService
     {
         $normalized = mb_strtolower(trim($query));
 
-        if (! preg_match('/\btop\s+\d{1,2}\b/u', $normalized)) {
-            return false;
+        if (preg_match('/\btop\s+\d{1,2}\b/u', $normalized)) {
+            return (bool) preg_match(
+                '/\b(people|person|persons|men|women|executives?|founders?|billionaires?|millionaires?|wealthiest|richest|magnates?|names|individuals?|leaders?)\b/u',
+                $normalized
+            );
         }
 
-        return (bool) preg_match(
-            '/\b(people|person|persons|men|women|executives?|founders?|billionaires?|millionaires?|wealthiest|richest|magnates?|names|individuals?|leaders?)\b/u',
-            $normalized
-        );
+        return $this->isFactualRankingQuery($query);
+    }
+
+    public function isFactualRankingQuery(string $query): bool
+    {
+        $normalized = mb_strtolower(trim($query));
+
+        if (preg_match('/\b(all of these|these)\s+(top\s+)?\d{1,2}\b/u', $normalized)) {
+            return true;
+        }
+
+        if (preg_match('/\b(top|most|biggest|largest|highest)\s+\d{1,2}\b/u', $normalized)) {
+            return (bool) preg_match(
+                '/\b(wealthiest|richest|successful|billionaires?|millionaires?|people|men|women|companies|brands|executives?|founders?)\b/u',
+                $normalized
+            );
+        }
+
+        if (preg_match('/\b(wealthiest|richest|most successful|highest.?net.?worth)\b/u', $normalized)) {
+            return (bool) preg_match('/\b(men|women|people|persons|billionaires?|in the world|globally|worldwide)\b/u', $normalized);
+        }
+
+        return false;
+    }
+
+    public function isAuthoritativePeopleQuery(string $query): bool
+    {
+        return $this->isListiclePeopleQuery($query) || $this->isFactualRankingQuery($query);
     }
 
     private function detectTarget(string $normalized, string $intent): string

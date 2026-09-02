@@ -6,10 +6,15 @@ use App\Models\Lead;
 use App\Models\Organization;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
-use InvalidArgumentException;
+use App\Services\Integrations\Factory23\CrmSyncException;
 
 class CrmSyncService
 {
+    public const REASON_NOT_CONFIGURED = 'not_configured';
+
+    public const REASON_SYNC_DISABLED = 'sync_disabled';
+
+    public const REASON_NOT_LINKED = 'not_linked';
     /** @var array<string, string> */
     private array $defaultStatusByCompany = [];
 
@@ -21,12 +26,17 @@ class CrmSyncService
 
     public function status(Organization $organization): array
     {
+        $blockReason = $this->syncBlockReason($organization);
+
         return [
             'configured' => $this->isConfigured(),
             'global_enabled' => (bool) config('services.factory23.crm_sync_enabled'),
             'organization_enabled' => (bool) $organization->factory23_crm_sync_enabled,
             'f23_company_id' => $organization->f23_company_id,
             'linked' => filled($organization->f23_company_id),
+            'can_sync' => $blockReason === null,
+            'block_reason' => $blockReason,
+            'block_message' => $blockReason !== null ? $this->syncBlockMessage($blockReason) : null,
         ];
     }
 
@@ -79,15 +89,34 @@ class CrmSyncService
 
     public function canSync(Organization $organization): bool
     {
+        return $this->syncBlockReason($organization) === null;
+    }
+
+    public function syncBlockReason(Organization $organization): ?string
+    {
         if (! $this->isConfigured()) {
-            return false;
+            return self::REASON_NOT_CONFIGURED;
         }
 
         if (! config('services.factory23.crm_sync_enabled') && ! $organization->factory23_crm_sync_enabled) {
-            return false;
+            return self::REASON_SYNC_DISABLED;
         }
 
-        return filled($organization->f23_company_id);
+        if (! filled($organization->f23_company_id)) {
+            return self::REASON_NOT_LINKED;
+        }
+
+        return null;
+    }
+
+    public function syncBlockMessage(?string $reason): string
+    {
+        return match ($reason) {
+            self::REASON_NOT_CONFIGURED => 'Factory23 CRM API is not configured on the server (missing API URL or token).',
+            self::REASON_SYNC_DISABLED => 'CRM sync is disabled for this organization.',
+            self::REASON_NOT_LINKED => 'Factory23 is not linked for this organization. Sign out and sign back in, or contact your admin.',
+            default => 'CRM sync is unavailable for this organization.',
+        };
     }
 
     /**
@@ -105,8 +134,9 @@ class CrmSyncService
             ];
         }
 
-        if (! $this->canSync($organization)) {
-            throw new InvalidArgumentException('CRM sync is disabled or Factory23 is not linked for this organization.');
+        $blockReason = $this->syncBlockReason($organization);
+        if ($blockReason !== null) {
+            throw new CrmSyncException($this->syncBlockMessage($blockReason), $blockReason);
         }
 
         $base = rtrim((string) config('services.factory23.api_url'), '/');
@@ -122,7 +152,7 @@ class CrmSyncService
                 'status' => $response->status(),
                 'message' => $message,
             ]);
-            throw new InvalidArgumentException('Failed to push lead to CRM (HTTP ' . $response->status() . '): ' . $message);
+            throw new CrmSyncException('Failed to push lead to CRM (HTTP ' . $response->status() . '): ' . $message, 'push_failed');
         }
 
         $f23LeadId = (string) ($response->json('data.lead.id') ?? $response->json('data.id') ?? $response->json('id') ?? '');
@@ -144,6 +174,11 @@ class CrmSyncService
      */
     private function buildLeadPayload(Organization $organization, Lead $lead): array
     {
+        $meta = is_array($lead->meta) ? $lead->meta : [];
+        $title = trim((string) ($meta['title'] ?? ''));
+        $company = trim((string) ($meta['company'] ?? ''));
+        $sourceUrl = trim((string) ($meta['linkedin_url'] ?? $meta['source_url'] ?? ''));
+
         return [
             'name' => $lead->name,
             'source' => 'sales_engine',
@@ -155,6 +190,9 @@ class CrmSyncService
                 'sales_engine_lead_id' => $lead->id,
                 'score' => $lead->score,
                 'summary' => $lead->summary,
+                'title' => $title !== '' ? $title : null,
+                'company' => $company !== '' ? $company : null,
+                'source_url' => $sourceUrl !== '' ? $sourceUrl : null,
             ]),
         ];
     }

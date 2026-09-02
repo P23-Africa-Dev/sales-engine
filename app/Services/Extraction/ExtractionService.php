@@ -100,7 +100,7 @@ class ExtractionService
                 $result = $this->glm->chatJson([
                     [
                         'role' => 'system',
-                        'content' => 'Extract individual person names from a listicle search result. Return JSON: people (array of objects with person_name, title optional, company optional, summary optional). Use real names only — never invent. Max ' . $limit . ' people. No markdown.',
+                        'content' => 'Extract individual person names from a listicle search result. Return JSON: people (array of objects with person_name, title optional, company optional, summary optional). Use real full names only (first and last name) — never invent, never return sentence fragments, channel names, article titles, or single generic words. Max ' . $limit . ' people. No markdown.',
                     ],
                     [
                         'role' => 'user',
@@ -172,7 +172,7 @@ class ExtractionService
         $text = trim(($hit->snippet ?? '') . "\n" . ($hit->name ?? ''));
         $extracted = [];
 
-        if (preg_match_all('/(?:\d+[\.\)]\s*|[\-\x{2022}]\s*)([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3})/u', $text, $matches)) {
+        if (preg_match_all('/(?:\d+[\.\)]\s*|[\-\x{2022}]\s*)([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)/u', $text, $matches)) {
             foreach ($matches[1] as $name) {
                 $personName = trim($name);
                 if ($personName === '' || mb_strtolower($personName) === mb_strtolower($brief->name)) {
