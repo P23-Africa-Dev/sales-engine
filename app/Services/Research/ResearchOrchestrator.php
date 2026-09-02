@@ -57,9 +57,11 @@ class ResearchOrchestrator
         try {
             $subQueries = $this->decomposeQueries($organization, $icp, $query);
             $this->appendStage($run, 'searching_sources');
+            $this->updateProgress($run, 2, 0, 0);
 
             $sources = [];
             $hits = collect();
+            $sourcesChecked = 0;
 
             foreach ($subQueries as $subQuery) {
                 $brief = IcpBrief::fromIcpProfile($icp, $subQuery);
@@ -69,9 +71,12 @@ class ResearchOrchestrator
                     if (! $source->isEnabled()) {
                         continue;
                     }
+                    $sourcesChecked++;
                     $hits = $hits->merge($source->search($brief, $ctx));
                 }
             }
+
+            $this->updateProgress($run, 2, $sourcesChecked, 0);
 
             /** @var RawDiscoveryHit $hit */
             foreach ($hits->unique(fn (RawDiscoveryHit $h) => mb_strtolower($h->url ?? $h->name))->take(20) as $hit) {
@@ -84,9 +89,11 @@ class ResearchOrchestrator
             }
 
             $this->appendStage($run, 'synthesizing');
+            $this->updateProgress($run, 3, $sourcesChecked, count($sources));
             $narrative = $this->synthesize($organization, $icp, $query, $subQueries, $sources);
 
             $this->appendStage($run, 'compiling_results');
+            $this->updateProgress($run, 4, $sourcesChecked, count($sources));
 
             $run->update([
                 'status' => 'completed',
@@ -196,5 +203,32 @@ class ResearchOrchestrator
         $stages = $run->stages ?? [];
         $stages[] = $stage;
         $run->update(['stages' => $stages]);
+    }
+
+    private function updateProgress(
+        DiscoveryRun $run,
+        int $step,
+        ?int $sourcesChecked = null,
+        ?int $candidatesFound = null,
+    ): void {
+        $summary = is_array($run->result_summary) ? $run->result_summary : [];
+        $progress = $summary['progress'] ?? [
+            'total_steps' => 4,
+            'sources_checked' => 0,
+            'candidates_found' => 0,
+        ];
+
+        $progress['step'] = $step;
+        $progress['total_steps'] = 4;
+
+        if ($sourcesChecked !== null) {
+            $progress['sources_checked'] = $sourcesChecked;
+        }
+        if ($candidatesFound !== null) {
+            $progress['candidates_found'] = $candidatesFound;
+        }
+
+        $summary['progress'] = $progress;
+        $run->update(['result_summary' => $summary]);
     }
 }

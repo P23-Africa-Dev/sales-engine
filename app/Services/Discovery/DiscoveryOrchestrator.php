@@ -68,22 +68,29 @@ class DiscoveryOrchestrator
             $brief = IcpBrief::fromIcpProfile($icp, $query);
             $ctx = new SearchContext($organization->id, $user?->id, $limit, $intent);
 
+            $this->updateProgress($run, 1, 0, 0);
+
             $this->appendStage($run, 'searching_sources');
 
+            $sourcesChecked = 0;
             $hits = collect();
             foreach ($this->sources as $source) {
                 if (! $source->isEnabled()) {
                     continue;
                 }
+                $sourcesChecked++;
                 $hits = $hits->merge($source->search($brief, $ctx));
             }
+
+            $this->updateProgress($run, 2, $sourcesChecked, 0);
 
             $this->appendStage($run, 'extracting');
             $leadsPayload = [];
             $companies = collect();
+            $candidatesFound = 0;
 
             /** @var RawDiscoveryHit $hit */
-            foreach ($hits->unique(fn (RawDiscoveryHit $h) => mb_strtolower($h->name))->take($limit) as $hit) {
+            foreach ($hits->unique(fn(RawDiscoveryHit $h) => mb_strtolower($h->name))->take($limit) as $hit) {
                 $extracted = $this->extraction->extract($hit, $brief, $organization);
                 $scores = $this->scoring->score(array_merge($extracted, [
                     'name' => $hit->name,
@@ -152,9 +159,13 @@ class DiscoveryOrchestrator
                     'crm_synced' => filled($lead->synced_to_f23_at),
                     'f23_lead_id' => $lead->f23_lead_id,
                 ];
+
+                $candidatesFound++;
+                $this->updateProgress($run, 3, $sourcesChecked, $candidatesFound);
             }
 
             $this->appendStage($run, 'compiling_results');
+            $this->updateProgress($run, 4, $sourcesChecked, $candidatesFound);
 
             $icp->lead_count = Lead::query()
                 ->where('organization_id', $organization->id)
@@ -185,7 +196,7 @@ class DiscoveryOrchestrator
     public function enabledSources(): array
     {
         return collect($this->sources)
-            ->map(fn (DiscoverySourceInterface $s) => [
+            ->map(fn(DiscoverySourceInterface $s) => [
                 'key' => $s->key(),
                 'enabled' => $s->isEnabled(),
             ])
@@ -198,5 +209,32 @@ class DiscoveryOrchestrator
         $stages = $run->stages ?? [];
         $stages[] = $stage;
         $run->update(['stages' => $stages]);
+    }
+
+    private function updateProgress(
+        DiscoveryRun $run,
+        int $step,
+        ?int $sourcesChecked = null,
+        ?int $candidatesFound = null,
+    ): void {
+        $summary = is_array($run->result_summary) ? $run->result_summary : [];
+        $progress = $summary['progress'] ?? [
+            'total_steps' => 4,
+            'sources_checked' => 0,
+            'candidates_found' => 0,
+        ];
+
+        $progress['step'] = $step;
+        $progress['total_steps'] = 4;
+
+        if ($sourcesChecked !== null) {
+            $progress['sources_checked'] = $sourcesChecked;
+        }
+        if ($candidatesFound !== null) {
+            $progress['candidates_found'] = $candidatesFound;
+        }
+
+        $summary['progress'] = $progress;
+        $run->update(['result_summary' => $summary]);
     }
 }

@@ -122,7 +122,7 @@ class ChatService
                 'status' => 'queued',
                 'query' => $body,
                 'intent' => $intent,
-                'stages' => ['queued'],
+                'stages' => ['analyzing_brief'],
             ]);
 
             ProcessChatIntentJob::dispatch(

@@ -67,10 +67,46 @@ class DiscoveryController extends Controller
                 'intent' => $run->intent,
                 'stages' => $run->stages,
                 'result_summary' => $run->result_summary,
+                'progress' => $this->resolveProgress($run),
                 'error' => $run->error,
                 'started_at' => $run->started_at?->toIso8601String(),
                 'finished_at' => $run->finished_at?->toIso8601String(),
             ],
         ]);
+    }
+
+    /**
+     * @return array{step: int, total_steps: int, sources_checked: int, candidates_found: int}
+     */
+    private function resolveProgress(DiscoveryRun $run): array
+    {
+        $summary = is_array($run->result_summary) ? $run->result_summary : [];
+        if (isset($summary['progress']) && is_array($summary['progress'])) {
+            return [
+                'step' => (int) ($summary['progress']['step'] ?? 1),
+                'total_steps' => (int) ($summary['progress']['total_steps'] ?? 4),
+                'sources_checked' => (int) ($summary['progress']['sources_checked'] ?? 0),
+                'candidates_found' => (int) ($summary['progress']['candidates_found'] ?? 0),
+            ];
+        }
+
+        $stages = $run->stages ?? [];
+        $last = count($stages) > 0 ? $stages[count($stages) - 1] : 'analyzing_brief';
+        $stepMap = [
+            'queued' => 1,
+            'analyzing_brief' => 1,
+            'searching_sources' => 2,
+            'extracting' => 3,
+            'synthesizing' => 3,
+            'compiling_results' => 4,
+            'completed' => 4,
+        ];
+
+        return [
+            'step' => $stepMap[$last] ?? 1,
+            'total_steps' => 4,
+            'sources_checked' => 0,
+            'candidates_found' => 0,
+        ];
     }
 }
