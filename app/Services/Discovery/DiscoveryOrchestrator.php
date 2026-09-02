@@ -13,8 +13,8 @@ use App\Services\Discovery\Contracts\DiscoverySourceInterface;
 use App\Services\Discovery\DTO\IcpBrief;
 use App\Services\Discovery\DTO\RawDiscoveryHit;
 use App\Services\Discovery\DTO\SearchContext;
+use App\Services\Discovery\QueryIntentService;
 use App\Services\Extraction\ExtractionService;
-use App\Services\Integrations\Factory23\CrmSyncService;
 use App\Services\Scoring\ScoringService;
 use Illuminate\Support\Collection;
 
@@ -26,7 +26,7 @@ class DiscoveryOrchestrator
         private readonly CompanyCacheService $cache,
         private readonly ExtractionService $extraction,
         private readonly ScoringService $scoring,
-        private readonly CrmSyncService $crmSync,
+        private readonly QueryIntentService $queryIntent,
     ) {}
 
     /**
@@ -66,7 +66,8 @@ class DiscoveryOrchestrator
 
         try {
             $brief = IcpBrief::fromIcpProfile($icp, $query);
-            $ctx = new SearchContext($organization->id, $user?->id, $limit, $intent);
+            $effectiveLimit = min(12, max(1, $limit > 0 ? $limit : $brief->requestedLimit));
+            $ctx = new SearchContext($organization->id, $user?->id, $effectiveLimit, $intent);
 
             $this->updateProgress($run, 1, 0, 0);
 
@@ -90,20 +91,34 @@ class DiscoveryOrchestrator
             $candidatesFound = 0;
 
             /** @var RawDiscoveryHit $hit */
-            foreach ($hits->unique(fn(RawDiscoveryHit $h) => mb_strtolower($h->name))->take($limit) as $hit) {
+            foreach ($hits->unique(fn (RawDiscoveryHit $h) => mb_strtolower($h->name))->take($effectiveLimit) as $hit) {
                 $extracted = $this->extraction->extract($hit, $brief, $organization);
+                $displayName = trim((string) ($extracted['person_name'] ?? $extracted['name'] ?? $hit->name));
+
+                if ($displayName === '' || mb_strtolower($displayName) === mb_strtolower($brief->name)) {
+                    continue;
+                }
+
+                if ($this->queryIntent->looksLikeArticleTitle($displayName)) {
+                    continue;
+                }
+
                 $scores = $this->scoring->score(array_merge($extracted, [
-                    'name' => $hit->name,
+                    'name' => $displayName,
                     'source' => $hit->source,
                     'provider' => $hit->provider,
                 ]), $brief, $organization);
+
+                $scores = $this->applyScorePenalties($scores, $displayName, $brief, $extracted);
 
                 if ($intent === 'generate_leads' && $scores['priority_score'] < $brief->minMatchScore) {
                     continue;
                 }
 
+                $companyName = trim((string) ($extracted['company'] ?? $extracted['name'] ?? $displayName));
+
                 $company = $this->cache->upsertFromHit($organization, $hit, [
-                    'name' => $extracted['name'] ?? $hit->name,
+                    'name' => $companyName,
                     'sector' => $extracted['sector'] ?? $hit->sector,
                     'location' => $extracted['location'] ?? $hit->location,
                     'summary' => $extracted['summary'] ?? $hit->snippet,
@@ -130,24 +145,20 @@ class DiscoveryOrchestrator
                     'organization_id' => $organization->id,
                     'company_id' => $company->id,
                     'icp_profile_id' => $icp->id,
-                    'name' => $company->name,
+                    'name' => $displayName,
                     'source' => $hit->provider,
                     'score' => $scores['priority_score'],
-                    'summary' => $company->summary ?? $scores['rationale'],
+                    'summary' => $extracted['summary'] ?? $company->summary ?? $scores['rationale'],
                     'stage' => 'new',
-                    'meta' => ['rationale' => $scores['rationale']],
+                    'save_status' => Lead::SAVE_DRAFT,
+                    'meta' => [
+                        'rationale' => $scores['rationale'],
+                        'low_confidence' => (bool) ($extracted['low_confidence'] ?? false),
+                        'title' => $extracted['title'] ?? null,
+                        'company' => $extracted['company'] ?? null,
+                        'linkedin_url' => $extracted['linkedin_url'] ?? $hit->url,
+                    ],
                 ]);
-
-                if ($brief->autoSyncCrm && $scores['priority_score'] >= $brief->minMatchScore) {
-                    try {
-                        if ($this->crmSync->canSync($organization)) {
-                            $this->crmSync->pushLead($organization, $lead);
-                            $lead->refresh();
-                        }
-                    } catch (\Throwable) {
-                        // Auto-sync is best-effort; lead remains in SE CRM.
-                    }
-                }
 
                 $companies->push($company);
                 $leadsPayload[] = [
@@ -156,8 +167,10 @@ class DiscoveryOrchestrator
                     'source' => $lead->source,
                     'score' => (int) round((float) $lead->score),
                     'summary' => $lead->summary,
+                    'save_status' => $lead->save_status,
                     'crm_synced' => filled($lead->synced_to_f23_at),
                     'f23_lead_id' => $lead->f23_lead_id,
+                    'low_confidence' => (bool) ($extracted['low_confidence'] ?? false),
                 ];
 
                 $candidatesFound++;
@@ -236,5 +249,30 @@ class DiscoveryOrchestrator
 
         $summary['progress'] = $progress;
         $run->update(['result_summary' => $summary]);
+    }
+
+    /**
+     * @param  array{icp_fit_score: float, intent_score: float, priority_score: float, rationale: string}  $scores
+     * @param  array<string, mixed>  $extracted
+     * @return array{icp_fit_score: float, intent_score: float, priority_score: float, rationale: string}
+     */
+    private function applyScorePenalties(array $scores, string $displayName, IcpBrief $brief, array $extracted): array
+    {
+        if (mb_strtolower($displayName) === mb_strtolower($brief->name)) {
+            $scores['priority_score'] = max(0, $scores['priority_score'] - 40);
+            $scores['rationale'] .= ' Penalized: name matched ICP profile.';
+        }
+
+        if ($this->queryIntent->looksLikeArticleTitle($displayName)) {
+            $scores['priority_score'] = max(0, $scores['priority_score'] - 35);
+            $scores['rationale'] .= ' Penalized: looks like article content.';
+        }
+
+        if ((bool) ($extracted['low_confidence'] ?? false)) {
+            $scores['priority_score'] = max(0, $scores['priority_score'] - 15);
+            $scores['rationale'] .= ' Lower confidence extraction.';
+        }
+
+        return $scores;
     }
 }

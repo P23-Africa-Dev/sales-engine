@@ -10,6 +10,10 @@ class Lead extends Model
 {
     public const STAGES = ['new', 'contacted', 'engaged', 'qualified', 'won', 'lost'];
 
+    public const SAVE_DRAFT = 'draft';
+
+    public const SAVE_SAVED = 'saved';
+
     protected $fillable = [
         'organization_id',
         'company_id',
@@ -19,6 +23,7 @@ class Lead extends Model
         'score',
         'summary',
         'stage',
+        'save_status',
         'f23_lead_id',
         'synced_to_f23_at',
         'meta',

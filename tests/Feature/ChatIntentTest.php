@@ -126,7 +126,14 @@ class ChatIntentTest extends TestCase
         $response->assertOk()
             ->assertJsonPath('data.assistant_message.intent', 'generate_leads')
             ->assertJsonPath('data.assistant_message.leads.0.name', 'Acme Distributors Lagos')
-            ->assertJsonPath('data.assistant_message.leads.0.crm_synced', false);
+            ->assertJsonPath('data.assistant_message.leads.0.crm_synced', false)
+            ->assertJsonPath('data.assistant_message.leads.0.save_status', 'draft');
+
+        $this->assertDatabaseHas('leads', [
+            'organization_id' => $org->id,
+            'name' => 'Acme Distributors Lagos',
+            'save_status' => 'draft',
+        ]);
     }
 
     public function test_lead_sync_to_crm_endpoint(): void
@@ -144,6 +151,7 @@ class ChatIntentTest extends TestCase
             'organization_id' => $org->id,
             'name' => 'CRM Co',
             'stage' => 'new',
+            'save_status' => 'draft',
             'score' => 88,
         ]);
 
@@ -155,7 +163,13 @@ class ChatIntentTest extends TestCase
             ->postJson("/api/v1/leads/{$lead->id}/sync-to-crm")
             ->assertOk()
             ->assertJsonPath('data.synced', true)
-            ->assertJsonPath('data.f23_lead_id', '777');
+            ->assertJsonPath('data.f23_lead_id', '777')
+            ->assertJsonPath('data.save_status', 'saved');
+
+        $this->assertDatabaseHas('leads', [
+            'id' => $lead->id,
+            'save_status' => 'saved',
+        ]);
     }
 
     public function test_current_session_is_scoped_to_icp(): void

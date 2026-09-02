@@ -8,6 +8,7 @@ use App\Models\DiscoveryRun;
 use App\Models\IcpProfile;
 use App\Models\Organization;
 use App\Models\User;
+use App\Services\Discovery\DTO\IcpBrief;
 use App\Services\Discovery\DiscoveryOrchestrator;
 use App\Services\Icp\IcpProfileService;
 use App\Services\Llm\GlmClient;
@@ -125,6 +126,19 @@ class ChatService
                 'stages' => ['analyzing_brief'],
             ]);
 
+            ChatMessage::query()->create([
+                'chat_session_id' => $session->id,
+                'role' => 'assistant',
+                'body' => $intent === 'generate_leads'
+                    ? "I'm searching for leads matching your request. Results will appear here when ready — you can stay on this page."
+                    : "I'm researching your question. Results will appear here when ready — you can stay on this page.",
+                'intent' => $intent,
+                'meta' => [
+                    'pending' => true,
+                    'discovery_run_id' => $run->id,
+                ],
+            ]);
+
             ProcessChatIntentJob::dispatch(
                 $run->id,
                 $userMessage->id,
@@ -138,6 +152,13 @@ class ChatService
 
             if (config('queue.default') === 'sync') {
                 $assistantMessage = ChatMessage::query()
+                    ->where('chat_session_id', $session->id)
+                    ->where('role', 'assistant')
+                    ->where('id', '>', $userMessage->id)
+                    ->orderByDesc('id')
+                    ->get()
+                    ->first(fn(ChatMessage $message) => ! ($message->meta['pending'] ?? false))
+                    ?? ChatMessage::query()
                     ->where('chat_session_id', $session->id)
                     ->where('role', 'assistant')
                     ->where('id', '>', $userMessage->id)
@@ -177,6 +198,7 @@ class ChatService
             $meta['research'] = $result['research'];
             $assistantBody = $result['narrative'];
         } elseif ($intent === 'generate_leads' && $icp) {
+            $brief = IcpBrief::fromIcpProfile($icp, $body);
             $result = $this->discovery->run(
                 $organization,
                 $icp,
@@ -184,7 +206,7 @@ class ChatService
                 $body,
                 $intent,
                 $session->id,
-                12,
+                $brief->requestedLimit,
             );
             $leads = $result['leads'];
             $discoveryRunId = $result['run']->id;
@@ -270,6 +292,7 @@ class ChatService
                 $meta['research'] = $result['research'];
                 $assistantBody = $result['narrative'];
             } elseif ($intent === 'generate_leads') {
+                $brief = IcpBrief::fromIcpProfile($icp, $body);
                 $result = $this->discovery->run(
                     $organization,
                     $icp,
@@ -277,7 +300,7 @@ class ChatService
                     $body,
                     $intent,
                     $session->id,
-                    12,
+                    $brief->requestedLimit,
                     $run,
                 );
                 $leads = $result['leads'];
@@ -288,24 +311,57 @@ class ChatService
                 return;
             }
 
-            ChatMessage::query()->create([
-                'chat_session_id' => $session->id,
-                'role' => 'assistant',
-                'body' => $assistantBody,
-                'intent' => $intent,
-                'leads' => $leads ?: null,
-                'meta' => $meta,
-            ]);
+            $placeholder = ChatMessage::query()
+                ->where('chat_session_id', $session->id)
+                ->where('role', 'assistant')
+                ->where('id', '>', $userMessage->id)
+                ->orderBy('id')
+                ->get()
+                ->first(fn(ChatMessage $message) => (bool) ($message->meta['pending'] ?? false));
+
+            if ($placeholder) {
+                $placeholder->update([
+                    'body' => $assistantBody,
+                    'intent' => $intent,
+                    'leads' => $leads ?: null,
+                    'meta' => $meta,
+                ]);
+            } else {
+                ChatMessage::query()->create([
+                    'chat_session_id' => $session->id,
+                    'role' => 'assistant',
+                    'body' => $assistantBody,
+                    'intent' => $intent,
+                    'leads' => $leads ?: null,
+                    'meta' => $meta,
+                ]);
+            }
 
             $session->touch();
         } catch (\Throwable $e) {
-            ChatMessage::query()->create([
-                'chat_session_id' => $session->id,
-                'role' => 'assistant',
-                'body' => 'Sorry, that request failed: ' . $e->getMessage(),
-                'intent' => $intent,
-                'meta' => array_merge($meta, ['error' => $e->getMessage()]),
-            ]);
+            $placeholder = ChatMessage::query()
+                ->where('chat_session_id', $session->id)
+                ->where('role', 'assistant')
+                ->where('id', '>', $userMessage->id)
+                ->orderBy('id')
+                ->get()
+                ->first(fn(ChatMessage $message) => (bool) ($message->meta['pending'] ?? false));
+
+            if ($placeholder) {
+                $placeholder->update([
+                    'body' => 'Sorry, that request failed: ' . $e->getMessage(),
+                    'intent' => $intent,
+                    'meta' => array_merge($meta, ['error' => $e->getMessage(), 'pending' => false]),
+                ]);
+            } else {
+                ChatMessage::query()->create([
+                    'chat_session_id' => $session->id,
+                    'role' => 'assistant',
+                    'body' => 'Sorry, that request failed: ' . $e->getMessage(),
+                    'intent' => $intent,
+                    'meta' => array_merge($meta, ['error' => $e->getMessage()]),
+                ]);
+            }
             $session->touch();
         }
     }
@@ -321,7 +377,7 @@ class ChatService
 
         try {
             return $this->glm->chat([
-                ['role' => 'system', 'content' => 'You are Sales Engine. Summarize ranked lead prospects for a sales team. Emphasize match quality, score, and recommended next actions. Mention ICP name and top leads. ' . TimeGreeting::promptContext($clientTimezone)],
+                ['role' => 'system', 'content' => 'You are Sales Engine. Summarize ranked lead prospects for a sales team. Use sequential numbering (1, 2, 3...) — never repeat "1." for every item. Use each lead\'s actual name field — never substitute the ICP profile name as a lead name. Emphasize match quality, score, and recommended next actions. Tell the user they can review cards below and save selected leads to CRM. ' . TimeGreeting::promptContext($clientTimezone)],
                 ['role' => 'user', 'content' => json_encode([
                     'intent' => $intent,
                     'icp' => $icp->name,

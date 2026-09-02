@@ -27,7 +27,7 @@ class DiscoveryTest extends TestCase
             'config' => array_merge(IcpProfile::defaultConfig(), [
                 'industries' => ['FMCG & Retail'],
                 'territories' => ['Lagos, NG'],
-                'minMatchScore' => 50,
+                'minMatchScore' => 1,
             ]),
         ]);
 

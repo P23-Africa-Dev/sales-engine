@@ -130,6 +130,7 @@ class CrmSyncService
         $lead->update([
             'f23_lead_id' => $f23LeadId,
             'synced_to_f23_at' => now(),
+            'save_status' => Lead::SAVE_SAVED,
         ]);
 
         return [

@@ -28,7 +28,14 @@ class LeadSyncController extends Controller
             return response()->json(['message' => $e->getMessage()], 422);
         }
 
-        return response()->json(['data' => $result]);
+        $lead->refresh();
+
+        return response()->json([
+            'data' => array_merge($result, [
+                'lead_id' => $lead->id,
+                'save_status' => $lead->save_status,
+            ]),
+        ]);
     }
 
     public function syncBatch(Request $request): JsonResponse
@@ -55,9 +62,11 @@ class LeadSyncController extends Controller
 
             try {
                 $results[] = array_merge(
-                    ['lead_id' => $lead->id],
+                    ['lead_id' => $lead->id, 'save_status' => Lead::SAVE_SAVED],
                     $this->crmSync->pushLead($org, $lead),
                 );
+                $lead->refresh();
+                $results[count($results) - 1]['save_status'] = $lead->save_status;
             } catch (InvalidArgumentException $e) {
                 $errors[] = "Lead {$leadId}: ".$e->getMessage();
             }

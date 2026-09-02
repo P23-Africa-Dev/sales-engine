@@ -2,6 +2,8 @@
 
 namespace App\Services\Discovery\DTO;
 
+use App\Services\Discovery\QueryIntentService;
+
 readonly class IcpBrief
 {
     /**
@@ -21,11 +23,14 @@ readonly class IcpBrief
         public int $minMatchScore,
         public bool $autoSyncCrm,
         public string $query,
+        public string $target = 'companies',
+        public int $requestedLimit = 8,
     ) {}
 
     public static function fromIcpProfile(\App\Models\IcpProfile $profile, string $query = ''): self
     {
         $config = $profile->config ?? [];
+        $intent = app(QueryIntentService::class)->analyze($query, 'generate_leads');
 
         return new self(
             name: $profile->name,
@@ -38,19 +43,30 @@ readonly class IcpBrief
             minMatchScore: (int) ($config['minMatchScore'] ?? 60),
             autoSyncCrm: (bool) ($config['autoSyncCrm'] ?? false),
             query: $query,
+            target: $intent['target'],
+            requestedLimit: $intent['limit'],
         );
+    }
+
+    public function isPeopleSearch(): bool
+    {
+        return $this->target === QueryIntentService::TARGET_PEOPLE;
     }
 
     public function searchQuery(): string
     {
         if (trim($this->query) !== '') {
+            if ($this->isPeopleSearch()) {
+                return trim($this->query).' site:linkedin.com/in OR "CEO" OR "founder" OR "partnership"';
+            }
+
             return $this->query;
         }
 
         $parts = array_filter([
             implode(' ', array_slice($this->industries, 0, 2)),
             implode(' ', array_slice($this->territories, 0, 2)),
-            'companies distributors',
+            $this->isPeopleSearch() ? 'executives founders' : 'companies distributors',
         ]);
 
         return trim(implode(' ', $parts));

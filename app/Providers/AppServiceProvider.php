@@ -38,7 +38,7 @@ class AppServiceProvider extends ServiceProvider
                 cache: $app->make(CompanyCacheService::class),
                 extraction: $app->make(ExtractionService::class),
                 scoring: $app->make(ScoringService::class),
-                crmSync: $app->make(\App\Services\Integrations\Factory23\CrmSyncService::class),
+                queryIntent: $app->make(\App\Services\Discovery\QueryIntentService::class),
             );
         });
 
