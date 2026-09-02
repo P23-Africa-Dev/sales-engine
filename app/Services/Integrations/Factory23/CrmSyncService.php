@@ -198,24 +198,68 @@ class CrmSyncService
         $meta = is_array($lead->meta) ? $lead->meta : [];
         $title = trim((string) ($meta['title'] ?? ''));
         $company = trim((string) ($meta['company'] ?? ''));
-        $sourceUrl = trim((string) ($meta['linkedin_url'] ?? $meta['source_url'] ?? ''));
+        $location = trim((string) ($meta['location'] ?? ''));
+        $email = trim((string) ($meta['email'] ?? ''));
+        $phone = trim((string) ($meta['phone'] ?? ''));
+        $website = trim((string) ($meta['website'] ?? ''));
+        $profileUrls = $this->normalizeProfileUrls($meta['profile_urls'] ?? null, $meta['linkedin_url'] ?? null);
+        $sourceUrl = trim((string) ($meta['source_url'] ?? $meta['linkedin_url'] ?? ''));
+        $nextAction = trim((string) ($meta['next_action'] ?? ''));
+        if ($nextAction === '' || $this->looksLikeListicleFragment($nextAction)) {
+            $nextAction = 'Review and qualify this lead';
+        }
 
-        return [
+        return array_filter([
             'name' => $lead->name,
             'source' => 'sales_engine',
             'status' => $this->resolveDefaultLeadStatus($organization),
             'priority' => 'medium',
             'company_id' => $organization->f23_company_id,
-            'next_action' => filled($lead->summary) ? mb_substr((string) $lead->summary, 0, 255) : null,
+            'position' => $title !== '' ? $title : null,
+            'company_name' => $company !== '' ? $company : null,
+            'location' => $location !== '' ? $location : null,
+            'email' => $email !== '' ? $email : null,
+            'phone' => $phone !== '' ? $phone : null,
+            'website' => $website !== '' ? $website : null,
+            'profile_urls' => $profileUrls !== [] ? $profileUrls : null,
+            'next_action' => $nextAction,
             'meta' => array_filter([
                 'sales_engine_lead_id' => $lead->id,
                 'score' => $lead->score,
                 'summary' => $lead->summary,
-                'title' => $title !== '' ? $title : null,
-                'company' => $company !== '' ? $company : null,
                 'source_url' => $sourceUrl !== '' ? $sourceUrl : null,
+                'enrichment_confidence' => $meta['enrichment_confidence'] ?? null,
             ]),
-        ];
+        ], fn($value) => $value !== null);
+    }
+
+    /**
+     * @param  mixed  $profileUrls
+     * @return list<string>
+     */
+    private function normalizeProfileUrls(mixed $profileUrls, mixed $linkedinUrl): array
+    {
+        $urls = [];
+
+        if (is_array($profileUrls)) {
+            foreach ($profileUrls as $url) {
+                if (is_string($url) && trim($url) !== '') {
+                    $urls[] = trim($url);
+                }
+            }
+        }
+
+        if (is_string($linkedinUrl) && trim($linkedinUrl) !== '') {
+            $urls[] = trim($linkedinUrl);
+        }
+
+        return array_values(array_unique($urls));
+    }
+
+    private function looksLikeListicleFragment(string $text): bool
+    {
+        return (bool) preg_match('/\d+[\.\)]\s+[A-Z][a-z]+/u', $text)
+            || str_contains(mb_strtolower($text), ' · ');
     }
 
     private function resolveDefaultLeadStatus(Organization $organization): string

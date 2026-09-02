@@ -17,6 +17,7 @@ use App\Services\Discovery\QueryIntentService;
 use App\Services\Discovery\PersonNameValidator;
 use App\Services\Discovery\FactualListSynthesizer;
 use App\Services\Extraction\ExtractionService;
+use App\Services\Enrichment\LeadProfileEnrichmentService;
 use App\Services\Scoring\ScoringService;
 use Illuminate\Support\Collection;
 
@@ -31,6 +32,7 @@ class DiscoveryOrchestrator
         private readonly QueryIntentService $queryIntent,
         private readonly PersonNameValidator $personNameValidator,
         private readonly FactualListSynthesizer $factualListSynthesizer,
+        private readonly LeadProfileEnrichmentService $enrichment,
     ) {}
 
     /**
@@ -91,6 +93,7 @@ class DiscoveryOrchestrator
             $this->updateProgress($run, 2, $sourcesChecked, 0);
 
             $this->appendStage($run, 'extracting');
+            $this->enrichment->resetBudget();
             $isAuthoritativeQuery = $brief->isAuthoritativePeopleQuery();
             $leadsPayload = [];
             $companies = collect();
@@ -156,7 +159,7 @@ class DiscoveryOrchestrator
     public function enabledSources(): array
     {
         return collect($this->sources)
-            ->map(fn (DiscoverySourceInterface $s) => [
+            ->map(fn(DiscoverySourceInterface $s) => [
                 'key' => $s->key(),
                 'enabled' => $s->isEnabled(),
             ])
@@ -183,7 +186,7 @@ class DiscoveryOrchestrator
         $seenNames = [];
 
         /** @var RawDiscoveryHit $hit */
-        foreach ($hits->unique(fn (RawDiscoveryHit $h) => mb_strtolower($h->name.($h->url ?? ''))) as $hit) {
+        foreach ($hits->unique(fn(RawDiscoveryHit $h) => mb_strtolower($h->name . ($h->url ?? ''))) as $hit) {
             $extractions = $this->extraction->extractMany($hit, $brief, $organization);
 
             foreach ($extractions as $extracted) {
@@ -242,7 +245,7 @@ class DiscoveryOrchestrator
         $seenNames = [];
 
         /** @var RawDiscoveryHit $hit */
-        foreach ($hits->unique(fn (RawDiscoveryHit $h) => mb_strtolower($h->name)) as $hit) {
+        foreach ($hits->unique(fn(RawDiscoveryHit $h) => mb_strtolower($h->name)) as $hit) {
             if (count($candidates) >= $effectiveLimit * 2) {
                 break;
             }
@@ -357,6 +360,17 @@ class DiscoveryOrchestrator
                 continue;
             }
 
+            if ($brief->isPeopleSearch() || filled($extracted['person_name'] ?? null)) {
+                $enrichedProfile = $this->enrichment->enrich(
+                    $organization,
+                    $icp,
+                    $displayName,
+                    $brief->query,
+                    $extracted,
+                );
+                $extracted = $enrichedProfile->mergeIntoExtraction($extracted);
+            }
+
             $leadPayload = $this->createLeadFromExtraction(
                 $organization,
                 $icp,
@@ -459,6 +473,27 @@ class DiscoveryOrchestrator
             'detected_at' => now(),
         ]);
 
+        $profileUrls = is_array($extracted['profile_urls'] ?? null)
+            ? array_values(array_filter($extracted['profile_urls'], fn($u) => is_string($u) && trim($u) !== ''))
+            : [];
+
+        $sourceUrl = trim((string) (
+            $extracted['linkedin_url']
+            ?? ($profileUrls[0] ?? null)
+            ?? ($extracted['business_fields']['source_url'] ?? null)
+            ?? $hit->url
+        ));
+
+        $nextAction = trim((string) ($extracted['next_action'] ?? ''));
+        if ($nextAction === '') {
+            $nextAction = 'Review and qualify this lead';
+        }
+
+        $summary = trim((string) ($extracted['summary'] ?? ''));
+        if ($summary === '') {
+            $summary = $scores['rationale'];
+        }
+
         $lead = Lead::query()->create([
             'organization_id' => $organization->id,
             'company_id' => $company->id,
@@ -466,19 +501,27 @@ class DiscoveryOrchestrator
             'name' => $displayName,
             'source' => $hit->provider,
             'score' => $scores['priority_score'],
-            'summary' => $extracted['summary'] ?? $company->summary ?? $scores['rationale'],
+            'summary' => $summary,
             'stage' => 'new',
             'save_status' => Lead::SAVE_DRAFT,
-            'meta' => [
+            'meta' => array_filter([
                 'rationale' => $scores['rationale'],
                 'low_confidence' => (bool) ($extracted['low_confidence'] ?? false),
                 'title' => $extracted['title'] ?? null,
                 'company' => $extracted['company'] ?? null,
-                'linkedin_url' => $extracted['linkedin_url'] ?? $hit->url,
+                'location' => $extracted['location'] ?? null,
+                'email' => $extracted['email'] ?? null,
+                'phone' => $extracted['phone'] ?? null,
+                'website' => $extracted['website'] ?? null,
+                'profile_urls' => $profileUrls !== [] ? $profileUrls : null,
+                'linkedin_url' => $extracted['linkedin_url'] ?? ($profileUrls[0] ?? null),
+                'source_url' => $sourceUrl !== '' ? $sourceUrl : null,
+                'next_action' => $nextAction,
+                'enrichment_confidence' => $extracted['enrichment_confidence'] ?? null,
                 'icp_recommended' => $icpRecommended,
                 'icp_fit_score' => (int) round($scores['icp_fit_score']),
                 'query_match' => $queryMatch,
-            ],
+            ], fn($v) => $v !== null && $v !== ''),
         ]);
 
         return [
@@ -491,7 +534,11 @@ class DiscoveryOrchestrator
                 'summary' => $lead->summary,
                 'title' => $extracted['title'] ?? null,
                 'company' => $extracted['company'] ?? null,
-                'source_url' => $extracted['linkedin_url'] ?? $hit->url,
+                'location' => $extracted['location'] ?? null,
+                'website' => $extracted['website'] ?? null,
+                'profile_urls' => $profileUrls,
+                'next_action' => $nextAction,
+                'source_url' => $sourceUrl !== '' ? $sourceUrl : null,
                 'save_status' => $lead->save_status,
                 'crm_synced' => filled($lead->synced_to_f23_at),
                 'f23_lead_id' => $lead->f23_lead_id,

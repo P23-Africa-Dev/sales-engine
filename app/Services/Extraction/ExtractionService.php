@@ -100,7 +100,7 @@ class ExtractionService
                 $result = $this->glm->chatJson([
                     [
                         'role' => 'system',
-                        'content' => 'Extract individual person names from a listicle search result. Return JSON: people (array of objects with person_name, title optional, company optional, summary optional). Use real full names only (first and last name) — never invent, never return sentence fragments, channel names, article titles, or single generic words. Max ' . $limit . ' people. No markdown.',
+                        'content' => 'Extract individual person names from a listicle search result. Return JSON: people (array of objects with person_name, title optional, company optional, summary optional — one unique sentence per person from the snippet, never the full listicle). Use real full names only (first and last name) — never invent, never return sentence fragments, channel names, article titles, or single generic words. Include title and company when mentioned near each name. Max ' . $limit . ' people. No markdown.',
                     ],
                     [
                         'role' => 'user',
@@ -134,14 +134,20 @@ class ExtractionService
                         continue;
                     }
 
+                    $isListicleUrl = $this->queryIntent->isListicleUrl($hit->url);
+                    $personSummary = trim((string) ($person['summary'] ?? ''));
+                    if ($personSummary === '' || $this->looksLikeSharedListicleSnippet($personSummary, $hit->snippet)) {
+                        $personSummary = '';
+                    }
+
                     $extracted[] = [
                         'person_name' => $personName,
                         'name' => $personName,
                         'title' => trim((string) ($person['title'] ?? '')),
                         'company' => trim((string) ($person['company'] ?? '')),
-                        'linkedin_url' => $hit->url,
+                        'linkedin_url' => $isListicleUrl ? null : $hit->url,
                         'location' => $person['location'] ?? $hit->location,
-                        'summary' => (string) ($person['summary'] ?? $hit->snippet ?? $hit->name),
+                        'summary' => $personSummary,
                         'business_fields' => ['source_url' => $hit->url],
                         'commercial_signals' => [],
                         'low_confidence' => false,
@@ -186,7 +192,7 @@ class ExtractionService
                 $extracted[] = [
                     'person_name' => $personName,
                     'name' => $personName,
-                    'summary' => $hit->snippet ?? $hit->name,
+                    'summary' => '',
                     'business_fields' => ['source_url' => $hit->url],
                     'commercial_signals' => [],
                     'low_confidence' => true,
@@ -248,11 +254,11 @@ class ExtractionService
                 'name' => $personName,
                 'title' => $title,
                 'company' => $company,
-                'linkedin_url' => $result['linkedin_url'] ?? $hit->url,
+                'linkedin_url' => $this->resolvePersonUrl($result['linkedin_url'] ?? null, $hit->url),
                 'location' => $result['location'] ?? $hit->location,
                 'summary' => $summary,
                 'business_fields' => array_filter([
-                    'linkedin_url' => $result['linkedin_url'] ?? $hit->url,
+                    'linkedin_url' => $this->resolvePersonUrl($result['linkedin_url'] ?? null, $hit->url),
                     'title' => $title,
                     'company' => $company,
                 ]),
@@ -301,10 +307,33 @@ class ExtractionService
         return [
             'name' => $name,
             'person_name' => $name,
-            'summary' => $hit->snippet ?? $name,
-            'business_fields' => ['linkedin_url' => $hit->url],
+            'summary' => $this->queryIntent->isListicleUrl($hit->url) ? '' : ($hit->snippet ?? $name),
+            'business_fields' => ['source_url' => $hit->url],
             'commercial_signals' => [],
             'low_confidence' => true,
         ];
+    }
+
+    private function resolvePersonUrl(?string $candidate, ?string $fallback): ?string
+    {
+        $url = trim((string) ($candidate ?: $fallback));
+        if ($url === '' || $this->queryIntent->isListicleUrl($url)) {
+            return null;
+        }
+
+        return $url;
+    }
+
+    private function looksLikeSharedListicleSnippet(string $summary, ?string $snippet): bool
+    {
+        if ($snippet === null || trim($snippet) === '') {
+            return false;
+        }
+
+        if (trim($summary) === trim($snippet)) {
+            return true;
+        }
+
+        return (bool) preg_match('/\d+[\.\)]\s+[A-Z][a-z]+/u', $summary);
     }
 }
