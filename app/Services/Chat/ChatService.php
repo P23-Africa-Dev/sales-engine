@@ -30,6 +30,7 @@ class ChatService
         private readonly ResearchOrchestrator $research,
         private readonly IcpProfileService $icps,
         private readonly OutreachDraftService $outreach,
+        private readonly ChatIntentResolver $intentResolver,
     ) {}
 
     public function createSession(Organization $organization, User $user, ?string $title = null, ?int $icpProfileId = null): ChatSession
@@ -99,6 +100,8 @@ class ChatService
             throw new InvalidArgumentException('Invalid intent.');
         }
 
+        ['intent' => $intent, 'body' => $body] = $this->intentResolver->resolve($session, $body, $intent);
+
         $icp = $session->icp_profile_id
             ? IcpProfile::query()->where('organization_id', $organization->id)->find($session->icp_profile_id)
             : $this->icps->active($organization);
@@ -130,8 +133,8 @@ class ChatService
                 'chat_session_id' => $session->id,
                 'role' => 'assistant',
                 'body' => $intent === 'generate_leads'
-                    ? "I'm searching for leads matching your request. Results will appear here when ready — you can stay on this page."
-                    : "I'm researching your question. Results will appear here when ready — you can stay on this page.",
+                    ? "Searching for leads matching your request. Results will appear here shortly."
+                    : "Researching your question. Results will appear here shortly.",
                 'intent' => $intent,
                 'meta' => [
                     'pending' => true,
@@ -369,10 +372,12 @@ class ChatService
     private function narrateDiscovery(Organization $organization, IcpProfile $icp, string $query, array $leads, string $intent, ?string $clientTimezone = null): string
     {
         $count = count($leads);
+        if ($count === 0) {
+            return "No leads met the match threshold for ICP \"{$icp->name}\". Try refining territories or industries, or use Generate New Leads with broader search terms.";
+        }
+
         if (! $this->glm->isConfigured()) {
-            return $count > 0
-                ? "Found {$count} qualified leads matching ICP \"{$icp->name}\" for: {$query}."
-                : "No leads met the match threshold for ICP \"{$icp->name}\". Try refining territories or industries.";
+            return "Found {$count} qualified leads matching ICP \"{$icp->name}\" for: {$query}.";
         }
 
         try {
@@ -416,6 +421,7 @@ class ChatService
                 TimeGreeting::promptContext($clientTimezone),
                 $firstName !== '' ? "User's first name: {$firstName}. Use it naturally when greeting." : null,
                 'When the user greets you (hello, hi, etc.), reply with the appropriate time-of-day greeting above — never the wrong period.',
+                'Never claim that lead cards, Save buttons, or CRM sync actions are visible in the chat. For structured lead results with save-to-CRM cards, tell the user to tap Generate New Leads or ask explicitly to generate leads.',
             ])),
         ]);
 

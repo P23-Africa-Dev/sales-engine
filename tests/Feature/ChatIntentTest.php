@@ -284,4 +284,59 @@ class ChatIntentTest extends TestCase
 
         Queue::assertPushed(ProcessChatIntentJob::class);
     }
+
+    public function test_freeform_create_leads_message_upgrades_to_generate_leads(): void
+    {
+        config([
+            'services.serper.api_key' => 'test-serper',
+            'services.glm.api_key' => '',
+        ]);
+
+        [$user, $org] = $this->actingAsOrgMember();
+
+        IcpProfile::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'FMCG',
+            'is_active' => true,
+            'config' => array_merge(IcpProfile::defaultConfig(), [
+                'industries' => ['FMCG & Retail'],
+                'territories' => ['Lagos, NG'],
+                'minMatchScore' => 1,
+            ]),
+        ]);
+
+        $session = ChatSession::query()->create([
+            'organization_id' => $org->id,
+            'user_id' => $user->id,
+        ]);
+
+        Http::fake([
+            'google.serper.dev/*' => Http::response([
+                'organic' => [
+                    [
+                        'title' => 'Acme Distributors Lagos',
+                        'link' => 'https://acme.example.com',
+                        'snippet' => 'Leading FMCG distributor.',
+                    ],
+                ],
+            ], 200),
+        ]);
+
+        $response = $this->withHeaders($this->orgHeaders($org))
+            ->postJson("/api/v1/chat/sessions/{$session->id}/messages", [
+                'body' => 'create leads for the top 10 wealthiest men',
+                'intent' => 'freeform',
+            ]);
+
+        $response->assertOk()
+            ->assertJsonPath('data.assistant_message.intent', 'generate_leads')
+            ->assertJsonPath('data.assistant_message.leads.0.name', 'Acme Distributors Lagos')
+            ->assertJsonPath('data.assistant_message.leads.0.save_status', 'draft');
+
+        $this->assertDatabaseHas('chat_messages', [
+            'chat_session_id' => $session->id,
+            'role' => 'user',
+            'intent' => 'generate_leads',
+        ]);
+    }
 }
