@@ -63,6 +63,95 @@ class DiscoveryTest extends TestCase
         ]);
     }
 
+    public function test_user_query_outside_icp_still_returns_leads_with_advisory_flags(): void
+    {
+        config([
+            'services.serper.api_key' => 'test-serper',
+            'services.glm.api_key' => '',
+        ]);
+
+        [, $org] = $this->actingAsOrgMember();
+
+        IcpProfile::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'Tech Health ICP',
+            'is_active' => true,
+            'config' => array_merge(IcpProfile::defaultConfig(), [
+                'industries' => ['Health Tech'],
+                'territories' => ['Lagos, NG'],
+                'minMatchScore' => 95,
+            ]),
+        ]);
+
+        Http::fake([
+            'google.serper.dev/*' => Http::response([
+                'organic' => [
+                    [
+                        'title' => 'Global Retail Holdings',
+                        'link' => 'https://global-retail.example.com',
+                        'snippet' => 'Major global retail conglomerate outside health tech.',
+                    ],
+                ],
+            ], 200),
+        ]);
+
+        $response = $this->withHeaders($this->orgHeaders($org))
+            ->postJson('/api/v1/discovery/runs', [
+                'query' => 'top retail conglomerates worldwide',
+                'intent' => 'generate_leads',
+            ]);
+
+        $response->assertCreated()
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonPath('data.leads.0.name', 'Global Retail Holdings')
+            ->assertJsonPath('data.leads.0.icp_recommended', false)
+            ->assertJsonPath('data.leads.0.query_match', true);
+    }
+
+    public function test_listicle_people_query_extracts_named_leads(): void
+    {
+        config([
+            'services.serper.api_key' => 'test-serper',
+            'services.glm.api_key' => '',
+        ]);
+
+        [, $org] = $this->actingAsOrgMember();
+
+        IcpProfile::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'General ICP',
+            'is_active' => true,
+            'config' => array_merge(IcpProfile::defaultConfig(), [
+                'minMatchScore' => 95,
+            ]),
+        ]);
+
+        Http::fake([
+            'google.serper.dev/*' => Http::response([
+                'organic' => [
+                    [
+                        'title' => 'Top 10 Wealthiest Men in the World',
+                        'link' => 'https://example.com/blog/top-10-wealthiest-men',
+                        'snippet' => '1. Bernard Arnault 2. Elon Musk 3. Jeff Bezos',
+                    ],
+                ],
+            ], 200),
+        ]);
+
+        $response = $this->withHeaders($this->orgHeaders($org))
+            ->postJson('/api/v1/discovery/runs', [
+                'query' => 'create leads for the top 10 wealthiest men',
+                'intent' => 'generate_leads',
+            ]);
+
+        $response->assertCreated()
+            ->assertJsonPath('data.status', 'completed');
+
+        $leads = $response->json('data.leads');
+        $this->assertNotEmpty($leads);
+        $this->assertSame('Bernard Arnault', $leads[0]['name']);
+    }
+
     public function test_whatsapp_send_requires_opt_in(): void
     {
         [, $org] = $this->actingAsOrgMember();

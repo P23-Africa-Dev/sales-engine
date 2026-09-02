@@ -23,13 +23,27 @@ class QueryIntentService
         ];
     }
 
+    public function isListiclePeopleQuery(string $query): bool
+    {
+        $normalized = mb_strtolower(trim($query));
+
+        if (! preg_match('/\btop\s+\d{1,2}\b/u', $normalized)) {
+            return false;
+        }
+
+        return (bool) preg_match(
+            '/\b(people|person|persons|men|women|executives?|founders?|billionaires?|millionaires?|wealthiest|richest|magnates?|names|individuals?|leaders?)\b/u',
+            $normalized
+        );
+    }
+
     private function detectTarget(string $normalized, string $intent): string
     {
         if ($intent !== 'generate_leads') {
             return self::TARGET_COMPANIES;
         }
 
-        if (preg_match('/\b(people|person|persons|executives?|founders?|ceos?|cto|cfo|vp|directors?|contacts?|individuals?|partnership contacts?|decision makers?|professionals?|influencers?|leaders?)\b/u', $normalized)) {
+        if (preg_match('/\b(people|person|persons|executives?|founders?|ceos?|cto|cfo|vp|directors?|contacts?|individuals?|partnership contacts?|decision makers?|professionals?|influencers?|leaders?|men|women|billionaires?|millionaires?|wealthiest|richest|magnates?|names)\b/u', $normalized)) {
             return self::TARGET_PEOPLE;
         }
 
@@ -46,7 +60,7 @@ class QueryIntentService
             return min(12, max(1, (int) $matches[1]));
         }
 
-        if (preg_match('/\b(\d{1,2})\s+(?:people|persons|leads|prospects|contacts|names|executives|companies|accounts)\b/u', $normalized, $matches)) {
+        if (preg_match('/\b(\d{1,2})\s+(?:people|persons|leads|prospects|contacts|names|executives|companies|accounts|men|women)\b/u', $normalized, $matches)) {
             return min(12, max(1, (int) $matches[1]));
         }
 
@@ -72,6 +86,6 @@ class QueryIntentService
     {
         $lower = mb_strtolower(trim($name));
 
-        return (bool) preg_match('/\b(top|best|how to|what is|guide to|careers? in|jobs in|trends in|salary|hiring|learn|certification|degree|courses?|training|list of|ways to|\d+\s+(best|top|ways|careers|jobs|skills|companies))\b/u', $lower);
+        return (bool) preg_match('/\b(top|best|how to|what is|guide to|careers? in|jobs in|trends in|salary|hiring|learn|certification|degree|courses?|training|list of|ways to|\d+\s+(best|top|ways|careers|jobs|skills|companies|wealthiest|richest|people|men|women))\b/u', $lower);
     }
 }

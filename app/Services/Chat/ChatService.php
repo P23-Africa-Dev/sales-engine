@@ -372,27 +372,58 @@ class ChatService
     private function narrateDiscovery(Organization $organization, IcpProfile $icp, string $query, array $leads, string $intent, ?string $clientTimezone = null): string
     {
         $count = count($leads);
+        $hasUserQuery = trim($query) !== '';
+
         if ($count === 0) {
-            return "No leads met the match threshold for ICP \"{$icp->name}\". Try refining territories or industries, or use Generate New Leads with broader search terms.";
+            if ($hasUserQuery) {
+                return 'No leads could be extracted for your search. Try rephrasing your request or asking for specific names, companies, or territories.';
+            }
+
+            return "No leads met the match threshold for ICP \"{$icp->name}\". Try refining territories or industries.";
         }
 
+        $icpRecommendedCount = count(array_filter($leads, fn (array $lead) => (bool) ($lead['icp_recommended'] ?? false)));
+        $advisoryNote = $this->buildIcpAdvisoryNote($icp, $count, $icpRecommendedCount, $hasUserQuery);
+
         if (! $this->glm->isConfigured()) {
-            return "Found {$count} qualified leads matching ICP \"{$icp->name}\" for: {$query}.";
+            return "Found {$count} leads for your search.{$advisoryNote}";
         }
 
         try {
-            return $this->glm->chat([
-                ['role' => 'system', 'content' => 'You are Sales Engine. Summarize ranked lead prospects for a sales team. Use sequential numbering (1, 2, 3...) — never repeat "1." for every item. Use each lead\'s actual name field — never substitute the ICP profile name as a lead name. Emphasize match quality, score, and recommended next actions. Tell the user they can review cards below and save selected leads to CRM. ' . TimeGreeting::promptContext($clientTimezone)],
+            $narrative = $this->glm->chat([
+                ['role' => 'system', 'content' => 'You are Sales Engine. Summarize ranked lead prospects for a sales team. Use sequential numbering (1, 2, 3...) — never repeat "1." for every item. Use each lead\'s actual name field — never substitute the ICP profile name as a lead name. Emphasize match quality, score, and recommended next actions. Tell the user they can review cards below and save selected leads to CRM. When some leads are outside the user\'s ICP, mention that clearly but still present all results. '.TimeGreeting::promptContext($clientTimezone)],
                 ['role' => 'user', 'content' => json_encode([
                     'intent' => $intent,
                     'icp' => $icp->name,
                     'query' => $query,
                     'leads' => $leads,
+                    'icp_recommended_count' => $icpRecommendedCount,
                 ], JSON_UNESCAPED_UNICODE)],
             ], 'chat', $organization);
+
+            return rtrim($narrative).$advisoryNote;
         } catch (\Throwable) {
-            return "Found {$count} qualified leads for \"{$icp->name}\".";
+            return "Found {$count} leads for your search.{$advisoryNote}";
         }
+    }
+
+    private function buildIcpAdvisoryNote(IcpProfile $icp, int $total, int $icpRecommendedCount, bool $hasUserQuery): string
+    {
+        if (! $hasUserQuery || $total === 0) {
+            return '';
+        }
+
+        if ($icpRecommendedCount === $total) {
+            return " All {$total} match your ICP \"{$icp->name}\".";
+        }
+
+        if ($icpRecommendedCount === 0) {
+            return " These answer your search but may fall outside your ICP ({$icp->name}) — review cards below and save any you want. Consider refining your ICP or asking for ICP-aligned alternatives.";
+        }
+
+        $outside = $total - $icpRecommendedCount;
+
+        return " {$icpRecommendedCount} of {$total} align with your ICP \"{$icp->name}\"; {$outside} answer your search but may be outside your profile. Save any leads you want from the cards below.";
     }
 
     private function freeformReply(Organization $organization, ?IcpProfile $icp, ChatSession $session, string $body, User $user, ?string $clientTimezone = null): string

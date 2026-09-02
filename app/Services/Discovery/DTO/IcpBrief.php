@@ -53,6 +53,16 @@ readonly class IcpBrief
         return $this->target === QueryIntentService::TARGET_PEOPLE;
     }
 
+    public function isListiclePeopleQuery(): bool
+    {
+        return app(QueryIntentService::class)->isListiclePeopleQuery($this->query);
+    }
+
+    public function hasUserQuery(): bool
+    {
+        return trim($this->query) !== '';
+    }
+
     public function searchQuery(): string
     {
         if (trim($this->query) !== '') {

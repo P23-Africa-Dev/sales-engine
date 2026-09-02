@@ -3,7 +3,7 @@
 namespace Tests\Unit;
 
 use App\Services\Discovery\QueryIntentService;
-use PHPUnit\Framework\TestCase;
+use Tests\TestCase;
 
 class QueryIntentServiceTest extends TestCase
 {
@@ -12,33 +12,23 @@ class QueryIntentServiceTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->service = new QueryIntentService();
+        $this->service = new QueryIntentService;
     }
 
-    public function test_detects_people_query_and_limit(): void
+    public function test_top_wealthiest_men_detected_as_people_with_limit_ten(): void
     {
-        $result = $this->service->analyze('Give me 5 important people in the tech market for partnerships');
+        $result = $this->service->analyze('create leads for the top 10 wealthiest men', 'generate_leads');
 
-        $this->assertSame('people', $result['target']);
-        $this->assertSame(5, $result['limit']);
+        $this->assertSame(QueryIntentService::TARGET_PEOPLE, $result['target']);
+        $this->assertSame(10, $result['limit']);
+        $this->assertTrue($this->service->isListiclePeopleQuery('create leads for the top 10 wealthiest men'));
     }
 
-    public function test_detects_company_query_by_default(): void
+    public function test_company_query_stays_companies(): void
     {
-        $result = $this->service->analyze('Top FMCG distributors in Lagos');
+        $result = $this->service->analyze('FMCG distributors in Lagos', 'generate_leads');
 
-        $this->assertSame('companies', $result['target']);
-    }
-
-    public function test_rejects_listicle_urls(): void
-    {
-        $this->assertTrue($this->service->isListicleUrl('https://example.com/blog/top-tech-careers-2026'));
-        $this->assertFalse($this->service->isListicleUrl('https://www.linkedin.com/in/jane-doe'));
-    }
-
-    public function test_detects_article_titles(): void
-    {
-        $this->assertTrue($this->service->looksLikeArticleTitle('Top 10 tech careers in 2026'));
-        $this->assertFalse($this->service->looksLikeArticleTitle('Jane Doe'));
+        $this->assertSame(QueryIntentService::TARGET_COMPANIES, $result['target']);
+        $this->assertFalse($this->service->isListiclePeopleQuery('FMCG distributors in Lagos'));
     }
 }

@@ -16,7 +16,29 @@ class ExtractionService
     ) {}
 
     /**
-     * @return array{name?: string, sector?: string, location?: string, summary?: string, business_fields?: array, commercial_signals?: array, person_name?: string, title?: string, company?: string, linkedin_url?: string, low_confidence?: bool}
+     * @return list<array{name?: string, sector?: string, location?: string, summary?: string, business_fields?: array, commercial_signals?: array, person_name?: string, title?: string, company?: string, linkedin_url?: string, low_confidence?: bool, from_listicle?: bool}>
+     */
+    public function extractMany(RawDiscoveryHit $hit, IcpBrief $brief, Organization $organization): array
+    {
+        if ($brief->isListiclePeopleQuery()) {
+            $listiclePeople = $this->extractListiclePeople($hit, $brief, $organization);
+            if ($listiclePeople !== []) {
+                return $listiclePeople;
+            }
+        }
+
+        $single = $this->extract($hit, $brief, $organization);
+        $name = trim((string) ($single['person_name'] ?? $single['name'] ?? ''));
+
+        if ($name === '') {
+            return [];
+        }
+
+        return [$single];
+    }
+
+    /**
+     * @return array{name?: string, sector?: string, location?: string, summary?: string, business_fields?: array, commercial_signals?: array, person_name?: string, title?: string, company?: string, linkedin_url?: string, low_confidence?: bool, from_listicle?: bool}
      */
     public function extract(RawDiscoveryHit $hit, IcpBrief $brief, Organization $organization): array
     {
@@ -37,6 +59,7 @@ class ExtractionService
                 [
                     'role' => 'user',
                     'content' => json_encode([
+                        'user_query' => $brief->query,
                         'icp' => [
                             'industries' => $brief->industries,
                             'territories' => $brief->territories,
@@ -66,12 +89,126 @@ class ExtractionService
     }
 
     /**
+     * @return list<array{name?: string, person_name?: string, title?: string, company?: string, linkedin_url?: string, location?: string, summary?: string, business_fields?: array, commercial_signals?: array, low_confidence?: bool, from_listicle?: bool}>
+     */
+    private function extractListiclePeople(RawDiscoveryHit $hit, IcpBrief $brief, Organization $organization): array
+    {
+        $limit = $brief->requestedLimit;
+
+        if ($this->glm->isConfigured()) {
+            try {
+                $result = $this->glm->chatJson([
+                    [
+                        'role' => 'system',
+                        'content' => 'Extract individual person names from a listicle search result. Return JSON: people (array of objects with person_name, title optional, company optional, summary optional). Use real names only — never invent. Max ' . $limit . ' people. No markdown.',
+                    ],
+                    [
+                        'role' => 'user',
+                        'content' => json_encode([
+                            'user_query' => $brief->query,
+                            'title' => $hit->name,
+                            'snippet' => $hit->snippet,
+                            'url' => $hit->url,
+                            'limit' => $limit,
+                        ], JSON_UNESCAPED_UNICODE),
+                    ],
+                ], 'extract', $organization);
+
+                $people = $result['people'] ?? [];
+                if (! is_array($people)) {
+                    $people = [];
+                }
+
+                $extracted = [];
+                foreach ($people as $person) {
+                    if (! is_array($person)) {
+                        continue;
+                    }
+
+                    $personName = trim((string) ($person['person_name'] ?? $person['name'] ?? ''));
+                    if ($personName === '' || mb_strtolower($personName) === mb_strtolower($brief->name)) {
+                        continue;
+                    }
+
+                    if ($this->queryIntent->looksLikeArticleTitle($personName)) {
+                        continue;
+                    }
+
+                    $extracted[] = [
+                        'person_name' => $personName,
+                        'name' => $personName,
+                        'title' => trim((string) ($person['title'] ?? '')),
+                        'company' => trim((string) ($person['company'] ?? '')),
+                        'linkedin_url' => $hit->url,
+                        'location' => $person['location'] ?? $hit->location,
+                        'summary' => (string) ($person['summary'] ?? $hit->snippet ?? $hit->name),
+                        'business_fields' => ['source_url' => $hit->url],
+                        'commercial_signals' => [],
+                        'low_confidence' => false,
+                        'from_listicle' => true,
+                    ];
+
+                    if (count($extracted) >= $limit) {
+                        break;
+                    }
+                }
+
+                if ($extracted !== []) {
+                    return $extracted;
+                }
+            } catch (\Throwable) {
+                // Fall through to heuristic parsing.
+            }
+        }
+
+        return $this->heuristicListiclePeople($hit, $brief, $limit);
+    }
+
+    /**
+     * @return list<array{name?: string, person_name?: string, summary?: string, business_fields?: array, commercial_signals?: array, low_confidence?: bool, from_listicle?: bool}>
+     */
+    private function heuristicListiclePeople(RawDiscoveryHit $hit, IcpBrief $brief, int $limit): array
+    {
+        $text = trim(($hit->snippet ?? '') . "\n" . ($hit->name ?? ''));
+        $extracted = [];
+
+        if (preg_match_all('/(?:\d+[\.\)]\s*|[\-\x{2022}]\s*)([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3})/u', $text, $matches)) {
+            foreach ($matches[1] as $name) {
+                $personName = trim($name);
+                if ($personName === '' || mb_strtolower($personName) === mb_strtolower($brief->name)) {
+                    continue;
+                }
+
+                if ($this->queryIntent->looksLikeArticleTitle($personName)) {
+                    continue;
+                }
+
+                $extracted[] = [
+                    'person_name' => $personName,
+                    'name' => $personName,
+                    'summary' => $hit->snippet ?? $hit->name,
+                    'business_fields' => ['source_url' => $hit->url],
+                    'commercial_signals' => [],
+                    'low_confidence' => true,
+                    'from_listicle' => true,
+                ];
+
+                if (count($extracted) >= $limit) {
+                    break;
+                }
+            }
+        }
+
+        return $extracted;
+    }
+
+    /**
      * @return array{name?: string, sector?: string, location?: string, summary?: string, business_fields?: array, commercial_signals?: array, person_name?: string, title?: string, company?: string, linkedin_url?: string, low_confidence?: bool}
      */
     private function extractPerson(RawDiscoveryHit $hit, IcpBrief $brief, Organization $organization): array
     {
         if (! $this->glm->isConfigured()) {
-            return $this->fallbackPerson($hit);
+            return $this->fallbackPerson($hit, $brief);
         }
 
         try {
@@ -83,6 +220,7 @@ class ExtractionService
                 [
                     'role' => 'user',
                     'content' => json_encode([
+                        'user_query' => $brief->query,
                         'hit' => [
                             'name' => $hit->name,
                             'snippet' => $hit->snippet,
@@ -94,7 +232,7 @@ class ExtractionService
 
             $personName = trim((string) ($result['person_name'] ?? ''));
             if ($personName === '' || mb_strtolower($personName) === mb_strtolower($brief->name)) {
-                return $this->fallbackPerson($hit);
+                return $this->fallbackPerson($hit, $brief);
             }
 
             $summary = (string) ($result['summary'] ?? $hit->snippet ?? $hit->name);
@@ -122,7 +260,7 @@ class ExtractionService
                 'low_confidence' => false,
             ];
         } catch (\Throwable) {
-            return $this->fallbackPerson($hit);
+            return $this->fallbackPerson($hit, $brief);
         }
     }
 
@@ -145,11 +283,11 @@ class ExtractionService
     /**
      * @return array{name?: string, person_name?: string, summary?: string, business_fields?: array, commercial_signals?: array, low_confidence?: bool}
      */
-    private function fallbackPerson(RawDiscoveryHit $hit): array
+    private function fallbackPerson(RawDiscoveryHit $hit, IcpBrief $brief): array
     {
         $name = $hit->name;
 
-        if ($this->queryIntent->looksLikeArticleTitle($name)) {
+        if ($this->queryIntent->looksLikeArticleTitle($name) && ! $brief->isListiclePeopleQuery()) {
             return [
                 'name' => '',
                 'person_name' => '',

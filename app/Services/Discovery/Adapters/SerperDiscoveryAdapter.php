@@ -81,16 +81,18 @@ class SerperDiscoveryAdapter implements DiscoverySourceInterface
                         meta: ['title' => $title, 'target' => $brief->target],
                     );
                 })
-                ->filter(function (RawDiscoveryHit $h) {
+                ->filter(function (RawDiscoveryHit $h) use ($brief) {
                     if ($h->name === '') {
                         return false;
                     }
 
-                    if ($this->queryIntent->isListicleUrl($h->url)) {
+                    $allowListicle = $brief->isPeopleSearch() || $brief->isListiclePeopleQuery();
+
+                    if (! $allowListicle && $this->queryIntent->isListicleUrl($h->url)) {
                         return false;
                     }
 
-                    if ($this->queryIntent->looksLikeArticleTitle($h->name)) {
+                    if (! $allowListicle && $this->queryIntent->looksLikeArticleTitle($h->name)) {
                         return false;
                     }
 
