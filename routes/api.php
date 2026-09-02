@@ -92,5 +92,6 @@ Route::middleware(['auth:sanctum', 'org.resolve'])->group(function () {
     Route::patch('/crm/leads/{id}', [CrmController::class, 'updateLead']);
 
     Route::get('/integrations/factory23/status', [IntegrationController::class, 'factory23Status']);
+    Route::post('/integrations/factory23/ensure', [IntegrationController::class, 'ensureFactory23CrmLink']);
     Route::post('/integrations/factory23/crm-sync', [IntegrationController::class, 'factory23CrmSync']);
 });

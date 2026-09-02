@@ -44,4 +44,16 @@ class IntegrationController extends Controller
             ],
         ]);
     }
+
+    public function ensureFactory23CrmLink(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'f23_access_token' => ['required', 'string'],
+        ]);
+
+        $org = OrgContext::require();
+        $result = $this->crmSync->ensureOrganizationToken($org, $data['f23_access_token']);
+
+        return response()->json(['data' => $result]);
+    }
 }

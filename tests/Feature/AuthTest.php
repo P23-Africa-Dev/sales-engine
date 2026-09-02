@@ -3,8 +3,10 @@
 namespace Tests\Feature;
 
 use App\Models\IcpProfile;
+use App\Models\Organization;
 use App\Models\User;
 use Firebase\JWT\JWT;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Hash;
 use Tests\TestCase;
 
@@ -54,6 +56,11 @@ class AuthTest extends TestCase
         config([
             'services.factory23.jwt_secret' => 'test-secret-key-at-least-32-bytes-long!!',
             'services.factory23.crm_sync_enabled' => true,
+            'services.factory23.api_url' => 'https://api.example.com',
+        ]);
+
+        Http::fake([
+            'api.example.com/*' => Http::response(['data' => ['items' => [['slug' => 'new_lead']]]], 200),
         ]);
 
         $assertion = JWT::encode([
@@ -67,6 +74,7 @@ class AuthTest extends TestCase
 
         $response = $this->postJson('/api/v1/auth/factory23/exchange', [
             'assertion' => $assertion,
+            'f23_access_token' => 'f23-user-token',
         ]);
 
         $response->assertOk()
@@ -78,5 +86,12 @@ class AuthTest extends TestCase
             'provider' => 'factory23',
             'external_user_id' => 'f23-user-1',
         ]);
+
+        $org = Organization::query()->where('f23_company_id', 'f23-co-9')->first();
+        $this->assertNotNull($org);
+        $this->assertSame(
+            'f23-user-token',
+            app(\App\Services\Integrations\Factory23\Factory23CrmTokenService::class)->resolveToken($org)
+        );
     }
 }

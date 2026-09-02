@@ -13,12 +13,16 @@ class Organization extends Model
         'slug',
         'f23_company_id',
         'factory23_crm_sync_enabled',
+        'f23_api_token',
+        'f23_api_token_verified_at',
     ];
 
     protected function casts(): array
     {
         return [
             'factory23_crm_sync_enabled' => 'boolean',
+            'f23_api_token' => 'encrypted',
+            'f23_api_token_verified_at' => 'datetime',
         ];
     }
 

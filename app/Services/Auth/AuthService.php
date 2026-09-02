@@ -6,12 +6,14 @@ use App\Models\ExternalIdentity;
 use App\Models\Organization;
 use App\Models\OrganizationUser;
 use App\Models\User;
+use App\Services\Integrations\Factory23\Factory23CrmTokenService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 
 class AuthService
 {
+    public function __construct(private readonly Factory23CrmTokenService $crmTokenService) {}
     /**
      * @return array{user: User, organization: Organization, token: string}
      */
@@ -54,9 +56,9 @@ class AuthService
      * @param  array{sub: string, email: string, name?: string, company_id?: string|null, company_name?: string|null}  $claims
      * @return array{user: User, organization: Organization, token: string}
      */
-    public function exchangeFactory23(array $claims): array
+    public function exchangeFactory23(array $claims, ?string $f23AccessToken = null): array
     {
-        return DB::transaction(function () use ($claims) {
+        return DB::transaction(function () use ($claims, $f23AccessToken) {
             $externalUserId = (string) $claims['sub'];
             $email = (string) $claims['email'];
             $name = (string) ($claims['name'] ?? 'Factory23 User');
@@ -110,6 +112,11 @@ class AuthService
 
             if ($companyId && filled($organization->f23_company_id) && config('services.factory23.crm_sync_enabled')) {
                 $organization->update(['factory23_crm_sync_enabled' => true]);
+            }
+
+            if (filled($f23AccessToken) && filled($organization->f23_company_id)) {
+                $this->crmTokenService->registerForOrganization($organization, $f23AccessToken);
+                $organization = $organization->fresh();
             }
 
             if (! OrganizationUser::query()->where('organization_id', $organization->id)->where('user_id', $user->id)->exists()) {

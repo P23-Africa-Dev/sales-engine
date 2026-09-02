@@ -15,8 +15,13 @@ class CrmSyncService
     public const REASON_SYNC_DISABLED = 'sync_disabled';
 
     public const REASON_NOT_LINKED = 'not_linked';
+
+    public const REASON_TOKEN_INVALID = 'token_invalid';
+
     /** @var array<string, string> */
     private array $defaultStatusByCompany = [];
+
+    public function __construct(private readonly Factory23CrmTokenService $tokenService) {}
 
     public function isConfigured(): bool
     {
@@ -28,7 +33,13 @@ class CrmSyncService
             return true;
         }
 
-        return $this->companyTokens() !== [];
+        if ($this->companyTokens() !== []) {
+            return true;
+        }
+
+        return Organization::query()
+            ->whereNotNull('f23_api_token')
+            ->exists();
     }
 
     public function isConfiguredForOrganization(Organization $organization): bool
@@ -37,7 +48,7 @@ class CrmSyncService
             return false;
         }
 
-        return $this->resolveApiToken($organization) !== null;
+        return $this->tokenService->hasResolvableToken($organization);
     }
 
     public function status(Organization $organization): array
@@ -50,6 +61,7 @@ class CrmSyncService
             'organization_enabled' => (bool) $organization->factory23_crm_sync_enabled,
             'f23_company_id' => $organization->f23_company_id,
             'linked' => filled($organization->f23_company_id),
+            'token_linked' => filled($organization->f23_api_token),
             'can_sync' => $blockReason === null,
             'block_reason' => $blockReason,
             'block_message' => $blockReason !== null ? $this->syncBlockMessage($blockReason) : null,
@@ -128,11 +140,31 @@ class CrmSyncService
     public function syncBlockMessage(?string $reason): string
     {
         return match ($reason) {
-            self::REASON_NOT_CONFIGURED => 'Factory23 CRM API is not configured on the server (missing API URL or token).',
+            self::REASON_NOT_CONFIGURED => 'CRM connection is not ready yet. Refresh this page while signed in to Factory23, or sign out and back in.',
             self::REASON_SYNC_DISABLED => 'CRM sync is disabled for this organization.',
             self::REASON_NOT_LINKED => 'Factory23 is not linked for this organization. Sign out and sign back in, or contact your admin.',
+            self::REASON_TOKEN_INVALID => 'Your Factory23 session expired for CRM sync. Refresh this page to reconnect.',
             default => 'CRM sync is unavailable for this organization.',
         };
+    }
+
+    public function ensureOrganizationToken(Organization $organization, string $accessToken): array
+    {
+        if (! filled($organization->f23_company_id)) {
+            return [
+                'linked' => false,
+                'token_registered' => false,
+                'status' => $this->status($organization),
+            ];
+        }
+
+        $registered = $this->tokenService->registerForOrganization($organization, $accessToken);
+
+        return [
+            'linked' => true,
+            'token_registered' => $registered,
+            'status' => $this->status($organization->fresh()),
+        ];
     }
 
     /**
@@ -156,7 +188,7 @@ class CrmSyncService
         }
 
         $base = rtrim((string) config('services.factory23.api_url'), '/');
-        $token = $this->resolveApiToken($organization);
+        $token = $this->tokenService->resolveToken($organization);
 
         if ($token === null) {
             throw new CrmSyncException($this->syncBlockMessage(self::REASON_NOT_CONFIGURED), self::REASON_NOT_CONFIGURED);
@@ -165,6 +197,11 @@ class CrmSyncService
         $response = Http::timeout(20)
             ->withToken($token)
             ->post($base . '/api/v1/crm/leads', $this->buildLeadPayload($organization, $lead));
+
+        if (in_array($response->status(), [401, 403], true) && filled($organization->f23_api_token)) {
+            $this->tokenService->clearForOrganization($organization);
+            throw new CrmSyncException($this->syncBlockMessage(self::REASON_TOKEN_INVALID), self::REASON_TOKEN_INVALID);
+        }
 
         if (! $response->successful()) {
             $message = (string) ($response->json('message') ?? 'Unknown error');
@@ -271,7 +308,7 @@ class CrmSyncService
 
         $fallbacks = ['new_lead', 'newly_lead', 'contacted', 'qualified'];
         $base = rtrim((string) config('services.factory23.api_url'), '/');
-        $token = $this->resolveApiToken($organization);
+        $token = $this->tokenService->resolveToken($organization);
 
         if ($token === null) {
             return $fallbacks[0];
@@ -316,21 +353,5 @@ class CrmSyncService
         $tokens = config('services.factory23.company_tokens');
 
         return is_array($tokens) ? $tokens : [];
-    }
-
-    private function resolveApiToken(Organization $organization): ?string
-    {
-        $companyId = (string) ($organization->f23_company_id ?? '');
-        $companyTokens = $this->companyTokens();
-
-        if ($companyId !== '' && isset($companyTokens[$companyId])) {
-            $token = trim((string) $companyTokens[$companyId]);
-
-            return $token !== '' ? $token : null;
-        }
-
-        $default = trim((string) config('services.factory23.api_token'));
-
-        return $default !== '' ? $default : null;
     }
 }

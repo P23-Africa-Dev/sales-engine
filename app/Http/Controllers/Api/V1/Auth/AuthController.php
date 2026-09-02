@@ -91,11 +91,12 @@ class AuthController extends Controller
     {
         $data = $request->validate([
             'assertion' => ['required', 'string'],
+            'f23_access_token' => ['nullable', 'string'],
         ]);
 
         try {
             $claims = $this->verifier->verify($data['assertion']);
-            $result = $this->auth->exchangeFactory23($claims);
+            $result = $this->auth->exchangeFactory23($claims, $data['f23_access_token'] ?? null);
         } catch (InvalidArgumentException $e) {
             return response()->json(['message' => $e->getMessage()], 503);
         } catch (UnexpectedValueException $e) {
