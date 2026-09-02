@@ -64,6 +64,10 @@ return [
         'jwt_secret' => env('FACTORY23_JWT_SECRET'),
         'crm_sync_enabled' => (bool) env('FACTORY23_CRM_SYNC_ENABLED', false),
         'api_token' => env('FACTORY23_API_TOKEN'),
+        'company_tokens' => array_filter(
+            json_decode((string) env('FACTORY23_COMPANY_TOKENS', '{}'), true) ?: [],
+            fn($token) => is_string($token) && trim($token) !== '',
+        ),
     ],
 
     'apollo' => [
