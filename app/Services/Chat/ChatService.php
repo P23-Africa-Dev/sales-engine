@@ -382,7 +382,7 @@ class ChatService
             return "No leads met the match threshold for ICP \"{$icp->name}\". Try refining territories or industries.";
         }
 
-        $icpRecommendedCount = count(array_filter($leads, fn (array $lead) => (bool) ($lead['icp_recommended'] ?? false)));
+        $icpRecommendedCount = count(array_filter($leads, fn(array $lead) => (bool) ($lead['icp_recommended'] ?? false)));
         $advisoryNote = $this->buildIcpAdvisoryNote($icp, $count, $icpRecommendedCount, $hasUserQuery);
 
         if (! $this->glm->isConfigured()) {
@@ -390,7 +390,7 @@ class ChatService
         }
 
         try {
-            $publicLeads = array_map(fn (array $lead) => array_filter([
+            $publicLeads = array_map(fn(array $lead) => array_filter([
                 'name' => $lead['name'] ?? '',
                 'score' => $lead['score'] ?? 0,
                 'summary' => $lead['summary'] ?? '',
@@ -400,7 +400,7 @@ class ChatService
             ]), $leads);
 
             $narrative = $this->glm->chat([
-                ['role' => 'system', 'content' => 'You are Sales Engine. Summarize ranked lead prospects for a sales team. Use sequential numbering (1, 2, 3...) — never repeat "1." for every item. Use each lead\'s actual name field — never substitute the ICP profile name as a lead name. Write in plain prose: name, role/company if known, and why they matter. Do NOT include internal fields like Match Quality, Query Match, ICP Fit Score, or Recommended Next Action. Tell the user they can review cards below and save selected leads to CRM. When some leads are outside the user\'s ICP, mention that clearly but still present all results. '.TimeGreeting::promptContext($clientTimezone)],
+                ['role' => 'system', 'content' => 'You are Sales Engine. Summarize ranked lead prospects for a sales team. Use sequential numbering (1, 2, 3...) — never repeat "1." for every item. Use each lead\'s actual name field — never substitute the ICP profile name as a lead name. Write in plain prose: name, role/company if known, and why they matter. Do NOT include internal fields like Match Quality, Query Match, ICP Fit Score, or Recommended Next Action. Tell the user they can review cards below and save selected leads to CRM. When some leads are outside the user\'s ICP, mention that clearly but still present all results. ' . TimeGreeting::promptContext($clientTimezone)],
                 ['role' => 'user', 'content' => json_encode([
                     'intent' => $intent,
                     'icp' => $icp->name,
@@ -410,7 +410,7 @@ class ChatService
                 ], JSON_UNESCAPED_UNICODE)],
             ], 'chat', $organization);
 
-            return rtrim($this->fixRepeatedNumbering($narrative)).$advisoryNote;
+            return rtrim($this->fixRepeatedNumbering($narrative)) . $advisoryNote;
         } catch (\Throwable) {
             return "Found {$count} leads for your search.{$advisoryNote}";
         }
@@ -427,7 +427,7 @@ class ChatService
         }
 
         if ($icpRecommendedCount === 0) {
-            return " These answer your search but may fall outside your ICP ({$icp->name}) — review cards below and save any you want. Consider refining your ICP or asking for ICP-aligned alternatives.";
+            return " These answer your search but may fall outside your ICP ({$icp->name}). Review cards below and save any you want. Consider refining your ICP or asking for ICP-aligned alternatives.";
         }
 
         $outside = $total - $icpRecommendedCount;
