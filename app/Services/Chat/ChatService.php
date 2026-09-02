@@ -4,6 +4,7 @@ namespace App\Services\Chat;
 
 use App\Models\ChatMessage;
 use App\Models\ChatSession;
+use App\Models\DiscoveryRun;
 use App\Models\IcpProfile;
 use App\Models\Organization;
 use App\Models\User;
@@ -13,11 +14,14 @@ use App\Services\Llm\GlmClient;
 use App\Services\Outreach\OutreachDraftService;
 use App\Services\Research\ResearchOrchestrator;
 use App\Support\TimeGreeting;
+use App\Jobs\ProcessChatIntentJob;
 use InvalidArgumentException;
 
 class ChatService
 {
     public const INTENTS = ['freeform', 'quick_research', 'generate_leads', 'create_outreach'];
+
+    public const ASYNC_INTENTS = ['quick_research', 'generate_leads'];
 
     public function __construct(
         private readonly GlmClient $glm,
@@ -27,30 +31,60 @@ class ChatService
         private readonly OutreachDraftService $outreach,
     ) {}
 
-    public function createSession(Organization $organization, User $user, ?string $title = null): ChatSession
+    public function createSession(Organization $organization, User $user, ?string $title = null, ?int $icpProfileId = null): ChatSession
     {
-        $icp = $this->icps->active($organization);
+        $icpId = $icpProfileId ?? $this->icps->active($organization)?->id;
 
         return ChatSession::query()->create([
             'organization_id' => $organization->id,
             'user_id' => $user->id,
-            'icp_profile_id' => $icp?->id,
+            'icp_profile_id' => $icpId,
             'title' => $title,
         ]);
     }
 
-    public function latestSessionForUser(Organization $organization, User $user): ?ChatSession
+    public function latestSessionForUser(Organization $organization, User $user, ?int $icpProfileId = null): ?ChatSession
     {
-        return ChatSession::query()
+        $resolvedIcpId = $icpProfileId ?? $this->icps->active($organization)?->id;
+
+        $query = ChatSession::query()
             ->where('organization_id', $organization->id)
-            ->where('user_id', $user->id)
+            ->where('user_id', $user->id);
+
+        if ($resolvedIcpId) {
+            $query->where('icp_profile_id', $resolvedIcpId);
+        }
+
+        return $query
             ->whereHas('messages')
             ->latest('updated_at')
             ->first();
     }
 
+    public function resolveOrCreateSessionForIcp(Organization $organization, User $user, IcpProfile $icp): ChatSession
+    {
+        $existing = ChatSession::query()
+            ->where('organization_id', $organization->id)
+            ->where('user_id', $user->id)
+            ->where('icp_profile_id', $icp->id)
+            ->latest('updated_at')
+            ->first();
+
+        if ($existing) {
+            return $existing;
+        }
+
+        return $this->createSession($organization, $user, null, $icp->id);
+    }
+
+    public function clearSessionMessages(ChatSession $session): void
+    {
+        ChatMessage::query()->where('chat_session_id', $session->id)->delete();
+        $session->touch();
+    }
+
     /**
-     * @return array{user_message: ChatMessage, assistant_message: ChatMessage, discovery_run_id?: int|null}
+     * @return array{user_message: ChatMessage, assistant_message?: ChatMessage|null, discovery_run_id?: int|null, status?: string}
      */
     public function postMessage(
         ChatSession $session,
@@ -78,6 +112,53 @@ class ChatService
             'body' => $body,
             'intent' => $intent,
         ]);
+
+        if (in_array($intent, self::ASYNC_INTENTS, true) && $icp) {
+            $run = DiscoveryRun::query()->create([
+                'organization_id' => $organization->id,
+                'user_id' => $user->id,
+                'icp_profile_id' => $icp->id,
+                'chat_session_id' => $session->id,
+                'status' => 'queued',
+                'query' => $body,
+                'intent' => $intent,
+                'stages' => ['queued'],
+            ]);
+
+            ProcessChatIntentJob::dispatch(
+                $run->id,
+                $userMessage->id,
+                $clientTimezone,
+            );
+
+            if (! $session->title) {
+                $session->update(['title' => mb_substr($body, 0, 80)]);
+            }
+            $session->touch();
+
+            if (config('queue.default') === 'sync') {
+                $assistantMessage = ChatMessage::query()
+                    ->where('chat_session_id', $session->id)
+                    ->where('role', 'assistant')
+                    ->where('id', '>', $userMessage->id)
+                    ->orderByDesc('id')
+                    ->first();
+
+                return [
+                    'user_message' => $userMessage,
+                    'assistant_message' => $assistantMessage,
+                    'discovery_run_id' => $run->id,
+                    'status' => $assistantMessage ? 'completed' : 'processing',
+                ];
+            }
+
+            return [
+                'user_message' => $userMessage,
+                'assistant_message' => null,
+                'discovery_run_id' => $run->id,
+                'status' => 'processing',
+            ];
+        }
 
         $leads = [];
         $meta = ['intent' => $intent];
@@ -137,7 +218,96 @@ class ChatService
             'user_message' => $userMessage,
             'assistant_message' => $assistantMessage,
             'discovery_run_id' => $discoveryRunId,
+            'status' => 'completed',
         ];
+    }
+
+    public function processQueuedIntent(int $runId, int $userMessageId, ?string $clientTimezone = null): void
+    {
+        $run = DiscoveryRun::query()->find($runId);
+        if (! $run || $run->status !== 'queued') {
+            return;
+        }
+
+        $session = $run->chat_session_id
+            ? ChatSession::query()->find($run->chat_session_id)
+            : null;
+        $userMessage = ChatMessage::query()->find($userMessageId);
+
+        if (! $session || ! $userMessage || $userMessage->chat_session_id !== $session->id) {
+            $run->update(['status' => 'failed', 'error' => 'Invalid chat context.', 'finished_at' => now()]);
+
+            return;
+        }
+
+        $organization = Organization::query()->find($run->organization_id);
+        $user = User::query()->find($run->user_id);
+        $icp = $run->icp_profile_id
+            ? IcpProfile::query()->find($run->icp_profile_id)
+            : null;
+
+        if (! $organization || ! $user || ! $icp) {
+            $run->update(['status' => 'failed', 'error' => 'Missing organization, user, or ICP.', 'finished_at' => now()]);
+
+            return;
+        }
+
+        $body = $userMessage->body;
+        $intent = (string) $run->intent;
+        $leads = [];
+        $meta = ['intent' => $intent, 'discovery_run_id' => $run->id];
+
+        try {
+            if ($intent === 'quick_research') {
+                $result = $this->research->run(
+                    $organization,
+                    $icp,
+                    $user,
+                    $body,
+                    $session->id,
+                    $run,
+                );
+                $meta['research'] = $result['research'];
+                $assistantBody = $result['narrative'];
+            } elseif ($intent === 'generate_leads') {
+                $result = $this->discovery->run(
+                    $organization,
+                    $icp,
+                    $user,
+                    $body,
+                    $intent,
+                    $session->id,
+                    12,
+                    $run,
+                );
+                $leads = $result['leads'];
+                $assistantBody = $this->narrateDiscovery($organization, $icp, $body, $leads, $intent, $clientTimezone);
+            } else {
+                $run->update(['status' => 'failed', 'error' => 'Unsupported async intent.', 'finished_at' => now()]);
+
+                return;
+            }
+
+            ChatMessage::query()->create([
+                'chat_session_id' => $session->id,
+                'role' => 'assistant',
+                'body' => $assistantBody,
+                'intent' => $intent,
+                'leads' => $leads ?: null,
+                'meta' => $meta,
+            ]);
+
+            $session->touch();
+        } catch (\Throwable $e) {
+            ChatMessage::query()->create([
+                'chat_session_id' => $session->id,
+                'role' => 'assistant',
+                'body' => 'Sorry, that request failed: ' . $e->getMessage(),
+                'intent' => $intent,
+                'meta' => array_merge($meta, ['error' => $e->getMessage()]),
+            ]);
+            $session->touch();
+        }
     }
 
     private function narrateDiscovery(Organization $organization, IcpProfile $icp, string $query, array $leads, string $intent, ?string $clientTimezone = null): string
@@ -151,7 +321,7 @@ class ChatService
 
         try {
             return $this->glm->chat([
-                ['role' => 'system', 'content' => 'You are Sales Engine. Summarize ranked lead prospects for a sales team. Emphasize match quality, score, and recommended next actions. Mention ICP name and top leads. '.TimeGreeting::promptContext($clientTimezone)],
+                ['role' => 'system', 'content' => 'You are Sales Engine. Summarize ranked lead prospects for a sales team. Emphasize match quality, score, and recommended next actions. Mention ICP name and top leads. ' . TimeGreeting::promptContext($clientTimezone)],
                 ['role' => 'user', 'content' => json_encode([
                     'intent' => $intent,
                     'icp' => $icp->name,
@@ -175,7 +345,7 @@ class ChatService
             ->orderBy('id')
             ->limit(12)
             ->get()
-            ->map(fn (ChatMessage $m) => ['role' => $m->role, 'content' => $m->body])
+            ->map(fn(ChatMessage $m) => ['role' => $m->role, 'content' => $m->body])
             ->all();
 
         $history[] = ['role' => 'user', 'content' => $body];
@@ -186,7 +356,7 @@ class ChatService
             'role' => 'system',
             'content' => implode(' ', array_filter([
                 'You are Sales Engine, a B2B lead discovery assistant for African markets.',
-                'Active ICP: '.($icp?->name ?? 'none').'.',
+                'Active ICP: ' . ($icp?->name ?? 'none') . '.',
                 TimeGreeting::promptContext($clientTimezone),
                 $firstName !== '' ? "User's first name: {$firstName}. Use it naturally when greeting." : null,
                 'When the user greets you (hello, hi, etc.), reply with the appropriate time-of-day greeting above — never the wrong period.',
@@ -196,7 +366,7 @@ class ChatService
         try {
             return $this->glm->chat($history, 'chat', $organization);
         } catch (\Throwable $e) {
-            return 'Chat temporarily unavailable: '.$e->getMessage();
+            return 'Chat temporarily unavailable: ' . $e->getMessage();
         }
     }
 }

@@ -52,6 +52,7 @@ Route::middleware(['auth:sanctum', 'org.resolve'])->group(function () {
     Route::post('/chat/sessions', [ChatController::class, 'storeSession']);
     Route::get('/chat/sessions/current', [ChatController::class, 'currentSession']);
     Route::get('/chat/sessions/{id}/messages', [ChatController::class, 'messages']);
+    Route::delete('/chat/sessions/{id}/messages', [ChatController::class, 'clearMessages']);
     Route::post('/chat/sessions/{id}/messages', [ChatController::class, 'postMessage'])
         ->middleware('throttle:30,1');
 

@@ -30,8 +30,9 @@ class ResearchOrchestrator
         ?User $user,
         string $query,
         ?int $chatSessionId = null,
+        ?DiscoveryRun $existingRun = null,
     ): array {
-        $run = DiscoveryRun::query()->create([
+        $run = $existingRun ?? DiscoveryRun::query()->create([
             'organization_id' => $organization->id,
             'user_id' => $user?->id,
             'icp_profile_id' => $icp->id,
@@ -42,6 +43,16 @@ class ResearchOrchestrator
             'stages' => ['analyzing_brief'],
             'started_at' => now(),
         ]);
+
+        if ($existingRun) {
+            $run->update([
+                'status' => 'running',
+                'query' => $query,
+                'intent' => 'quick_research',
+                'stages' => ['analyzing_brief'],
+                'started_at' => now(),
+            ]);
+        }
 
         try {
             $subQueries = $this->decomposeQueries($organization, $icp, $query);

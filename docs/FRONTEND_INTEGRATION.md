@@ -185,24 +185,34 @@ Shapes match UI `IcpProfile` / `IcpConfig` (camelCase in `config`).
 
 Intents: `freeform` | `quick_research` | `generate_leads` | `create_outreach`
 
-| Intent            | Behavior                                                                         |
-| ----------------- | -------------------------------------------------------------------------------- |
-| `freeform`        | GLM chat with session history                                                    |
-| `quick_research`  | Multi-query research synthesis; `meta.research` with sources; no leads persisted |
-| `generate_leads`  | Lead discovery (limit 12, minMatchScore filter); inline leads with `crm_synced`  |
-| `create_outreach` | Outreach draft; `meta.outreach`; uses session leads when available               |
+| Intent            | Behavior                                                                             |
+| ----------------- | ------------------------------------------------------------------------------------ |
+| `freeform`        | GLM chat with session history (synchronous)                                          |
+| `quick_research`  | Multi-query research synthesis; **async** — poll discovery run, then reload messages |
+| `generate_leads`  | Lead discovery (limit 12); **async** — poll discovery run, then reload messages      |
+| `create_outreach` | Outreach draft; synchronous; `meta.outreach`                                         |
+
+Chat sessions are scoped per **ICP profile** (`icp_profile_id` on `chat_sessions`). Use `icp_profile_id` when resolving the current session so each ICP build keeps its own transcript.
 
 ```http
 POST /api/v1/chat/sessions
-{ "title": "optional" }
+{ "title": "optional", "icp_profile_id": 1 }
 ```
 
 ```http
-GET /api/v1/chat/sessions/current
+GET /api/v1/chat/sessions/current?icp_profile_id=1
 GET /api/v1/chat/sessions/{id}/messages
+DELETE /api/v1/chat/sessions/{id}/messages
 POST /api/v1/chat/sessions/{id}/messages
 { "body": "Find distributors in Lagos", "intent": "generate_leads", "timezone": "Africa/Lagos" }
 ```
+
+**Async intents** (`quick_research`, `generate_leads`):
+
+- Initial response: **202** with `{ user_message, discovery_run_id, status: "processing" }` (no assistant yet)
+- Poll `GET /api/v1/discovery/runs/{discovery_run_id}` until `status` is `completed` or `failed`
+- Then `GET /api/v1/chat/sessions/{id}/messages` for the assistant reply
+- With `QUEUE_CONNECTION=sync` (local/tests), the assistant may be included immediately with **200**
 
 **Assistant message** may include:
 
@@ -432,6 +442,7 @@ Do not call Factory23 CRM for discovery data — discovery lives on this API.
 
 | Date       | Change                                                                         |
 | ---------- | ------------------------------------------------------------------------------ |
+| 2026-09-02 | Chat async discovery (202 + poll), ICP-scoped sessions, clear chat history     |
 | 2026-09-02 | Social Listening API, SendGrid outreach sender settings, social signal actions |
 | 2026-08-31 | Agent assertion path; 401 troubleshooting; link to F23 frontend guide          |
 | 2026-08-30 | Initial API contract                                                           |

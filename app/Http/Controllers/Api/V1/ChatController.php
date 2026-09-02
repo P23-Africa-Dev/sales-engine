@@ -19,13 +19,25 @@ class ChatController extends Controller
     {
         $data = $request->validate([
             'title' => ['nullable', 'string', 'max:255'],
+            'icp_profile_id' => ['nullable', 'integer'],
         ]);
 
-        $session = $this->chat->createSession(
-            OrgContext::require(),
-            $request->user(),
-            $data['title'] ?? null,
-        );
+        $org = OrgContext::require();
+        $icpProfileId = isset($data['icp_profile_id']) ? (int) $data['icp_profile_id'] : null;
+
+        if ($icpProfileId) {
+            $icp = \App\Models\IcpProfile::query()
+                ->where('organization_id', $org->id)
+                ->where('id', $icpProfileId)
+                ->firstOrFail();
+            $session = $this->chat->resolveOrCreateSessionForIcp($org, $request->user(), $icp);
+        } else {
+            $session = $this->chat->createSession(
+                $org,
+                $request->user(),
+                $data['title'] ?? null,
+            );
+        }
 
         return response()->json([
             'data' => [
@@ -34,14 +46,19 @@ class ChatController extends Controller
                 'icp_profile_id' => $session->icp_profile_id,
                 'created_at' => $session->created_at?->toIso8601String(),
             ],
-        ], 201);
+        ], $session->wasRecentlyCreated ? 201 : 200);
     }
 
     public function currentSession(Request $request): JsonResponse
     {
+        $data = $request->validate([
+            'icp_profile_id' => ['nullable', 'integer'],
+        ]);
+
         $session = $this->chat->latestSessionForUser(
             OrgContext::require(),
             $request->user(),
+            isset($data['icp_profile_id']) ? (int) $data['icp_profile_id'] : null,
         );
 
         if (! $session) {
@@ -57,6 +74,14 @@ class ChatController extends Controller
                 'updated_at' => $session->updated_at?->toIso8601String(),
             ],
         ]);
+    }
+
+    public function clearMessages(int $id): JsonResponse
+    {
+        $session = $this->ownedSession($id);
+        $this->chat->clearSessionMessages($session);
+
+        return response()->json(['data' => ['cleared' => true]]);
     }
 
     public function messages(int $id): JsonResponse
@@ -91,13 +116,19 @@ class ChatController extends Controller
             return response()->json(['message' => $e->getMessage()], 422);
         }
 
-        return response()->json([
-            'data' => [
-                'user_message' => new ChatMessageResource($result['user_message']),
-                'assistant_message' => new ChatMessageResource($result['assistant_message']),
-                'discovery_run_id' => $result['discovery_run_id'],
-            ],
-        ]);
+        $payload = [
+            'user_message' => new ChatMessageResource($result['user_message']),
+            'discovery_run_id' => $result['discovery_run_id'] ?? null,
+            'status' => $result['status'] ?? 'completed',
+        ];
+
+        if (! empty($result['assistant_message'])) {
+            $payload['assistant_message'] = new ChatMessageResource($result['assistant_message']);
+        }
+
+        $statusCode = ($result['status'] ?? 'completed') === 'processing' ? 202 : 200;
+
+        return response()->json(['data' => $payload], $statusCode);
     }
 
     private function ownedSession(int $id): ChatSession

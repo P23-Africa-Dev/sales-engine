@@ -2,10 +2,13 @@
 
 namespace Tests\Feature;
 
+use App\Models\ChatMessage;
 use App\Models\ChatSession;
 use App\Models\IcpProfile;
 use App\Models\Lead;
+use App\Jobs\ProcessChatIntentJob;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
 class ChatIntentTest extends TestCase
@@ -153,5 +156,118 @@ class ChatIntentTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.synced', true)
             ->assertJsonPath('data.f23_lead_id', '777');
+    }
+
+    public function test_current_session_is_scoped_to_icp(): void
+    {
+        [$user, $org] = $this->actingAsOrgMember();
+
+        $icpA = IcpProfile::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'ICP A',
+            'is_active' => true,
+            'config' => IcpProfile::defaultConfig(),
+        ]);
+
+        $icpB = IcpProfile::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'ICP B',
+            'is_active' => false,
+            'config' => IcpProfile::defaultConfig(),
+        ]);
+
+        $sessionA = ChatSession::query()->create([
+            'organization_id' => $org->id,
+            'user_id' => $user->id,
+            'icp_profile_id' => $icpA->id,
+        ]);
+
+        ChatMessage::query()->create([
+            'chat_session_id' => $sessionA->id,
+            'role' => 'user',
+            'body' => 'Hello A',
+        ]);
+
+        $sessionB = ChatSession::query()->create([
+            'organization_id' => $org->id,
+            'user_id' => $user->id,
+            'icp_profile_id' => $icpB->id,
+        ]);
+
+        ChatMessage::query()->create([
+            'chat_session_id' => $sessionB->id,
+            'role' => 'user',
+            'body' => 'Hello B',
+        ]);
+
+        $this->withHeaders($this->orgHeaders($org))
+            ->getJson("/api/v1/chat/sessions/current?icp_profile_id={$icpA->id}")
+            ->assertOk()
+            ->assertJsonPath('data.id', $sessionA->id);
+
+        $this->withHeaders($this->orgHeaders($org))
+            ->getJson("/api/v1/chat/sessions/current?icp_profile_id={$icpB->id}")
+            ->assertOk()
+            ->assertJsonPath('data.id', $sessionB->id);
+    }
+
+    public function test_clear_session_messages(): void
+    {
+        [$user, $org] = $this->actingAsOrgMember();
+
+        $session = ChatSession::query()->create([
+            'organization_id' => $org->id,
+            'user_id' => $user->id,
+        ]);
+
+        ChatMessage::query()->create([
+            'chat_session_id' => $session->id,
+            'role' => 'user',
+            'body' => 'To be cleared',
+        ]);
+
+        $this->withHeaders($this->orgHeaders($org))
+            ->deleteJson("/api/v1/chat/sessions/{$session->id}/messages")
+            ->assertOk()
+            ->assertJsonPath('data.cleared', true);
+
+        $this->assertDatabaseMissing('chat_messages', ['chat_session_id' => $session->id]);
+    }
+
+    public function test_async_chat_intent_dispatches_job_when_queue_is_not_sync(): void
+    {
+        config(['queue.default' => 'redis']);
+
+        Queue::fake();
+
+        config([
+            'services.serper.api_key' => 'test-serper',
+            'services.glm.api_key' => '',
+        ]);
+
+        [$user, $org] = $this->actingAsOrgMember();
+
+        $icp = IcpProfile::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'FMCG',
+            'is_active' => true,
+            'config' => IcpProfile::defaultConfig(),
+        ]);
+
+        $session = ChatSession::query()->create([
+            'organization_id' => $org->id,
+            'user_id' => $user->id,
+            'icp_profile_id' => $icp->id,
+        ]);
+
+        $this->withHeaders($this->orgHeaders($org))
+            ->postJson("/api/v1/chat/sessions/{$session->id}/messages", [
+                'body' => 'Top FMCG distributors in Lagos',
+                'intent' => 'generate_leads',
+            ])
+            ->assertStatus(202)
+            ->assertJsonPath('data.status', 'processing');
+
+        Queue::assertPushed(ProcessChatIntentJob::class);
     }
 }

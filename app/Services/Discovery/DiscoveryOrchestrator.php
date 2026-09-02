@@ -40,8 +40,9 @@ class DiscoveryOrchestrator
         string $intent = 'generate_leads',
         ?int $chatSessionId = null,
         int $limit = 8,
+        ?DiscoveryRun $existingRun = null,
     ): array {
-        $run = DiscoveryRun::query()->create([
+        $run = $existingRun ?? DiscoveryRun::query()->create([
             'organization_id' => $organization->id,
             'user_id' => $user?->id,
             'icp_profile_id' => $icp->id,
@@ -52,6 +53,16 @@ class DiscoveryOrchestrator
             'stages' => ['analyzing_brief'],
             'started_at' => now(),
         ]);
+
+        if ($existingRun) {
+            $run->update([
+                'status' => 'running',
+                'query' => $query,
+                'intent' => $intent,
+                'stages' => ['analyzing_brief'],
+                'started_at' => now(),
+            ]);
+        }
 
         try {
             $brief = IcpBrief::fromIcpProfile($icp, $query);
