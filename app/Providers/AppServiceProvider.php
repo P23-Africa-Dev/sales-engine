@@ -58,6 +58,19 @@ class AppServiceProvider extends ServiceProvider
                 glm: $app->make(\App\Services\Llm\GlmClient::class),
             );
         });
+
+        $this->app->singleton(\App\Services\Intent\SocialListeningOrchestrator::class, function ($app) {
+            return new \App\Services\Intent\SocialListeningOrchestrator(
+                sources: [
+                    $app->make(\App\Services\Intent\Adapters\SerperLinkedInAdapter::class),
+                    $app->make(\App\Services\Intent\Adapters\SerperXAdapter::class),
+                    $app->make(\App\Services\Intent\Adapters\SerperRedditAdapter::class),
+                    $app->make(\App\Services\Intent\Adapters\SerperMetaAdapter::class),
+                ],
+                enricher: $app->make(\App\Services\Intent\SocialSignalEnricher::class),
+                glm: $app->make(\App\Services\Llm\GlmClient::class),
+            );
+        });
     }
 
     public function boot(): void

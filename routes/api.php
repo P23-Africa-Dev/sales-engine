@@ -12,6 +12,8 @@ use App\Http\Controllers\Api\V1\LeadSyncController;
 use App\Http\Controllers\Api\V1\MetricsController;
 use App\Http\Controllers\Api\V1\OrganizationController;
 use App\Http\Controllers\Api\V1\OutreachController;
+use App\Http\Controllers\Api\V1\OutreachSenderController;
+use App\Http\Controllers\Api\V1\SocialListeningController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -67,6 +69,21 @@ Route::middleware(['auth:sanctum', 'org.resolve'])->group(function () {
     Route::get('/dashboard', [MetricsController::class, 'index']);
     Route::get('/outreach/recent', [OutreachController::class, 'recent']);
     Route::post('/outreach/draft', [OutreachController::class, 'draft']);
+    Route::get('/outreach/sender-settings', [OutreachSenderController::class, 'show']);
+    Route::put('/outreach/sender-settings', [OutreachSenderController::class, 'update']);
+
+    Route::get('/social-listening/signals', [SocialListeningController::class, 'indexSignals']);
+    Route::get('/social-listening/signals/{id}', [SocialListeningController::class, 'showSignal']);
+    Route::get('/social-listening/metrics', [SocialListeningController::class, 'metrics']);
+    Route::get('/social-listening/settings', [SocialListeningController::class, 'showSettings']);
+    Route::put('/social-listening/settings', [SocialListeningController::class, 'updateSettings']);
+    Route::post('/social-listening/runs', [SocialListeningController::class, 'storeRun'])
+        ->middleware('throttle:10,60');
+    Route::get('/social-listening/runs/{id}', [SocialListeningController::class, 'showRun']);
+    Route::post('/social-listening/signals/{id}/outreach', [SocialListeningController::class, 'createOutreach']);
+    Route::post('/social-listening/signals/{id}/reminder', [SocialListeningController::class, 'setReminder']);
+    Route::post('/social-listening/signals/{id}/sync-to-crm', [SocialListeningController::class, 'syncToCrm']);
+    Route::post('/social-listening/signals/{id}/dismiss', [SocialListeningController::class, 'dismiss']);
 
     Route::get('/crm/pipeline', [CrmController::class, 'pipeline']);
     Route::patch('/crm/leads/{id}', [CrmController::class, 'updateLead']);

@@ -94,4 +94,14 @@ return [
         'app_secret' => env('META_APP_SECRET'),
     ],
 
+    'sendgrid' => [
+        'api_key' => env('SENDGRID_API_KEY'),
+        'platform_from_email' => env('SENDGRID_PLATFORM_FROM_EMAIL', 'outreach@thefactory23.com'),
+        'webhook_secret' => env('SENDGRID_WEBHOOK_SECRET'),
+    ],
+
+    'social_listening' => [
+        'daily_api_cap' => (int) env('SOCIAL_LISTENING_DAILY_API_CAP', 200),
+    ],
+
 ];

@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: queue-worker
+  namespace: sales-engine
+  labels:
+    app.kubernetes.io/name: queue-worker
+    app.kubernetes.io/component: worker
+    app.kubernetes.io/part-of: sales-engine
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: queue-worker
+  template:
+    metadata:
+      labels:
+        app: queue-worker
+        app.kubernetes.io/name: queue-worker
+        app.kubernetes.io/component: worker
+    spec:
+      terminationGracePeriodSeconds: 60
+      imagePullSecrets:
+        - name: do-registry
+      containers:
+        - name: worker
+          image: registry.digitalocean.com/con-reg/sales-engine-api:latest
+          imagePullPolicy: IfNotPresent
+          command: ["php", "artisan", "queue:work", "redis", "--sleep=3", "--tries=3", "--timeout=600"]
+          envFrom:
+            - configMapRef:
+                name: sales-engine-config
+            - secretRef:
+                name: sales-engine-secret
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          securityContext:
+            allowPrivilegeEscalation: false

@@ -11,6 +11,7 @@ class OutreachActivity extends Model
         'organization_id',
         'lead_id',
         'company_id',
+        'social_signal_id',
         'name',
         'channel',
         'preview',
@@ -18,12 +19,16 @@ class OutreachActivity extends Model
         'accent_icon',
         'occurred_at',
         'meta',
+        'sendgrid_message_id',
+        'sent_at',
+        'sender_type',
     ];
 
     protected function casts(): array
     {
         return [
             'occurred_at' => 'datetime',
+            'sent_at' => 'datetime',
             'meta' => 'array',
         ];
     }

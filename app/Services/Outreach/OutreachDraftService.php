@@ -8,6 +8,7 @@ use App\Models\IcpProfile;
 use App\Models\Lead;
 use App\Models\Organization;
 use App\Models\OutreachActivity;
+use App\Models\SocialSignal;
 use App\Support\TimeGreeting;
 use App\Services\Llm\GlmClient;
 use Illuminate\Support\Collection;
@@ -67,6 +68,44 @@ class OutreachDraftService
                 'crm_synced' => filled($l->synced_to_f23_at),
                 'f23_lead_id' => $l->f23_lead_id,
             ])->all(),
+        ];
+    }
+
+    /**
+     * @return array{channel: string, subject: ?string, body: string, sent: bool, social_signal_id: int}
+     */
+    public function draftFromSocialSignal(
+        Organization $organization,
+        IcpProfile $icp,
+        SocialSignal $signal,
+        ?string $clientTimezone = null,
+    ): array {
+        $prompt = "Respond to this social post with a compliant email outreach draft.\n\nPost: {$signal->post_text}\nPersona: {$signal->persona}\nProblem: {$signal->problem}";
+
+        $body = $signal->suggested_message ?: $this->compose($organization, $icp, $prompt, 'email', [], $clientTimezone);
+
+        $activity = OutreachActivity::query()->create([
+            'organization_id' => $organization->id,
+            'social_signal_id' => $signal->id,
+            'lead_id' => $signal->lead_id,
+            'name' => $signal->profile_name ?? $signal->company_name ?? 'Social prospect',
+            'channel' => 'email draft',
+            'preview' => mb_substr($body, 0, 160),
+            'accent_bg' => '#EEF2FF',
+            'accent_icon' => '#4F46E5',
+            'occurred_at' => now(),
+            'meta' => ['sent' => false, 'social_signal_id' => $signal->id],
+        ]);
+
+        $signal->update(['status' => 'outreached']);
+
+        return [
+            'channel' => 'email',
+            'subject' => 'Following up on your post',
+            'body' => $body,
+            'sent' => false,
+            'social_signal_id' => $signal->id,
+            'activity_id' => $activity->id,
         ];
     }
 

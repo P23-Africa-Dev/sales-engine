@@ -307,6 +307,75 @@ POST /api/v1/outreach/draft
 
 WhatsApp: drafts only. `send: true` is rejected unless contact has `whatsapp_opt_in` + `whatsapp_opt_in_at`, and outbound send is not enabled in v1.
 
+Email send (SendGrid): pass `send: true` and `to_email` on `POST /outreach/draft` when `SENDGRID_API_KEY` is configured. Replies route to the rep via `Reply-To`.
+
+```http
+GET /api/v1/outreach/sender-settings
+PUT /api/v1/outreach/sender-settings
+```
+
+```json
+{
+    "sender_mode": "platform",
+    "reply_to_email": "rep@company.com"
+}
+```
+
+---
+
+## 8. Social Listening
+
+Requires an **active ICP** (422 otherwise).
+
+```http
+GET /api/v1/social-listening/signals?page=1&per_page=20&search=&source=&signal_type=&buying_stage=
+GET /api/v1/social-listening/signals/{id}
+GET /api/v1/social-listening/metrics
+GET /api/v1/social-listening/settings
+PUT /api/v1/social-listening/settings
+POST /api/v1/social-listening/runs
+GET /api/v1/social-listening/runs/{id}
+POST /api/v1/social-listening/signals/{id}/outreach
+POST /api/v1/social-listening/signals/{id}/reminder
+POST /api/v1/social-listening/signals/{id}/sync-to-crm
+POST /api/v1/social-listening/signals/{id}/dismiss
+```
+
+Signals list response:
+
+```json
+{
+    "data": [
+        {
+            "id": 1,
+            "signal": "post text",
+            "source": "LinkedIn Post",
+            "sourceIcon": "in",
+            "score": 73,
+            "suggestedMessage": "..."
+        }
+    ],
+    "meta": { "current_page": 1, "last_page": 1, "per_page": 20, "total": 1 }
+}
+```
+
+Metrics:
+
+```json
+{
+    "data": {
+        "signals_detected": 0,
+        "high_opportunities": 0,
+        "added_to_crm": 0,
+        "percent_change": 0
+    }
+}
+```
+
+Manual runs are async (Redis queue). Rate limit: 10 requests/hour per user on `POST /social-listening/runs`.
+
+Social outreach: `POST .../outreach` always creates a draft; include `send: true` + `to_email` only when a recipient is known.
+
 ---
 
 ## 9. SE CRM
@@ -361,7 +430,8 @@ Do not call Factory23 CRM for discovery data — discovery lives on this API.
 
 ## 13. Changelog
 
-| Date       | Change                                                                |
-| ---------- | --------------------------------------------------------------------- |
-| 2026-08-31 | Agent assertion path; 401 troubleshooting; link to F23 frontend guide |
-| 2026-08-30 | Initial API contract                                                  |
+| Date       | Change                                                                         |
+| ---------- | ------------------------------------------------------------------------------ |
+| 2026-09-02 | Social Listening API, SendGrid outreach sender settings, social signal actions |
+| 2026-08-31 | Agent assertion path; 401 troubleshooting; link to F23 frontend guide          |
+| 2026-08-30 | Initial API contract                                                           |

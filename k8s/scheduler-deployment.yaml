@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: scheduler
+  namespace: sales-engine
+  labels:
+    app.kubernetes.io/name: scheduler
+    app.kubernetes.io/component: scheduler
+    app.kubernetes.io/part-of: sales-engine
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: scheduler
+  template:
+    metadata:
+      labels:
+        app: scheduler
+        app.kubernetes.io/name: scheduler
+        app.kubernetes.io/component: scheduler
+    spec:
+      terminationGracePeriodSeconds: 30
+      imagePullSecrets:
+        - name: do-registry
+      containers:
+        - name: scheduler
+          image: registry.digitalocean.com/con-reg/sales-engine-api:latest
+          imagePullPolicy: IfNotPresent
+          command: ["php", "artisan", "schedule:work"]
+          envFrom:
+            - configMapRef:
+                name: sales-engine-config
+            - secretRef:
+                name: sales-engine-secret
+          resources:
+            requests:
+              cpu: "25m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "256Mi"
+          securityContext:
+            allowPrivilegeEscalation: false

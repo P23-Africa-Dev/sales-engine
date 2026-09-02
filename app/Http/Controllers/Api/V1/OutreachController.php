@@ -8,6 +8,7 @@ use App\Models\IcpProfile;
 use App\Models\OutreachActivity;
 use App\Services\Icp\IcpProfileService;
 use App\Services\Outreach\OutreachDraftService;
+use App\Services\Outreach\OutreachSendService;
 use App\Support\OrgContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -17,6 +18,7 @@ class OutreachController extends Controller
 {
     public function __construct(
         private readonly OutreachDraftService $outreach,
+        private readonly OutreachSendService $sendService,
         private readonly IcpProfileService $icps,
     ) {}
 
@@ -48,6 +50,7 @@ class OutreachController extends Controller
             'channel' => ['nullable', 'string', 'in:email,whatsapp'],
             'contact_id' => ['nullable', 'integer'],
             'send' => ['nullable', 'boolean'],
+            'to_email' => ['nullable', 'email'],
         ]);
 
         $org = OrgContext::require();
@@ -68,17 +71,36 @@ class OutreachController extends Controller
             }
         }
 
-        // Sending is not implemented in v1 — drafts only.
-        if (! empty($data['send'])) {
-            return response()->json(['message' => 'Outbound send is not enabled. Drafts only until channel providers are configured.'], 422);
-        }
-
         $prompt = $data['prompt'];
         if (($data['channel'] ?? null) === 'whatsapp' && ! str_contains(mb_strtolower($prompt), 'whatsapp')) {
             $prompt = 'whatsapp: '.$prompt;
         }
 
         $draft = $this->outreach->draftFromPrompt($org, $icp, $prompt);
+
+        if (! empty($data['send']) && ($data['channel'] ?? 'email') === 'email') {
+            $user = $request->user();
+            if (! $user) {
+                return response()->json(['message' => 'Authenticated user required to send email.'], 401);
+            }
+            $toEmail = $data['to_email'] ?? null;
+            if (! $toEmail) {
+                return response()->json(['message' => 'to_email is required when send=true.'], 422);
+            }
+            try {
+                $this->sendService->sendEmail(
+                    $org,
+                    $user,
+                    $toEmail,
+                    (string) ($draft['subject'] ?? 'Outreach'),
+                    $draft['body'],
+                );
+            } catch (\Throwable $e) {
+                return response()->json(['message' => $e->getMessage()], 422);
+            }
+
+            return response()->json(['data' => array_merge($draft, ['sent' => true])]);
+        }
 
         return response()->json(['data' => $draft]);
     }

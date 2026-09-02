@@ -10,6 +10,8 @@ resources:
   - nginx-configmap.yaml
   - backend-service.yaml
   - backend-deployment.yaml
+  - queue-worker-deployment.yaml
+  - scheduler-deployment.yaml
   - migrate-job.yaml
   - certificate.yaml
   - ingress.yaml

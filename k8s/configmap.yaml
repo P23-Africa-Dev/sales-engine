@@ -64,3 +64,7 @@ data:
   SERPER_BASE_URL: "https://google.serper.dev"
   MONO_BASE_URL: "https://api.withmono.com"
   FYLINGS_BASE_URL: "https://api.fylings.com"
+
+  # ── SendGrid (email outreach) ──────────────────────────────────────────────────
+  SENDGRID_PLATFORM_FROM_EMAIL: "outreach@thefactory23.com"
+  SENDGRID_PLATFORM_FROM_NAME: "Sales Engine"
