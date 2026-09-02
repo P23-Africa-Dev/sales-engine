@@ -98,7 +98,9 @@ The deploy workflow creates/refreshes `do-registry` in the namespace automatical
 6. [ ] Wait for Actions green
 7. [ ] `kubectl get certificate -n sales-engine` → Ready=True
 8. [ ] `curl https://api.salesengine.thefactory23.com/api/v1/health`
-9. [ ] Confirm Factory23 `https://api.thefactory23.com` still healthy
+9. [ ] `kubectl get pods -n sales-engine` — `queue-worker` and `scheduler` Running
+10. [ ] Add `SENDGRID_API_KEY` to `sales-engine-secret` for email outreach send
+11. [ ] Confirm Factory23 `https://api.thefactory23.com` still healthy
 
 ## Useful kubectl commands
 
@@ -125,6 +127,8 @@ kubectl apply -f k8s/certificate.yaml -n sales-engine
 | `k8s/redis-*.yaml`            | In-cluster Redis     |
 | `k8s/nginx-configmap.yaml`    | Nginx + PHP ini      |
 | `k8s/backend-deployment.yaml` | PHP-FPM + nginx      |
+| `k8s/queue-worker-deployment.yaml` | Redis queue worker (required for async jobs) |
+| `k8s/scheduler-deployment.yaml` | Laravel scheduler (daily social listening) |
 | `k8s/backend-service.yaml`    | ClusterIP            |
 | `k8s/migrate-job.yaml`        | Migrations           |
 | `k8s/ingress.yaml`            | Public host          |
@@ -133,7 +137,4 @@ kubectl apply -f k8s/certificate.yaml -n sales-engine
 
 ## Out of scope (later plans)
 
-- Product APIs (ICP, discovery, scoring, outreach)
-- Queue / scheduler workers
-- Factory23 auth exchange / CRM sync
-- Frontend deploy
+- Factory23 frontend deploy (Sales Engine UI lives in Factory23 fullstack)

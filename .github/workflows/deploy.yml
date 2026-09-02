@@ -206,7 +206,9 @@ jobs:
           echo "Deploying image: $NEW_IMAGE"
           sed -i "s|${{ env.IMAGE_NAME }}:[^ ]*|$NEW_IMAGE|g" \
             k8s/backend-deployment.yaml \
-            k8s/migrate-job.yaml
+            k8s/migrate-job.yaml \
+            k8s/queue-worker-deployment.yaml \
+            k8s/scheduler-deployment.yaml
 
       - name: Apply ConfigMap, Redis, Nginx, Certificate, Ingress
         run: |
@@ -268,6 +270,18 @@ jobs:
             done
             exit 1
           fi
+
+      - name: Deploy queue worker and scheduler
+        run: |
+          kubectl apply -f k8s/queue-worker-deployment.yaml -n ${{ env.K8S_NAMESPACE }}
+          kubectl apply -f k8s/scheduler-deployment.yaml -n ${{ env.K8S_NAMESPACE }}
+
+      - name: Wait for worker and scheduler rollout
+        run: |
+          kubectl rollout status deployment/queue-worker \
+            -n ${{ env.K8S_NAMESPACE }} --timeout=300s
+          kubectl rollout status deployment/scheduler \
+            -n ${{ env.K8S_NAMESPACE }} --timeout=300s
 
       - name: Smoke test — health endpoint
         run: |

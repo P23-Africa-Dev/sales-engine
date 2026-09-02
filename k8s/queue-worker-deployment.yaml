@@ -19,14 +19,29 @@ spec:
         app.kubernetes.io/name: queue-worker
         app.kubernetes.io/component: worker
     spec:
-      terminationGracePeriodSeconds: 60
+      terminationGracePeriodSeconds: 660
       imagePullSecrets:
         - name: do-registry
       containers:
         - name: worker
           image: registry.digitalocean.com/con-reg/sales-engine-api:latest
           imagePullPolicy: IfNotPresent
-          command: ["php", "artisan", "queue:work", "redis", "--sleep=3", "--tries=3", "--timeout=600"]
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              mkdir -p /var/www/html/storage/framework/cache/data \
+                       /var/www/html/storage/framework/sessions \
+                       /var/www/html/storage/framework/views \
+                       /var/www/html/storage/logs
+              php artisan config:clear
+              php artisan config:cache
+              exec php artisan queue:work redis \
+                --sleep=3 \
+                --tries=3 \
+                --timeout=600 \
+                --max-time=3600
           envFrom:
             - configMapRef:
                 name: sales-engine-config
@@ -39,5 +54,12 @@ spec:
             limits:
               cpu: "500m"
               memory: "512Mi"
+          livenessProbe:
+            exec:
+              command: ["/bin/sh", "-c", "php -r 'exit(0);'"]
+            initialDelaySeconds: 30
+            periodSeconds: 60
+            timeoutSeconds: 15
+            failureThreshold: 3
           securityContext:
             allowPrivilegeEscalation: false

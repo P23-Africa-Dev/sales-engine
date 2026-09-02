@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\IcpProfile;
+use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
 class IcpProfileTest extends TestCase
@@ -31,6 +32,8 @@ class IcpProfileTest extends TestCase
 
     public function test_activate_enforces_single_active_icp(): void
     {
+        Queue::fake();
+
         [, $org] = $this->actingAsOrgMember();
 
         $a = IcpProfile::query()->create([
@@ -54,6 +57,8 @@ class IcpProfileTest extends TestCase
         $this->assertFalse($a->fresh()->is_active);
         $this->assertTrue($b->fresh()->is_active);
         $this->assertSame(1, IcpProfile::query()->where('organization_id', $org->id)->where('is_active', true)->count());
+
+        Queue::assertPushed(\App\Jobs\RunSocialListeningJob::class);
     }
 
     public function test_org_isolation_blocks_cross_org_icp_access(): void

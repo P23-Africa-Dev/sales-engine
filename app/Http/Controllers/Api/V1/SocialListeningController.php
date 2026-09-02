@@ -13,6 +13,7 @@ use App\Models\SocialListeningSetting;
 use App\Models\SocialSignal;
 use App\Services\Icp\IcpProfileService;
 use App\Services\Intent\SignalToLeadService;
+use App\Services\Intent\SocialListeningRunService;
 use App\Services\Intent\SocialListeningSettingsService;
 use App\Services\Outreach\OutreachDraftService;
 use App\Services\Outreach\OutreachSendService;
@@ -26,6 +27,7 @@ class SocialListeningController extends Controller
     public function __construct(
         private readonly IcpProfileService $icps,
         private readonly SocialListeningSettingsService $settings,
+        private readonly SocialListeningRunService $runs,
         private readonly OutreachDraftService $outreachDraft,
         private readonly OutreachSendService $outreachSend,
         private readonly SignalToLeadService $signalToLead,
@@ -129,12 +131,16 @@ class SocialListeningController extends Controller
             ? (int) round((($detectedThisWeek - $detectedPriorWeek) / $detectedPriorWeek) * 100)
             : ($detectedThisWeek > 0 ? 100 : 0);
 
+        $latestRun = $this->runs->latestRun($org, $icp);
+
         return response()->json([
             'data' => [
                 'signals_detected' => $detected,
                 'high_opportunities' => $high,
                 'added_to_crm' => $synced,
                 'percent_change' => $percent,
+                'last_run_at' => $settings->last_run_at?->toIso8601String(),
+                'latest_run' => $this->runs->formatLatestRun($latestRun),
             ],
         ]);
     }
@@ -208,6 +214,30 @@ class SocialListeningController extends Controller
         RunSocialListeningJob::dispatch($run->id);
 
         return response()->json(['data' => ['id' => $run->id, 'status' => $run->status]], 201);
+    }
+
+    public function bootstrapRun(Request $request): JsonResponse
+    {
+        $org = OrgContext::require();
+        $icp = $this->icps->active($org);
+        if (! $icp) {
+            return response()->json(['message' => 'Activate an ICP profile before running social listening.'], 422);
+        }
+
+        $result = $this->runs->bootstrap(
+            $org,
+            $icp,
+            $request->user(),
+            $request->boolean('force'),
+        );
+
+        $latestRun = $this->runs->latestRun($org, $icp);
+
+        return response()->json([
+            'data' => array_merge($result, [
+                'latest_run' => $this->runs->formatLatestRun($latestRun),
+            ]),
+        ], $result['bootstrapped'] ? 201 : 200);
     }
 
     public function showRun(int $id): JsonResponse

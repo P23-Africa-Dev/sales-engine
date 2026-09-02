@@ -4,8 +4,8 @@ namespace Tests\Feature;
 
 use App\Models\IcpProfile;
 use App\Models\SocialListeningRun;
+use App\Models\SocialListeningSetting;
 use App\Models\SocialSignal;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
@@ -24,7 +24,7 @@ class SocialListeningTest extends TestCase
     {
         config(['services.serper.api_key' => 'test-serper']);
 
-        \Illuminate\Support\Facades\Queue::fake();
+        Queue::fake();
 
         [, $org] = $this->actingAsOrgMember();
 
@@ -39,7 +39,126 @@ class SocialListeningTest extends TestCase
             ->postJson('/api/v1/social-listening/runs', ['force' => true])
             ->assertCreated();
 
-        \Illuminate\Support\Facades\Queue::assertPushed(\App\Jobs\RunSocialListeningJob::class);
+        Queue::assertPushed(\App\Jobs\RunSocialListeningJob::class);
+    }
+
+    public function test_social_listening_bootstrap_is_idempotent(): void
+    {
+        Queue::fake();
+
+        [, $org] = $this->actingAsOrgMember();
+        $icp = IcpProfile::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'ICP',
+            'is_active' => true,
+            'config' => IcpProfile::defaultConfig(),
+        ]);
+
+        SocialListeningSetting::query()->create(
+            SocialListeningSetting::defaultsForOrg($org->id, $icp->id)
+        );
+
+        $headers = $this->orgHeaders($org);
+
+        $this->withHeaders($headers)
+            ->postJson('/api/v1/social-listening/runs/bootstrap')
+            ->assertCreated()
+            ->assertJsonPath('data.bootstrapped', true);
+
+        Queue::assertPushed(\App\Jobs\RunSocialListeningJob::class, 1);
+
+        SocialListeningRun::query()->create([
+            'organization_id' => $org->id,
+            'icp_profile_id' => $icp->id,
+            'status' => 'completed',
+            'signals_created' => 0,
+            'finished_at' => now(),
+        ]);
+
+        SocialListeningSetting::query()
+            ->where('organization_id', $org->id)
+            ->where('icp_profile_id', $icp->id)
+            ->update(['last_run_at' => now()]);
+
+        $this->withHeaders($headers)
+            ->postJson('/api/v1/social-listening/runs/bootstrap')
+            ->assertOk()
+            ->assertJsonPath('data.bootstrapped', false);
+
+        Queue::assertPushed(\App\Jobs\RunSocialListeningJob::class, 1);
+    }
+
+    public function test_social_listening_metrics_includes_run_status(): void
+    {
+        [, $org] = $this->actingAsOrgMember();
+        $icp = IcpProfile::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'ICP',
+            'is_active' => true,
+            'config' => IcpProfile::defaultConfig(),
+        ]);
+
+        SocialListeningSetting::query()->create(
+            array_merge(SocialListeningSetting::defaultsForOrg($org->id, $icp->id), [
+                'last_run_at' => now()->subDay(),
+            ])
+        );
+
+        SocialListeningRun::query()->create([
+            'organization_id' => $org->id,
+            'icp_profile_id' => $icp->id,
+            'status' => 'completed',
+            'signals_created' => 2,
+            'result_summary' => 'Created 2 social signals from 5 raw hits.',
+            'finished_at' => now(),
+        ]);
+
+        $this->withHeaders($this->orgHeaders($org))
+            ->getJson('/api/v1/social-listening/metrics')
+            ->assertOk()
+            ->assertJsonPath('data.latest_run.status', 'completed')
+            ->assertJsonPath('data.latest_run.signals_created', 2)
+            ->assertJsonStructure([
+                'data' => ['last_run_at', 'latest_run' => ['id', 'status', 'stages']],
+            ]);
+    }
+
+    public function test_default_min_score_allows_heuristic_signals(): void
+    {
+        $defaults = SocialListeningSetting::defaultsForOrg(1, 1);
+
+        $this->assertSame(55, $defaults['min_score']);
+    }
+
+    public function test_heuristic_enriched_score_passes_default_min_score(): void
+    {
+        [, $org] = $this->actingAsOrgMember();
+        $icp = IcpProfile::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'ICP',
+            'is_active' => true,
+            'config' => array_merge(IcpProfile::defaultConfig(), [
+                'industries' => ['FMCG & Retail'],
+                'territories' => ['Lagos, NG'],
+            ]),
+        ]);
+
+        config(['services.glm.api_key' => '']);
+
+        $hit = new \App\Services\Intent\DTO\RawSocialHit(
+            platform: 'linkedin',
+            sourceLabel: 'LinkedIn Post',
+            sourceIcon: 'in',
+            postText: 'Looking for CRM recommendations in Lagos',
+            postUrl: 'https://linkedin.com/posts/x',
+            snippet: 'Looking for CRM recommendations in Lagos',
+            title: 'Post',
+        );
+
+        $enriched = app(\App\Services\Intent\SocialSignalEnricher::class)->enrich($org, $icp, $hit);
+        $defaults = SocialListeningSetting::defaultsForOrg($org->id, $icp->id);
+
+        $this->assertGreaterThanOrEqual($defaults['min_score'], (float) $enriched['score']);
     }
 
     public function test_social_signal_enricher_heuristic(): void

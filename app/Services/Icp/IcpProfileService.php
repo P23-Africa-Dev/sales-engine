@@ -4,11 +4,17 @@ namespace App\Services\Icp;
 
 use App\Models\IcpProfile;
 use App\Models\Organization;
+use App\Services\Intent\SocialListeningRunService;
+use App\Services\Intent\SocialListeningSettingsService;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
 
 class IcpProfileService
 {
+    public function __construct(
+        private readonly SocialListeningSettingsService $socialSettings,
+        private readonly SocialListeningRunService $socialRuns,
+    ) {}
     public function list(Organization $organization): Collection
     {
         return IcpProfile::query()
@@ -70,6 +76,12 @@ class IcpProfileService
 
             $profile->is_active = true;
             $profile->save();
+
+            $organization = Organization::query()->find($profile->organization_id);
+            if ($organization) {
+                $this->socialSettings->forIcp($organization, $profile);
+                $this->socialRuns->bootstrap($organization, $profile);
+            }
 
             return $profile->fresh();
         });

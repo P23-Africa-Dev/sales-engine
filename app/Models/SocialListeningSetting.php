@@ -63,7 +63,7 @@ class SocialListeningSetting extends Model
             'icp_profile_id' => $icpProfileId,
             'enabled_sources' => self::DEFAULT_SOURCES,
             'cadence_days' => 14,
-            'min_score' => 70,
+            'min_score' => 55,
             'intent_filters' => self::DEFAULT_INTENT_FILTERS,
             'crm_destination' => 'qualified_pipeline',
             'outreach_channel_default' => 'email',

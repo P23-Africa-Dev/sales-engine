@@ -23,6 +23,11 @@ abstract class AbstractSerperSocialAdapter implements SocialSourceInterface
     /** @return list<string> */
     abstract protected function siteFilters(): array;
 
+    public function key(): string
+    {
+        return $this->sourceKey();
+    }
+
     public function isEnabled(IcpBrief $brief, array $enabledSources): bool
     {
         return in_array($this->sourceKey(), $enabledSources, true)
@@ -31,7 +36,7 @@ abstract class AbstractSerperSocialAdapter implements SocialSourceInterface
 
     public function search(IcpBrief $brief, string $query, int $organizationId, int $limit = 8): Collection
     {
-        $siteClause = implode(' OR ', array_map(fn (string $s) => "site:{$s}", $this->siteFilters()));
+        $siteClause = implode(' OR ', array_map(fn(string $s) => "site:{$s}", $this->siteFilters()));
         $fullQuery = trim("({$siteClause}) {$query}");
 
         $baseUrl = rtrim((string) config('services.serper.base_url'), '/');
@@ -42,7 +47,7 @@ abstract class AbstractSerperSocialAdapter implements SocialSourceInterface
                     'X-API-KEY' => (string) config('services.serper.api_key'),
                     'Content-Type' => 'application/json',
                 ])
-                ->post($baseUrl.'/search', [
+                ->post($baseUrl . '/search', [
                     'q' => $fullQuery,
                     'num' => min(10, $limit),
                 ]);
@@ -50,7 +55,7 @@ abstract class AbstractSerperSocialAdapter implements SocialSourceInterface
             ApiUsage::query()->create([
                 'organization_id' => $organizationId,
                 'provider' => 'serper',
-                'endpoint' => 'social_'.$this->sourceKey(),
+                'endpoint' => 'social_' . $this->sourceKey(),
                 'units' => 1,
                 'estimated_cost' => 0.005,
                 'meta' => ['status' => $response->status(), 'query' => $fullQuery],
@@ -82,7 +87,7 @@ abstract class AbstractSerperSocialAdapter implements SocialSourceInterface
                     snippet: $snippet ?: null,
                     title: $title ?: null,
                 );
-            })->filter(fn (RawSocialHit $h) => $h->postText !== '')->values();
+            })->filter(fn(RawSocialHit $h) => $h->postText !== '')->values();
         } catch (\Throwable $e) {
             Log::warning('Serper social search exception', [
                 'source' => $this->sourceKey(),

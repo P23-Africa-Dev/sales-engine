@@ -80,6 +80,8 @@ Route::middleware(['auth:sanctum', 'org.resolve'])->group(function () {
     Route::put('/social-listening/settings', [SocialListeningController::class, 'updateSettings']);
     Route::post('/social-listening/runs', [SocialListeningController::class, 'storeRun'])
         ->middleware('throttle:10,60');
+    Route::post('/social-listening/runs/bootstrap', [SocialListeningController::class, 'bootstrapRun'])
+        ->middleware('throttle:10,60');
     Route::get('/social-listening/runs/{id}', [SocialListeningController::class, 'showRun']);
     Route::post('/social-listening/signals/{id}/outreach', [SocialListeningController::class, 'createOutreach']);
     Route::post('/social-listening/signals/{id}/reminder', [SocialListeningController::class, 'setReminder']);
