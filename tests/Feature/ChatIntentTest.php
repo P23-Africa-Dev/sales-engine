@@ -339,4 +339,67 @@ class ChatIntentTest extends TestCase
             'intent' => 'generate_leads',
         ]);
     }
+
+    public function test_value_seeking_freeform_retrieves_live_sources(): void
+    {
+        config([
+            'services.serper.api_key' => 'test-serper',
+            'services.serper.base_url' => 'https://google.serper.dev',
+            'services.glm.api_key' => 'test-glm',
+            'services.glm.base_url' => 'https://glm.example.com',
+        ]);
+
+        [$user, $org] = $this->actingAsOrgMember();
+
+        IcpProfile::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'West Africa Fintech',
+            'is_active' => true,
+            'config' => array_merge(IcpProfile::defaultConfig(), [
+                'industries' => ['Fintech'],
+                'territories' => ['Lagos, NG'],
+                'decisionMakers' => ['CTO'],
+            ]),
+        ]);
+
+        $session = ChatSession::query()->create([
+            'organization_id' => $org->id,
+            'user_id' => $user->id,
+        ]);
+
+        Http::fake([
+            'google.serper.dev/*' => Http::response([
+                'organic' => [
+                    [
+                        'title' => 'Lagos fintech funding round',
+                        'link' => 'https://example.com/fintech-funding',
+                        'snippet' => 'Series B for payments infrastructure.',
+                    ],
+                ],
+            ], 200),
+            'glm.example.com/*' => Http::response([
+                'choices' => [[
+                    'message' => [
+                        'content' => "1. **Lagos fintech funding** — matches your ICP.\n1. **Payments infra** — CTO buyer fit.\n\nBased on your active ICP\nPrioritize payments plays in Lagos.",
+                    ],
+                ]],
+            ], 200),
+        ]);
+
+        $response = $this->withHeaders($this->orgHeaders($org))
+            ->postJson("/api/v1/chat/sessions/{$session->id}/messages", [
+                'body' => 'What opportunities are out there for me right now?',
+                'intent' => 'freeform',
+            ]);
+
+        $response->assertOk()
+            ->assertJsonPath('data.assistant_message.intent', 'freeform')
+            ->assertJsonPath('data.assistant_message.meta.retrieval', 'live_opportunity')
+            ->assertJsonPath('data.assistant_message.meta.sources.0.url', 'https://example.com/fintech-funding');
+
+        $body = (string) $response->json('data.assistant_message.body');
+        $this->assertStringContainsString('1. **Lagos fintech funding**', $body);
+        $this->assertStringContainsString('2. **Payments infra**', $body);
+        $this->assertStringNotContainsString("1. **Payments infra**", $body);
+    }
 }

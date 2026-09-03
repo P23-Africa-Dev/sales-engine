@@ -77,7 +77,8 @@ class IcpChatContextBuilder
             '5. If the question is unrelated to sales/GTM, still answer it, then briefly note any ICP-relevant angle only if there is a genuine connection — do not force irrelevant recommendations.',
             '6. If the user asks you to "use my ICP", apply the active ICP payload immediately; never substitute a generic wealth/tech celebrity list or invent ICP criteria.',
             '7. Prefer timely, actionable opportunities over generic textbook lists (market gaps, flash sales, etc.) unless those lists are explicitly tied to the ICP.',
-            '8. End with one optional next step (e.g. refine ICP, run Generate New Leads, or dig into one recommendation) when helpful.',
+            '8. When listing multiple items, number them sequentially as 1. 2. 3. — never repeat "1." for every item.',
+            '9. End with one optional next step (e.g. refine ICP, run Generate New Leads, or dig into one recommendation) when helpful.',
         ]);
     }
 }

@@ -32,6 +32,9 @@ class ChatService
         private readonly OutreachDraftService $outreach,
         private readonly ChatIntentResolver $intentResolver,
         private readonly IcpChatContextBuilder $icpChatContext,
+        private readonly ValueSeekingQueryDetector $valueSeeking,
+        private readonly FreeformOpportunityRetriever $opportunityRetriever,
+        private readonly ChatListNumbering $listNumbering,
     ) {}
 
     public function createSession(Organization $organization, User $user, ?string $title = null, ?int $icpProfileId = null): ChatSession
@@ -224,7 +227,20 @@ class ChatService
         } else {
             // Freeform always follows the org's currently active ICP (may differ from session-bound profile).
             $activeIcp = $this->icps->active($organization) ?? $icp;
-            $assistantBody = $this->freeformReply($organization, $activeIcp, $session, $body, $user, $clientTimezone);
+            if ($this->valueSeeking->matches($body) && $this->opportunityRetriever->isEnabled()) {
+                $retrieved = $this->opportunityRetriever->answer(
+                    $organization,
+                    $activeIcp,
+                    $body,
+                    $user,
+                    $clientTimezone,
+                );
+                $assistantBody = $retrieved['body'];
+                $meta['retrieval'] = 'live_opportunity';
+                $meta['sources'] = $retrieved['sources'];
+            } else {
+                $assistantBody = $this->freeformReply($organization, $activeIcp, $session, $body, $user, $clientTimezone);
+            }
         }
 
         $assistantMessage = ChatMessage::query()->create([
@@ -413,7 +429,7 @@ class ChatService
                 ], JSON_UNESCAPED_UNICODE)],
             ], 'chat', $organization);
 
-            return rtrim($this->fixRepeatedNumbering($narrative)) . $advisoryNote;
+            return rtrim($this->listNumbering->normalize($narrative)).$advisoryNote;
         } catch (\Throwable) {
             return "Found {$count} leads for your search.{$advisoryNote}";
         }
@@ -438,17 +454,6 @@ class ChatService
         return " {$icpRecommendedCount} of {$total} align with your ICP \"{$icp->name}\"; {$outside} answer your search but may be outside your profile. Save any leads you want from the cards below.";
     }
 
-    private function fixRepeatedNumbering(string $text): string
-    {
-        $counter = 0;
-
-        return preg_replace_callback('/^\s*1\.\s+/m', function () use (&$counter): string {
-            $counter++;
-
-            return " {$counter}. ";
-        }, $text) ?? $text;
-    }
-
     private function freeformReply(Organization $organization, ?IcpProfile $icp, ChatSession $session, string $body, User $user, ?string $clientTimezone = null): string
     {
         if (! $this->glm->isConfigured()) {
@@ -460,7 +465,7 @@ class ChatService
             ->orderBy('id')
             ->limit(12)
             ->get()
-            ->map(fn(ChatMessage $m) => ['role' => $m->role, 'content' => $m->body])
+            ->map(fn (ChatMessage $m) => ['role' => $m->role, 'content' => $m->body])
             ->all();
 
         $history[] = ['role' => 'user', 'content' => $body];
@@ -473,9 +478,9 @@ class ChatService
         ]);
 
         try {
-            return $this->glm->chat($history, 'chat', $organization);
+            return $this->listNumbering->normalize($this->glm->chat($history, 'chat', $organization));
         } catch (\Throwable $e) {
-            return 'Chat temporarily unavailable: ' . $e->getMessage();
+            return 'Chat temporarily unavailable: '.$e->getMessage();
         }
     }
 }
