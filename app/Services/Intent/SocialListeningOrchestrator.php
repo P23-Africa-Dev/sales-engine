@@ -169,14 +169,14 @@ class SocialListeningOrchestrator
                     [
                         'role' => 'system',
                         'content' => 'Generate 3-5 short Google search queries to find B2B buying-intent social posts matching an ICP. '
-                            .'Focus on people asking for recommendations, switching vendors, pricing, tools, or software — NOT job ads, recruiting, or generic thought leadership. '
-                            .'Include buying phrases like "looking for", "recommend", "alternative to", "switching from", "how much", "vendor". '
-                            .'Return JSON: {"queries":["..."]}',
+                            . 'Focus on people asking for recommendations, switching vendors, pricing, tools, or software — NOT job ads, recruiting, or generic thought leadership. '
+                            . 'Include buying phrases like "looking for", "recommend", "alternative to", "switching from", "how much", "vendor". '
+                            . 'Return JSON: {"queries":["..."]}',
                     ],
                     [
                         'role' => 'user',
                         'content' => json_encode([
-                            'industries' => array_values(array_filter($brief->industries, fn ($i) => is_string($i) && mb_strlen(trim($i)) >= 3 && ! in_array(mb_strtolower(trim($i)), ['yes', 'no', 'n/a'], true))),
+                            'industries' => array_values(array_filter($brief->industries, fn($i) => is_string($i) && mb_strlen(trim($i)) >= 3 && ! in_array(mb_strtolower(trim($i)), ['yes', 'no', 'n/a'], true))),
                             'territories' => $brief->territories,
                             'decision_makers' => $brief->decisionMakers,
                             'custom_prompt' => $brief->customPrompt,
