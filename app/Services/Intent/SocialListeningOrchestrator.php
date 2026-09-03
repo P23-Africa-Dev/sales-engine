@@ -32,8 +32,11 @@ class SocialListeningOrchestrator
     ): SocialListeningRun {
         $dailyCap = (int) config('services.social_listening.daily_api_cap', 200);
         if ($dailyCap > 0) {
+            // Only count social-listening Serper calls — not discovery/chat/enrichment usage.
             $usageToday = \App\Models\ApiUsage::query()
                 ->where('organization_id', $organization->id)
+                ->where('provider', 'serper')
+                ->where('endpoint', 'like', 'social_%')
                 ->whereDate('created_at', today())
                 ->count();
 
@@ -165,12 +168,15 @@ class SocialListeningOrchestrator
                 $json = $this->glm->chatJson([
                     [
                         'role' => 'system',
-                        'content' => 'Generate 3-5 short web search queries to find B2B buying-intent social posts matching an ICP. Return JSON: {"queries":["..."]}',
+                        'content' => 'Generate 3-5 short Google search queries to find B2B buying-intent social posts matching an ICP. '
+                            .'Focus on people asking for recommendations, switching vendors, pricing, tools, or software — NOT job ads, recruiting, or generic thought leadership. '
+                            .'Include buying phrases like "looking for", "recommend", "alternative to", "switching from", "how much", "vendor". '
+                            .'Return JSON: {"queries":["..."]}',
                     ],
                     [
                         'role' => 'user',
                         'content' => json_encode([
-                            'industries' => $brief->industries,
+                            'industries' => array_values(array_filter($brief->industries, fn ($i) => is_string($i) && mb_strlen(trim($i)) >= 3 && ! in_array(mb_strtolower(trim($i)), ['yes', 'no', 'n/a'], true))),
                             'territories' => $brief->territories,
                             'decision_makers' => $brief->decisionMakers,
                             'custom_prompt' => $brief->customPrompt,
@@ -206,18 +212,27 @@ class SocialListeningOrchestrator
             return true;
         }
 
-        $signalType = mb_strtolower((string) ($enriched['signal_type'] ?? ''));
+        $signalType = mb_strtolower(trim((string) ($enriched['signal_type'] ?? '')));
+        if ($signalType === '' || $signalType === 'other') {
+            return false;
+        }
+
+        // Canonical types from SocialSignalEnricher match filter keys 1:1.
+        if (in_array($signalType, $filters, true)) {
+            return true;
+        }
+
         $map = [
             'recommendation' => ['recommendation', 'recommendations'],
             'switching' => ['switching', 'switch'],
             'pricing' => ['price', 'pricing'],
-            'hiring_expansion' => ['hiring', 'expansion', 'growth'],
+            'hiring_expansion' => ['hiring', 'expansion', 'growth', 'job'],
         ];
 
         foreach ($filters as $filter) {
-            $needles = $map[$filter] ?? [mb_strtolower($filter)];
+            $needles = $map[$filter] ?? [mb_strtolower((string) $filter)];
             foreach ($needles as $needle) {
-                if (str_contains($signalType, $needle)) {
+                if ($needle !== '' && str_contains($signalType, $needle)) {
                     return true;
                 }
             }
