@@ -58,7 +58,7 @@ class SocialListeningController extends Controller
             ->orderByDesc('id');
 
         if (! empty($data['search'])) {
-            $term = '%'.$data['search'].'%';
+            $term = '%' . $data['search'] . '%';
             $query->where(function ($q) use ($term) {
                 $q->where('post_text', 'like', $term)
                     ->orWhere('company_name', 'like', $term)
@@ -79,7 +79,7 @@ class SocialListeningController extends Controller
             $query->where('buying_stage', $data['buying_stage']);
         }
 
-        $perPage = $data['per_page'] ?? 20;
+        $perPage = $data['per_page'] ?? 10;
         $paginator = $query->paginate($perPage);
 
         return response()->json([
