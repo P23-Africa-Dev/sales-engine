@@ -116,21 +116,21 @@ class SocialListeningOrchestrator
                     'source_icon' => $hit->sourceIcon,
                     'post_text' => $hit->postText,
                     'posted_at' => now()->subHours(2),
-                    'profile_name' => $enriched['profile_name'] ?? null,
-                    'persona' => $enriched['persona'] ?? null,
-                    'company_name' => $enriched['company_name'] ?? null,
-                    'location_text' => $enriched['location_text'] ?? null,
-                    'intent_label' => $intentLabel,
+                    'profile_name' => $this->clip((string) ($enriched['profile_name'] ?? ''), 255),
+                    'persona' => $this->clip((string) ($enriched['persona'] ?? ''), 255),
+                    'company_name' => $this->clip((string) ($enriched['company_name'] ?? ''), 255),
+                    'location_text' => $this->clip((string) ($enriched['location_text'] ?? ''), 255),
+                    'intent_label' => $this->clip($intentLabel, 64),
                     'intent_color' => SocialSignalEnricher::intentColor($intentLabel),
-                    'intent_description' => $enriched['intent_description'] ?? null,
-                    'signal_type' => $enriched['signal_type'] ?? null,
-                    'buying_stage' => $enriched['buying_stage'] ?? null,
-                    'problem' => $enriched['problem'] ?? null,
-                    'urgency' => $enriched['urgency'] ?? null,
+                    'intent_description' => $this->clip((string) ($enriched['intent_description'] ?? ''), 1000),
+                    'signal_type' => $this->clip((string) ($enriched['signal_type'] ?? ''), 64),
+                    'buying_stage' => $this->clip((string) ($enriched['buying_stage'] ?? ''), 64),
+                    'problem' => $this->clip((string) ($enriched['problem'] ?? ''), 1000),
+                    'urgency' => $this->clip((string) ($enriched['urgency'] ?? ''), 64),
                     'score' => $score,
                     'reasons' => $enriched['reasons'] ?? [],
                     'suggested_message' => $enriched['suggested_message'] ?? null,
-                    'recommended_action' => $enriched['recommended_action'] ?? null,
+                    'recommended_action' => $this->clip((string) ($enriched['recommended_action'] ?? ''), 1000),
                     'status' => 'new',
                     'meta' => ['title' => $hit->title, 'snippet' => $hit->snippet],
                 ]);
@@ -239,5 +239,15 @@ class SocialListeningOrchestrator
         }
 
         return false;
+    }
+
+    private function clip(?string $value, int $max): ?string
+    {
+        $value = trim((string) $value);
+        if ($value === '') {
+            return null;
+        }
+
+        return mb_strlen($value) <= $max ? $value : mb_substr($value, 0, $max);
     }
 }
