@@ -19,6 +19,7 @@ class ResearchOrchestrator
     public function __construct(
         private readonly array $sources,
         private readonly GlmClient $glm,
+        private readonly \App\Services\Chat\IcpChatContextBuilder $icpChatContext,
     ) {}
 
     /**
@@ -79,7 +80,7 @@ class ResearchOrchestrator
             $this->updateProgress($run, 2, $sourcesChecked, 0);
 
             /** @var RawDiscoveryHit $hit */
-            foreach ($hits->unique(fn (RawDiscoveryHit $h) => mb_strtolower($h->url ?? $h->name))->take(20) as $hit) {
+            foreach ($hits->unique(fn(RawDiscoveryHit $h) => mb_strtolower($h->url ?? $h->name))->take(20) as $hit) {
                 $sources[] = [
                     'title' => $hit->name,
                     'url' => $hit->url,
@@ -136,12 +137,12 @@ class ResearchOrchestrator
             $result = $this->glm->chatJson([
                 [
                     'role' => 'system',
-                    'content' => 'Decompose a B2B research question into 2-4 focused sub-questions covering market context, competitors, signals, and geography. Return JSON: {"sub_queries":["..."]}.',
+                    'content' => 'Decompose a B2B research question into 2-4 focused sub-questions covering market context, competitors, signals, and geography for the active ICP. Return JSON: {"sub_queries":["..."]}.',
                 ],
                 [
                     'role' => 'user',
                     'content' => json_encode([
-                        'icp' => $icp->name,
+                        'active_icp' => $this->icpChatContext->toPromptPayload($icp),
                         'query' => $query,
                     ], JSON_UNESCAPED_UNICODE),
                 ],
@@ -149,7 +150,7 @@ class ResearchOrchestrator
 
             $subs = $result['sub_queries'] ?? [];
             if (is_array($subs) && count($subs) > 0) {
-                $filtered = array_values(array_filter($subs, fn ($q) => is_string($q) && trim($q) !== ''));
+                $filtered = array_values(array_filter($subs, fn($q) => is_string($q) && trim($q) !== ''));
 
                 return array_slice($filtered, 0, 4) ?: [$query];
             }
@@ -181,12 +182,12 @@ class ResearchOrchestrator
             return $this->glm->chat([
                 [
                     'role' => 'system',
-                    'content' => 'You are Sales Engine. Write a concise research brief for a B2B sales team in African markets. Structure: Executive Summary, Key Findings, Risks/Opportunities, Recommended Next Steps. Use markdown. Do not invent sources — only reference provided source snippets.',
+                    'content' => 'You are Sales Engine. Write a concise research brief for a B2B sales team. Structure: Executive Summary, Key Findings, Risks/Opportunities, Recommended Next Steps. Ground findings in the active ICP (industries, territories, buyers). End Recommended Next Steps with ICP-aligned actions and one-line reasons. Use markdown. Do not invent sources — only reference provided source snippets.',
                 ],
                 [
                     'role' => 'user',
                     'content' => json_encode([
-                        'icp' => $icp->name,
+                        'active_icp' => $this->icpChatContext->toPromptPayload($icp),
                         'query' => $query,
                         'sub_queries' => $subQueries,
                         'sources' => array_slice($sources, 0, 15),
@@ -194,7 +195,7 @@ class ResearchOrchestrator
                 ],
             ], 'chat', $organization);
         } catch (\Throwable) {
-            return "Research completed for \"{$query}\" with ".count($sources).' sources. Review the source list below for details.';
+            return "Research completed for \"{$query}\" with " . count($sources) . ' sources. Review the source list below for details.';
         }
     }
 

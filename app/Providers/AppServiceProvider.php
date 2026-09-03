@@ -59,6 +59,7 @@ class AppServiceProvider extends ServiceProvider
                     $app->make(MetaPagesDiscoveryAdapter::class),
                 ],
                 glm: $app->make(\App\Services\Llm\GlmClient::class),
+                icpChatContext: $app->make(\App\Services\Chat\IcpChatContextBuilder::class),
             );
         });
 

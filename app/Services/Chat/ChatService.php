@@ -31,6 +31,7 @@ class ChatService
         private readonly IcpProfileService $icps,
         private readonly OutreachDraftService $outreach,
         private readonly ChatIntentResolver $intentResolver,
+        private readonly IcpChatContextBuilder $icpChatContext,
     ) {}
 
     public function createSession(Organization $organization, User $user, ?string $title = null, ?int $icpProfileId = null): ChatSession
@@ -221,7 +222,9 @@ class ChatService
             $meta['outreach'] = $draft;
             $leads = $draft['leads'] ?? [];
         } else {
-            $assistantBody = $this->freeformReply($organization, $icp, $session, $body, $user, $clientTimezone);
+            // Freeform always follows the org's currently active ICP (may differ from session-bound profile).
+            $activeIcp = $this->icps->active($organization) ?? $icp;
+            $assistantBody = $this->freeformReply($organization, $activeIcp, $session, $body, $user, $clientTimezone);
         }
 
         $assistantMessage = ChatMessage::query()->create([
@@ -400,10 +403,10 @@ class ChatService
             ]), $leads);
 
             $narrative = $this->glm->chat([
-                ['role' => 'system', 'content' => 'You are Sales Engine. Summarize ranked lead prospects for a sales team. Use sequential numbering (1, 2, 3...) — never repeat "1." for every item. Use each lead\'s actual name field — never substitute the ICP profile name as a lead name. Write in plain prose: name, role/company if known, and why they matter. Do NOT include internal fields like Match Quality, Query Match, ICP Fit Score, or Recommended Next Action. Tell the user they can review cards below and save selected leads to CRM. When some leads are outside the user\'s ICP, mention that clearly but still present all results. ' . TimeGreeting::promptContext($clientTimezone)],
+                ['role' => 'system', 'content' => 'You are Sales Engine. Summarize ranked lead prospects for a sales team. Use sequential numbering (1, 2, 3...) — never repeat "1." for every item. Use each lead\'s actual name field — never substitute the ICP profile name as a lead name. Write in plain prose: name, role/company if known, and why they matter for the active ICP. Do NOT include internal fields like Match Quality, Query Match, ICP Fit Score, or Recommended Next Action. Tell the user they can review cards below and save selected leads to CRM. When some leads are outside the user\'s ICP, mention that clearly but still present all results. ' . TimeGreeting::promptContext($clientTimezone)],
                 ['role' => 'user', 'content' => json_encode([
                     'intent' => $intent,
-                    'icp' => $icp->name,
+                    'active_icp' => $this->icpChatContext->toPromptPayload($icp),
                     'query' => $query,
                     'leads' => $publicLeads,
                     'icp_recommended_count' => $icpRecommendedCount,
@@ -466,14 +469,7 @@ class ChatService
 
         array_unshift($history, [
             'role' => 'system',
-            'content' => implode(' ', array_filter([
-                'You are Sales Engine, a B2B lead discovery assistant for African markets.',
-                'Active ICP: ' . ($icp?->name ?? 'none') . '.',
-                TimeGreeting::promptContext($clientTimezone),
-                $firstName !== '' ? "User's first name: {$firstName}. Use it naturally when greeting." : null,
-                'When the user greets you (hello, hi, etc.), reply with the appropriate time-of-day greeting above — never the wrong period.',
-                'Never claim that lead cards, Save buttons, or CRM sync actions are visible in the chat. For structured lead results with save-to-CRM cards, tell the user to tap Generate New Leads or ask explicitly to generate leads.',
-            ])),
+            'content' => $this->icpChatContext->buildFreeformSystemPrompt($icp, $firstName, $clientTimezone),
         ]);
 
         try {
