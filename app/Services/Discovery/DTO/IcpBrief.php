@@ -30,7 +30,9 @@ readonly class IcpBrief
     public static function fromIcpProfile(\App\Models\IcpProfile $profile, string $query = ''): self
     {
         $config = $profile->config ?? [];
-        $intent = app(QueryIntentService::class)->analyze($query, 'generate_leads');
+        $queryIntent = app(QueryIntentService::class);
+        $cleanedQuery = $queryIntent->stripProspectCountInstruction($query);
+        $intent = $queryIntent->analyze($cleanedQuery, 'generate_leads');
 
         return new self(
             name: $profile->name,
@@ -42,7 +44,7 @@ readonly class IcpBrief
             customPrompt: (string) ($config['customPrompt'] ?? ''),
             minMatchScore: (int) ($config['minMatchScore'] ?? 60),
             autoSyncCrm: (bool) ($config['autoSyncCrm'] ?? false),
-            query: $query,
+            query: $cleanedQuery,
             target: $intent['target'],
             requestedLimit: $intent['limit'],
         );
@@ -60,7 +62,10 @@ readonly class IcpBrief
 
     public function hasUserQuery(): bool
     {
-        return trim($this->query) !== '';
+        $queryIntent = app(QueryIntentService::class);
+        $cleaned = $queryIntent->stripProspectCountInstruction($this->query);
+
+        return trim($cleaned) !== '' && ! $queryIntent->isGenericLeadRequest($cleaned);
     }
 
     public function isAuthoritativePeopleQuery(): bool
@@ -70,22 +75,34 @@ readonly class IcpBrief
 
     public function searchQuery(): string
     {
-        if (trim($this->query) !== '') {
+        $queryIntent = app(QueryIntentService::class);
+        $cleaned = $queryIntent->stripProspectCountInstruction($this->query);
+
+        if (trim($cleaned) !== '' && ! $queryIntent->isGenericLeadRequest($cleaned)) {
             if ($this->isAuthoritativePeopleQuery()) {
-                return trim($this->query).' Forbes Bloomberg billionaires richest people world ranking list';
+                return trim($cleaned) . ' Forbes Bloomberg billionaires richest people world ranking list';
             }
 
             if ($this->isPeopleSearch()) {
-                return trim($this->query).' site:linkedin.com/in OR "CEO" OR "founder" OR "partnership"';
+                return trim($cleaned) . ' site:linkedin.com/in OR "CEO" OR "founder" OR "partnership"';
             }
 
-            return $this->query;
+            return $cleaned;
         }
+
+        return $this->icpFallbackSearchQuery();
+    }
+
+    private function icpFallbackSearchQuery(): string
+    {
+        $decisionMakerHint = implode(' ', array_slice($this->decisionMakers, 0, 2));
 
         $parts = array_filter([
             implode(' ', array_slice($this->industries, 0, 2)),
             implode(' ', array_slice($this->territories, 0, 2)),
-            $this->isPeopleSearch() ? 'executives founders' : 'companies distributors',
+            $this->isPeopleSearch()
+                ? ($decisionMakerHint !== '' ? $decisionMakerHint : 'executives founders')
+                : ($decisionMakerHint !== '' ? $decisionMakerHint . ' companies' : 'companies distributors'),
         ]);
 
         return trim(implode(' ', $parts));

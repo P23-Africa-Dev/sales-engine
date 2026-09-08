@@ -12,28 +12,36 @@ class ScoringService
 
     /**
      * @param  array<string, mixed>  $companyPayload
-     * @return array{icp_fit_score: float, intent_score: float, priority_score: float, query_relevance_score: float, rationale: string}
+     * @return array{icp_fit_score: float, intent_score: float, priority_score: float, query_relevance_score: float, rationale: string, icp_relevance_reason: string}
      */
     public function score(array $companyPayload, IcpBrief $brief, Organization $organization): array
     {
         $hasUserQuery = $brief->hasUserQuery();
+        $isFactualQuery = $brief->isAuthoritativePeopleQuery();
 
         if (! $this->glm->isConfigured()) {
             $queryScore = $hasUserQuery
                 ? $this->heuristicQueryRelevance($companyPayload, $brief->query)
                 : 50.0;
             $icpBase = 55.0 + (count($brief->industries) > 0 ? 10 : 0);
+            $icpFit = min(95, $icpBase);
 
             $priority = $hasUserQuery
-                ? min(95, ($queryScore * 0.7) + ($icpBase * 0.3))
-                : min(95, $icpBase - 5);
+                ? min(95, ($queryScore * 0.7) + ($icpFit * 0.3))
+                : min(95, $icpFit - 5);
 
             return [
-                'icp_fit_score' => min(95, $icpBase),
+                'icp_fit_score' => $icpFit,
                 'intent_score' => 40.0,
                 'priority_score' => $priority,
                 'query_relevance_score' => $queryScore,
                 'rationale' => 'Heuristic score (GLM unavailable).',
+                'icp_relevance_reason' => $this->buildIcpRelevanceReason(
+                    $brief,
+                    $icpFit,
+                    $isFactualQuery,
+                    $companyPayload,
+                ),
             ];
         }
 
@@ -41,17 +49,20 @@ class ScoringService
             $result = $this->glm->chatJson([
                 [
                     'role' => 'system',
-                    'content' => 'Score lead relevance. Return JSON: icp_fit_score (0-100), intent_score (0-100), query_relevance_score (0-100), priority_score (0-100), rationale (string). Score query relevance to the user\'s words first. ICP fit is advisory — results that answer the query but fall outside ICP industries/territories should still have high query_relevance_score. Boost query_relevance_score when authoritative_source is true.',
+                    'content' => 'Score lead relevance. Return JSON: icp_fit_score (0-100), intent_score (0-100), query_relevance_score (0-100), priority_score (0-100), rationale (string), icp_relevance_reason (string — one short sentence citing specific ICP industries/territories/decision makers). Score query relevance to the user\'s words first. ICP fit is advisory — results that answer the query but fall outside ICP industries/territories should still have high query_relevance_score. Boost query_relevance_score when authoritative_source is true. When is_factual_query is true and icp_fit_score is below minMatchScore, phrase icp_relevance_reason like: "Answers your search for X; doesn\'t match your {industries} focus in {territories}."',
                 ],
                 [
                     'role' => 'user',
                     'content' => json_encode([
                         'user_query' => $brief->query,
+                        'is_factual_query' => $isFactualQuery,
                         'icp' => [
                             'name' => $brief->name,
+                            'description' => $brief->description,
                             'industries' => $brief->industries,
                             'territories' => $brief->territories,
                             'companySizes' => $brief->companySizes,
+                            'decisionMakers' => $brief->decisionMakers,
                             'customPrompt' => $brief->customPrompt,
                             'minMatchScore' => $brief->minMatchScore,
                         ],
@@ -75,26 +86,86 @@ class ScoringService
                 }
             }
 
+            $reason = trim((string) ($result['icp_relevance_reason'] ?? ''));
+            if ($reason === '') {
+                $reason = $this->buildIcpRelevanceReason($brief, $icpFit, $isFactualQuery, $companyPayload);
+            }
+
             return [
                 'icp_fit_score' => $icpFit,
                 'intent_score' => (float) ($result['intent_score'] ?? 40),
                 'priority_score' => $priority,
                 'query_relevance_score' => $queryRelevance,
                 'rationale' => (string) ($result['rationale'] ?? ''),
+                'icp_relevance_reason' => $reason,
             ];
         } catch (\Throwable) {
             $queryScore = $hasUserQuery
                 ? $this->heuristicQueryRelevance($companyPayload, $brief->query)
                 : 45.0;
+            $icpFit = 50.0;
 
             return [
-                'icp_fit_score' => 50.0,
+                'icp_fit_score' => $icpFit,
                 'intent_score' => 40.0,
                 'priority_score' => $hasUserQuery ? max(45, $queryScore - 5) : 45.0,
                 'query_relevance_score' => $queryScore,
                 'rationale' => 'Scoring fallback.',
+                'icp_relevance_reason' => $this->buildIcpRelevanceReason(
+                    $brief,
+                    $icpFit,
+                    $isFactualQuery,
+                    $companyPayload,
+                ),
             ];
         }
+    }
+
+    /**
+     * Deterministic plain-language ICP reason for heuristic / empty-GLM paths.
+     *
+     * @param  array<string, mixed>  $companyPayload
+     */
+    public function buildIcpRelevanceReason(
+        IcpBrief $brief,
+        float $icpFit,
+        bool $isFactualQuery = false,
+        array $companyPayload = [],
+    ): string {
+        $industries = array_slice(array_values(array_filter($brief->industries)), 0, 2);
+        $territories = array_slice(array_values(array_filter($brief->territories)), 0, 2);
+        $buyers = array_slice(array_values(array_filter($brief->decisionMakers)), 0, 2);
+
+        $industryLabel = $industries !== [] ? implode(' / ', $industries) : 'your target industries';
+        $territoryLabel = $territories !== [] ? implode(' / ', $territories) : 'your target territories';
+        $buyerLabel = $buyers !== [] ? implode(' / ', $buyers) : null;
+
+        $matchesIcp = $icpFit >= $brief->minMatchScore;
+        $leadName = trim((string) ($companyPayload['name'] ?? $companyPayload['person_name'] ?? ''));
+        $queryHint = trim($brief->query);
+        if ($queryHint === '') {
+            $queryHint = 'your search';
+        }
+
+        if ($isFactualQuery && ! $matchesIcp) {
+            $who = $leadName !== '' ? $leadName : 'This result';
+
+            return "{$who} answers your search for {$queryHint}; doesn't match your {$industryLabel} focus in {$territoryLabel}.";
+        }
+
+        if ($matchesIcp) {
+            $parts = ["Fits your {$industryLabel} focus"];
+            if ($territories !== []) {
+                $parts[] = "in {$territoryLabel}";
+            }
+            if ($buyerLabel !== null) {
+                $parts[] = "aligned with {$buyerLabel}";
+            }
+
+            return implode(' ', $parts).'.';
+        }
+
+        return "Limited overlap with your {$industryLabel} focus in {$territoryLabel} — still answers the search request.";
     }
 
     /**

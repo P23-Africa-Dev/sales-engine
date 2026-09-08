@@ -41,6 +41,9 @@ class LeadResource extends JsonResource
             'linkedin_url' => $linkedinUrl !== '' ? $linkedinUrl : null,
             'profile_urls' => $profileUrls,
             'contact_ready' => $contactReady,
+            'icp_relevance_reason' => isset($meta['icp_relevance_reason']) && trim((string) $meta['icp_relevance_reason']) !== ''
+                ? trim((string) $meta['icp_relevance_reason'])
+                : null,
             'created_at' => $this->created_at?->toIso8601String(),
         ];
     }

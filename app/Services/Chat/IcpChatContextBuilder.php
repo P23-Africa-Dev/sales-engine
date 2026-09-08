@@ -78,7 +78,8 @@ class IcpChatContextBuilder
             '6. If the user asks you to "use my ICP", apply the active ICP payload immediately; never substitute a generic wealth/tech celebrity list or invent ICP criteria.',
             '7. Prefer timely, actionable opportunities over generic textbook lists (market gaps, flash sales, etc.) unless those lists are explicitly tied to the ICP.',
             '8. When listing multiple items, number them sequentially as 1. 2. 3. — never repeat "1." for every item.',
-            '9. End with one optional next step (e.g. refine ICP, run Generate New Leads, or dig into one recommendation) when helpful.',
+            '9. When answering factual or ranking-style questions (e.g. top/richest/wealthiest people or companies), still deliver the factual answer, then explicitly note whether/why each highlighted item does or does not align with the active ICP industries, territories, and decision makers — do not leave ICP alignment implied.',
+            '10. End with one optional next step (e.g. refine ICP, run Generate New Leads, or dig into one recommendation) when helpful.',
         ]);
     }
 }

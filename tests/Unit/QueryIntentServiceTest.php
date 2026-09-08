@@ -45,4 +45,24 @@ class QueryIntentServiceTest extends TestCase
         $this->assertTrue($this->service->looksLikeArticleTitle('Matching Requirement'));
         $this->assertFalse($this->service->looksLikeContentOrGenericPhrase('Acme Distributors'));
     }
+
+    public function test_strips_prospect_count_instruction(): void
+    {
+        $raw = 'I need leads of the top richest people in the world (Find 100 prospects unless a different number is specified.)';
+        $this->assertSame(
+            'I need leads of the top richest people in the world',
+            $this->service->stripProspectCountInstruction($raw)
+        );
+    }
+
+    public function test_detects_generic_lead_requests(): void
+    {
+        $this->assertTrue($this->service->isGenericLeadRequest('Generate leads relevant to me'));
+        $this->assertTrue($this->service->isGenericLeadRequest(
+            'Generate leads relevant to my ICP (Find 100 prospects unless a different number is specified.)'
+        ));
+        $this->assertTrue($this->service->isGenericLeadRequest('generate new prospects'));
+        $this->assertFalse($this->service->isGenericLeadRequest('I need leads of the top richest people in the world'));
+        $this->assertFalse($this->service->isGenericLeadRequest('FMCG distributors in Lagos'));
+    }
 }

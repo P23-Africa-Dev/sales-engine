@@ -16,10 +16,13 @@ use InvalidArgumentException;
 
 class OutreachDraftService
 {
-    public function __construct(private readonly GlmClient $glm) {}
+    public function __construct(
+        private readonly GlmClient $glm,
+        private readonly \App\Services\Chat\IcpChatContextBuilder $icpChatContext,
+    ) {}
 
     /**
-     * @return array{channel: string, subject?: string|null, body: string, sent: bool, leads?: list<array>, target_lead_ids: list<int>}
+     * @return array{channel: string, subject?: string|null, body: string, sent: bool, leads?: list<array>, target_lead_ids: list<int>, icp_alignment_note: string}
      */
     public function draftFromPrompt(
         Organization $organization,
@@ -37,6 +40,7 @@ class OutreachDraftService
         $leads = $this->resolveLeads($organization, $icp, $chatSessionId);
 
         $body = $this->compose($organization, $icp, $prompt, $channel, $leads->all(), $clientTimezone);
+        $alignmentNote = $this->buildIcpAlignmentNote($icp, $leads->all());
 
         foreach ($leads as $lead) {
             OutreachActivity::query()->create([
@@ -59,6 +63,7 @@ class OutreachDraftService
             'body' => $body,
             'sent' => false,
             'target_lead_ids' => $leads->pluck('id')->map(fn ($id) => (int) $id)->all(),
+            'icp_alignment_note' => $alignmentNote,
             'leads' => $leads->map(fn (Lead $l) => [
                 'id' => $l->id,
                 'name' => $l->name,
@@ -67,6 +72,9 @@ class OutreachDraftService
                 'summary' => $l->summary,
                 'crm_synced' => filled($l->synced_to_f23_at),
                 'f23_lead_id' => $l->f23_lead_id,
+                'icp_relevance_reason' => is_array($l->meta)
+                    ? (trim((string) ($l->meta['icp_relevance_reason'] ?? '')) ?: null)
+                    : null,
             ])->all(),
         ];
     }
@@ -180,19 +188,66 @@ class OutreachDraftService
             return $this->glm->chat([
                 [
                     'role' => 'system',
-                    'content' => "Draft a concise {$channel} outreach message for the user's specific request. Do not claim the message was sent. Professional tone for African B2B. ".TimeGreeting::promptContext($clientTimezone).' Reference the provided lead context when relevant.',
+                    'content' => "Draft a concise {$channel} outreach message for the user's specific request. Do not claim the message was sent. Professional tone for African B2B. ".TimeGreeting::promptContext($clientTimezone).' Use the active ICP industries, territories, and decision makers to tailor the angle. Reference the provided lead context when relevant. Output ONLY the sendable message body — no ICP analysis preamble.',
                 ],
                 [
                     'role' => 'user',
                     'content' => json_encode([
                         'prompt' => $prompt,
-                        'icp' => $icp->name,
-                        'leads' => collect($leads)->map->only(['name', 'summary', 'score'])->all(),
+                        'active_icp' => $this->icpChatContext->toPromptPayload($icp),
+                        'leads' => collect($leads)->map(function (Lead $lead) {
+                            $meta = is_array($lead->meta) ? $lead->meta : [];
+
+                            return [
+                                'name' => $lead->name,
+                                'summary' => $lead->summary,
+                                'score' => $lead->score,
+                                'icp_relevance_reason' => $meta['icp_relevance_reason'] ?? null,
+                            ];
+                        })->all(),
                     ], JSON_UNESCAPED_UNICODE),
                 ],
             ], 'outreach_draft', $organization);
         } catch (\Throwable) {
             return "Draft outreach for {$icp->name}: ".$prompt;
         }
+    }
+
+    /**
+     * @param  list<Lead>  $leads
+     */
+    private function buildIcpAlignmentNote(IcpProfile $icp, array $leads): string
+    {
+        $config = is_array($icp->config) ? $icp->config : [];
+        $industries = array_slice(array_values(array_filter($config['industries'] ?? [], 'is_string')), 0, 2);
+        $territories = array_slice(array_values(array_filter($config['territories'] ?? [], 'is_string')), 0, 2);
+
+        $industryLabel = $industries !== [] ? implode(' / ', $industries) : 'your ICP industries';
+        $territoryLabel = $territories !== [] ? implode(' / ', $territories) : null;
+
+        $reasons = [];
+        foreach ($leads as $lead) {
+            $meta = is_array($lead->meta) ? $lead->meta : [];
+            $reason = trim((string) ($meta['icp_relevance_reason'] ?? ''));
+            if ($reason !== '') {
+                $reasons[] = $lead->name.': '.$reason;
+            }
+        }
+
+        $count = count($leads);
+        if ($count === 0) {
+            return "Drafted against your active ICP \"{$icp->name}\" ({$industryLabel}".($territoryLabel ? " in {$territoryLabel}" : '').').';
+        }
+
+        $intro = "Targeting these {$count} lead".($count === 1 ? '' : 's')
+            ." because they relate to your {$industryLabel} focus"
+            .($territoryLabel ? " in {$territoryLabel}" : '')
+            .'.';
+
+        if ($reasons === []) {
+            return $intro;
+        }
+
+        return $intro.' '.implode(' ', array_slice($reasons, 0, 3));
     }
 }

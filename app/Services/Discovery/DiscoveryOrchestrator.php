@@ -582,6 +582,7 @@ class DiscoveryOrchestrator
                 'intent_score' => (int) round($scores['intent_score']),
                 'query_relevance_score' => (int) round($scores['query_relevance_score']),
                 'query_match' => $queryMatch,
+                'icp_relevance_reason' => trim((string) ($scores['icp_relevance_reason'] ?? '')) ?: null,
             ], fn($v) => $v !== null && $v !== ''),
         ]);
 
@@ -613,6 +614,7 @@ class DiscoveryOrchestrator
                 'intent_score' => (int) round($scores['intent_score']),
                 'query_relevance_score' => (int) round($scores['query_relevance_score']),
                 'query_match' => $queryMatch,
+                'icp_relevance_reason' => trim((string) ($scores['icp_relevance_reason'] ?? '')) ?: null,
             ],
         ];
     }

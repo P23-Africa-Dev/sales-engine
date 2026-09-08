@@ -91,6 +91,7 @@ class ResearchOrchestrator
 
             $this->appendStage($run, 'synthesizing');
             $this->updateProgress($run, 3, $sourcesChecked, count($sources));
+            $sources = $this->tagSourcesWithIcpRelevance($organization, $icp, $query, $sources);
             $narrative = $this->synthesize($organization, $icp, $query, $subQueries, $sources);
 
             $this->appendStage($run, 'compiling_results');
@@ -163,7 +164,7 @@ class ResearchOrchestrator
 
     /**
      * @param  list<string>  $subQueries
-     * @param  list<array{title: string, url: ?string, snippet: ?string, provider: ?string}>  $sources
+     * @param  list<array{title: string, url: ?string, snippet: ?string, provider: ?string, icp_relevance_reason?: string}>  $sources
      */
     private function synthesize(
         Organization $organization,
@@ -182,7 +183,7 @@ class ResearchOrchestrator
             return $this->glm->chat([
                 [
                     'role' => 'system',
-                    'content' => 'You are Sales Engine. Write a concise research brief for a B2B sales team. Structure: Executive Summary, Key Findings, Risks/Opportunities, Recommended Next Steps. Ground findings in the active ICP (industries, territories, buyers). End Recommended Next Steps with ICP-aligned actions and one-line reasons. Use markdown. Do not invent sources — only reference provided source snippets.',
+                    'content' => 'You are Sales Engine. Write a concise research brief for a B2B sales team. Structure: Executive Summary, Key Findings, Risks/Opportunities, Recommended Next Steps. Ground findings in the active ICP (industries, territories, buyers). For each Key Finding bullet, end with an explicit inline ICP-relevance clause citing industries, territories, or decision makers (e.g. "— relevant because it aligns with your FinTech focus in Lagos"). End Recommended Next Steps with ICP-aligned actions and one-line reasons. Use markdown. Do not invent sources — only reference provided source snippets.',
                 ],
                 [
                     'role' => 'user',
@@ -197,6 +198,70 @@ class ResearchOrchestrator
         } catch (\Throwable) {
             return "Research completed for \"{$query}\" with " . count($sources) . ' sources. Review the source list below for details.';
         }
+    }
+
+    /**
+     * Attach a short icp_relevance_reason to each research source when GLM is available.
+     *
+     * @param  list<array{title: string, url: ?string, snippet: ?string, provider: ?string}>  $sources
+     * @return list<array{title: string, url: ?string, snippet: ?string, provider: ?string, icp_relevance_reason?: string}>
+     */
+    private function tagSourcesWithIcpRelevance(
+        Organization $organization,
+        IcpProfile $icp,
+        string $query,
+        array $sources,
+    ): array {
+        if ($sources === [] || ! $this->glm->isConfigured()) {
+            return $sources;
+        }
+
+        try {
+            $result = $this->glm->chatJson([
+                [
+                    'role' => 'system',
+                    'content' => 'For each research source, write one short sentence explaining relevance (or lack of relevance) to the active ICP industries, territories, and decision makers. Return JSON: {"reasons":[{"index":0,"icp_relevance_reason":"..."}]}. Use 0-based indexes matching the sources array. Do not invent source content.',
+                ],
+                [
+                    'role' => 'user',
+                    'content' => json_encode([
+                        'active_icp' => $this->icpChatContext->toPromptPayload($icp),
+                        'query' => $query,
+                        'sources' => array_map(
+                            fn (array $source, int $index) => [
+                                'index' => $index,
+                                'title' => $source['title'],
+                                'snippet' => $source['snippet'],
+                                'url' => $source['url'],
+                            ],
+                            array_slice($sources, 0, 15),
+                            array_keys(array_slice($sources, 0, 15)),
+                        ),
+                    ], JSON_UNESCAPED_UNICODE),
+                ],
+            ], 'chat', $organization);
+
+            $reasons = $result['reasons'] ?? [];
+            if (! is_array($reasons)) {
+                return $sources;
+            }
+
+            foreach ($reasons as $row) {
+                if (! is_array($row)) {
+                    continue;
+                }
+                $index = (int) ($row['index'] ?? -1);
+                $reason = trim((string) ($row['icp_relevance_reason'] ?? ''));
+                if ($index < 0 || $index >= count($sources) || $reason === '') {
+                    continue;
+                }
+                $sources[$index]['icp_relevance_reason'] = $reason;
+            }
+        } catch (\Throwable) {
+            // Tagging is additive; leave sources unchanged on failure.
+        }
+
+        return $sources;
     }
 
     private function appendStage(DiscoveryRun $run, string $stage): void

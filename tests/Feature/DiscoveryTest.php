@@ -53,6 +53,8 @@ class DiscoveryTest extends TestCase
             ->assertJsonPath('data.status', 'completed')
             ->assertJsonPath('data.leads.0.name', 'Acme Distributors Lagos');
 
+        $this->assertNotEmpty($response->json('data.leads.0.icp_relevance_reason'));
+
         $this->assertDatabaseHas('companies', [
             'organization_id' => $org->id,
             'name' => 'Acme Distributors Lagos',

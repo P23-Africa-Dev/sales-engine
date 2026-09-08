@@ -221,7 +221,11 @@ class ChatService
             $assistantBody = $this->narrateDiscovery($organization, $icp, $body, $leads, $intent, $clientTimezone);
         } elseif ($intent === 'create_outreach' && $icp) {
             $draft = $this->outreach->draftFromPrompt($organization, $icp, $body, $clientTimezone, $session->id);
-            $assistantBody = $draft['body'];
+            $alignmentNote = trim((string) ($draft['icp_alignment_note'] ?? ''));
+            $draftBody = (string) ($draft['body'] ?? '');
+            $assistantBody = $alignmentNote !== ''
+                ? "**Why these leads**\n{$alignmentNote}\n\n---\n\n{$draftBody}"
+                : $draftBody;
             $meta['outreach'] = $draft;
             $leads = $draft['leads'] ?? [];
         } else {

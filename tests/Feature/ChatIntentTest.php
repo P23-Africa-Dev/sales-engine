@@ -40,27 +40,41 @@ class ChatIntentTest extends TestCase
             'google.serper.dev/*' => Http::response([
                 'organic' => [
                     [
-                        'title' => 'West Africa FMCG Trends',
-                        'link' => 'https://example.com/trends',
+                        'title' => 'West Africa FMCG Market Report',
+                        'link' => 'https://example.com/west-africa-fmcg-report',
                         'snippet' => 'Market growth in FMCG sector.',
                     ],
                 ],
             ], 200),
-            'glm.example.com/*' => Http::sequence()
-                ->push([
-                    'choices' => [[
-                        'message' => [
-                            'content' => '{"sub_queries":["FMCG trends West Africa","competitor landscape"]}',
-                        ],
-                    ]],
-                ], 200)
-                ->push([
+            'glm.example.com/*' => function ($request) {
+                $body = $request->body();
+                if (str_contains($body, 'Decompose a B2B research question')) {
+                    return Http::response([
+                        'choices' => [[
+                            'message' => [
+                                'content' => '{"sub_queries":["FMCG trends West Africa","competitor landscape"]}',
+                            ],
+                        ]],
+                    ], 200);
+                }
+                if (str_contains($body, 'For each research source')) {
+                    return Http::response([
+                        'choices' => [[
+                            'message' => [
+                                'content' => '{"reasons":[{"index":0,"icp_relevance_reason":"Aligns with FMCG focus in West Africa."}]}',
+                            ],
+                        ]],
+                    ], 200);
+                }
+
+                return Http::response([
                     'choices' => [[
                         'message' => [
                             'content' => "## Executive Summary\nKey FMCG trends in West Africa.",
                         ],
                     ]],
-                ], 200),
+                ], 200);
+            },
         ]);
 
         $response = $this->withHeaders($this->orgHeaders($org))
@@ -71,7 +85,11 @@ class ChatIntentTest extends TestCase
 
         $response->assertOk()
             ->assertJsonPath('data.assistant_message.intent', 'quick_research')
-            ->assertJsonPath('data.assistant_message.meta.research.sub_queries.0', 'FMCG trends West Africa');
+            ->assertJsonPath('data.assistant_message.meta.research.sub_queries.0', 'FMCG trends West Africa')
+            ->assertJsonPath(
+                'data.assistant_message.meta.research.sources.0.icp_relevance_reason',
+                'Aligns with FMCG focus in West Africa.'
+            );
 
         $this->assertNull($response->json('data.assistant_message.leads'));
         $this->assertDatabaseMissing('leads', [

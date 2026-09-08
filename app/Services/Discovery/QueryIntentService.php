@@ -115,6 +115,42 @@ class QueryIntentService
     }
 
     /**
+     * Strip the frontend's "(Find N prospects unless a different number is specified.)" wrapper.
+     */
+    public function stripProspectCountInstruction(string $query): string
+    {
+        $stripped = preg_replace(
+            '/\s*\(\s*find\s+\d+\s+prospects?\s+unless\s+a\s+different\s+number\s+is\s+specified\.?\s*\)\s*/iu',
+            ' ',
+            $query
+        );
+
+        return trim(preg_replace('/\s+/u', ' ', $stripped ?? $query) ?? $query);
+    }
+
+    /**
+     * True when the prompt has no real targeting content (industries, places, companies, people names)
+     * and is just a generic "generate leads / relevant to my ICP" instruction.
+     */
+    public function isGenericLeadRequest(string $query): bool
+    {
+        $normalized = mb_strtolower($this->stripProspectCountInstruction($query));
+        if ($normalized === '') {
+            return true;
+        }
+
+        $residual = preg_replace(
+            '/\b(generate|create|find|get|show|give|need|want|please|me|my|the|a|an|some|any|new|more|leads?|prospects?|contacts?|relevant|to|for|based|on|using|according|active|icp|profile|build|search|anything|prospect|request|help|looking|looking for|of)\b/u',
+            ' ',
+            $normalized
+        );
+        $residual = trim(preg_replace('/[^\p{L}\p{N}\s]+/u', ' ', $residual ?? '') ?? '');
+        $residual = trim(preg_replace('/\s+/u', ' ', $residual) ?? '');
+
+        return $residual === '' || mb_strlen($residual) < 3;
+    }
+
+    /**
      * Detect article/advice/listicle/generic-content phrases that should never become Lead.name.
      */
     public function looksLikeContentOrGenericPhrase(string $name): bool
