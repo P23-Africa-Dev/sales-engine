@@ -409,17 +409,19 @@ class ChatService
         }
 
         try {
-            $publicLeads = array_map(fn(array $lead) => array_filter([
+            $publicLeads = array_map(fn (array $lead) => array_filter([
                 'name' => $lead['name'] ?? '',
                 'score' => $lead['score'] ?? 0,
                 'summary' => $lead['summary'] ?? '',
                 'title' => $lead['title'] ?? null,
                 'company' => $lead['company'] ?? null,
-                'icp_recommended' => (bool) ($lead['icp_recommended'] ?? false),
-            ]), $leads);
+                'icp_fit_score' => $lead['icp_fit_score'] ?? null,
+                'intent_score' => $lead['intent_score'] ?? null,
+                'query_relevance_score' => $lead['query_relevance_score'] ?? null,
+            ], fn ($v) => $v !== null && $v !== ''), $leads);
 
             $narrative = $this->glm->chat([
-                ['role' => 'system', 'content' => 'You are Sales Engine. Summarize ranked lead prospects for a sales team. Use sequential numbering (1, 2, 3...) — never repeat "1." for every item. Use each lead\'s actual name field — never substitute the ICP profile name as a lead name. Write in plain prose: name, role/company if known, and why they matter for the active ICP. Do NOT include internal fields like Match Quality, Query Match, ICP Fit Score, or Recommended Next Action. Tell the user they can review cards below and save selected leads to CRM. When some leads are outside the user\'s ICP, mention that clearly but still present all results. ' . TimeGreeting::promptContext($clientTimezone)],
+                ['role' => 'system', 'content' => 'You are Sales Engine. Summarize ranked lead prospects for a sales team. Use sequential numbering (1, 2, 3...) — never repeat "1." for every item. Use each lead\'s actual name field — never substitute the ICP profile name as a lead name. Write in plain prose: name, role/company if known, and why they matter for the active ICP. Do NOT include internal fields like Match Quality, Query Match, ICP Fit Score, or Recommended Next Action. Do NOT label leads as "ICP match" or "Outside ICP" — refer to overall score and fit in plain language only. Tell the user they can review cards below (Overall / Search / ICP / Intent scores) and save selected leads to CRM. '.TimeGreeting::promptContext($clientTimezone)],
                 ['role' => 'user', 'content' => json_encode([
                     'intent' => $intent,
                     'active_icp' => $this->icpChatContext->toPromptPayload($icp),
@@ -442,16 +444,14 @@ class ChatService
         }
 
         if ($icpRecommendedCount === $total) {
-            return " All {$total} match your ICP \"{$icp->name}\".";
+            return " All {$total} score strongly against your ICP \"{$icp->name}\".";
         }
 
         if ($icpRecommendedCount === 0) {
-            return " These answer your search but may fall outside your ICP ({$icp->name}). Review cards below and save any you want. Consider refining your ICP or asking for ICP-aligned alternatives.";
+            return " These answer your search; compare the Search / ICP / Intent % on each card to decide what to save.";
         }
 
-        $outside = $total - $icpRecommendedCount;
-
-        return " {$icpRecommendedCount} of {$total} align with your ICP \"{$icp->name}\"; {$outside} answer your search but may be outside your profile. Save any leads you want from the cards below.";
+        return " Compare Overall, Search, ICP, and Intent % on each card — stronger ICP fit is ranked higher when scores are close.";
     }
 
     private function freeformReply(Organization $organization, ?IcpProfile $icp, ChatSession $session, string $body, User $user, ?string $clientTimezone = null): string

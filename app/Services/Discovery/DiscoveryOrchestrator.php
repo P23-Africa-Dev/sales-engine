@@ -520,6 +520,8 @@ class DiscoveryOrchestrator
                 'enrichment_confidence' => $extracted['enrichment_confidence'] ?? null,
                 'icp_recommended' => $icpRecommended,
                 'icp_fit_score' => (int) round($scores['icp_fit_score']),
+                'intent_score' => (int) round($scores['intent_score']),
+                'query_relevance_score' => (int) round($scores['query_relevance_score']),
                 'query_match' => $queryMatch,
             ], fn($v) => $v !== null && $v !== ''),
         ]);
@@ -545,6 +547,8 @@ class DiscoveryOrchestrator
                 'low_confidence' => (bool) ($extracted['low_confidence'] ?? false),
                 'icp_recommended' => $icpRecommended,
                 'icp_fit_score' => (int) round($scores['icp_fit_score']),
+                'intent_score' => (int) round($scores['intent_score']),
+                'query_relevance_score' => (int) round($scores['query_relevance_score']),
                 'query_match' => $queryMatch,
             ],
         ];
