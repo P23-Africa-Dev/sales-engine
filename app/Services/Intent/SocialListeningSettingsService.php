@@ -35,6 +35,7 @@ class SocialListeningSettingsService
             'enabled_sources',
             'cadence_days',
             'min_score',
+            'freshness_window_days',
             'intent_filters',
             'crm_destination',
             'outreach_channel_default',

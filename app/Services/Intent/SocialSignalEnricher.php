@@ -63,6 +63,7 @@ class SocialSignalEnricher
                             .'Use partnership_opportunity for potential collaborations. Use competitive_move for competitor actions worth knowing about. Use regulatory_change for policy/regulatory news. '
                             .'Use hiring_expansion for hiring/recruiting/expansion posts. Use recommendation/switching/pricing when the author is asking for vendors, alternatives, costs, or tools. '
                             .'Use other only for content with no plausible relevance to the user\'s ICP/interests, or spam. Do not force unrelated content into a sales bucket — pick the type that best matches WHY this matters to the user. '
+                            .'Prefer timely angles: if the post is recent or time-sensitive, say so in why_this_matters_to_you and urgency. '
                             .'Every field must be populated (use empty string/array rather than omitting a key).',
                     ],
                     [
@@ -82,6 +83,8 @@ class SocialSignalEnricher
                             'title' => $hit->title,
                             'platform' => $hit->platform,
                             'url' => $hit->postUrl,
+                            'posted_at' => $hit->postedAt?->toIso8601String(),
+                            'date_raw' => $hit->dateRaw,
                         ]),
                     ],
                 ], 'extract', $organization);

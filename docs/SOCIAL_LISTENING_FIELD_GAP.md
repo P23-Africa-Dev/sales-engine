@@ -21,27 +21,27 @@ Of 19 fields the mock/frontend expects, **13 have full parity** end-to-end (DB �
 
 ### ✅ Full parity (13 fields)
 
-| Field (frontend) | DB column | Type | Notes |
-|---|---|---|---|
-| `id` | `id` | int | — |
-| `signal` | `post_text` | string | Raw post/search-query text |
-| `source` | `source_label` | string | e.g. `"LinkedIn Post"`, `"Google Search"` |
-| `sourceIcon` | `source_icon` | string | `"in"` \| `"X"` \| `"r"` \| `"G"` |
-| `persona` | `persona` | string | Job title, e.g. `"Head of Growth & AI"` |
-| `company` | `company_name` | string | Company name, or `"Individual"` |
-| `location` | `location_text` | text | Multi-line: `"City (Area), Country\nN-N employees"` |
-| `intent` | `intent_label` | string(64) | Display label, matches `signalType` |
-| `intentColor` | `intent_color` | string(16) | Hex, set via `SocialSignalEnricher::intentColor()` |
-| `description` | `intent_description` | string | Short tag under the intent pill |
-| `score` | `score` | decimal(5,2) → int | Resource rounds to int |
-| `profile` | `profile_name` | string | Person's display name |
-| `reasons` | `reasons` | json → array | 4-5 bullet strings |
-| `signalType` | `signal_type` | string(64) | `recommendation` \| `switching` \| `pricing` \| `hiring_expansion` \| `other` (note: canonical set differs slightly from mock — see "Known divergence" below) |
-| `buyingStage` | `buying_stage` | string(64) | e.g. `"Vendor Evaluation"` |
-| `problem` | `problem` | string | One-sentence pain point |
-| `urgency` | `urgency` | string(64) | `High` \| `Medium` \| etc. |
-| `suggestedMessage` | `suggested_message` | text | Pre-drafted outreach message |
-| `postUrl` | `post_url` | string(2048) | Naming only: camelCase (frontend type) vs snake_case (API) — already handled correctly in `sales-engine-view.tsx:1778` |
+| Field (frontend)   | DB column            | Type               | Notes                                                                                                                                                         |
+| ------------------ | -------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`               | `id`                 | int                | —                                                                                                                                                             |
+| `signal`           | `post_text`          | string             | Raw post/search-query text                                                                                                                                    |
+| `source`           | `source_label`       | string             | e.g. `"LinkedIn Post"`, `"Google Search"`                                                                                                                     |
+| `sourceIcon`       | `source_icon`        | string             | `"in"` \| `"X"` \| `"r"` \| `"G"`                                                                                                                             |
+| `persona`          | `persona`            | string             | Job title, e.g. `"Head of Growth & AI"`                                                                                                                       |
+| `company`          | `company_name`       | string             | Company name, or `"Individual"`                                                                                                                               |
+| `location`         | `location_text`      | text               | Multi-line: `"City (Area), Country\nN-N employees"`                                                                                                           |
+| `intent`           | `intent_label`       | string(64)         | Display label, matches `signalType`                                                                                                                           |
+| `intentColor`      | `intent_color`       | string(16)         | Hex, set via `SocialSignalEnricher::intentColor()`                                                                                                            |
+| `description`      | `intent_description` | string             | Short tag under the intent pill                                                                                                                               |
+| `score`            | `score`              | decimal(5,2) → int | Resource rounds to int                                                                                                                                        |
+| `profile`          | `profile_name`       | string             | Person's display name                                                                                                                                         |
+| `reasons`          | `reasons`            | json → array       | 4-5 bullet strings                                                                                                                                            |
+| `signalType`       | `signal_type`        | string(64)         | `recommendation` \| `switching` \| `pricing` \| `hiring_expansion` \| `other` (note: canonical set differs slightly from mock — see "Known divergence" below) |
+| `buyingStage`      | `buying_stage`       | string(64)         | e.g. `"Vendor Evaluation"`                                                                                                                                    |
+| `problem`          | `problem`            | string             | One-sentence pain point                                                                                                                                       |
+| `urgency`          | `urgency`            | string(64)         | `High` \| `Medium` \| etc.                                                                                                                                    |
+| `suggestedMessage` | `suggested_message`  | text               | Pre-drafted outreach message                                                                                                                                  |
+| `postUrl`          | `post_url`           | string(2048)       | Naming only: camelCase (frontend type) vs snake_case (API) — already handled correctly in `sales-engine-view.tsx:1778`                                        |
 
 Backend-only additions with no frontend regression (present in API, not in original mock): `status`, `posted_at`, `lead_id`, `f23_lead_id`.
 
@@ -50,16 +50,16 @@ Backend-only additions with no frontend regression (present in API, not in origi
 **`recommendedAction`**
 
 - Mock/frontend expects: `{ title: string; detail: string }` — e.g.:
-  ```json
-  {
-    "title": "Reach out within 2 hours",
-    "detail": "Share our East Africa B2B firmographic benchmark and offer a 15-minute SDR workflow walkthrough."
-  }
-  ```
+    ```json
+    {
+        "title": "Reach out within 2 hours",
+        "detail": "Share our East Africa B2B firmographic benchmark and offer a 15-minute SDR workflow walkthrough."
+    }
+    ```
 - Backend actually returns: a single flattened string, e.g.:
-  ```json
-  "recommendedAction": "Reach out within 24 hours — this prospect may be actively looking for solutions."
-  ```
+    ```json
+    "recommendedAction": "Reach out within 24 hours — this prospect may be actively looking for solutions."
+    ```
 - Root cause: DB column `recommended_action` is `text` (single string); the LLM prompt in `SocialSignalEnricher::enrich()` asks for `recommended_action` as one string; `heuristicEnrich()` also returns a plain string.
 - UI impact: `AllOutreachModal`/`SocialOpportunityDetail` in `sales-engine-view.tsx:1910` renders it as one flat paragraph. The mock's UI showed a bolded short title ("Reach out within 2 hours") separate from a fuller explanatory sentence — that visual split is lost with the current API shape.
 
@@ -67,14 +67,14 @@ Backend-only additions with no frontend regression (present in API, not in origi
 
 None of these are DB columns, none are in `SocialSignal::$fillable`, none are requested in the GLM prompt or produced by the heuristic fallback, and none are in `SocialSignalResource::toArray()`. They do not exist anywhere in the backend pipeline.
 
-| Field | Type | Example (from mock) | Used in UI for |
-|---|---|---|---|
-| `summary` | string | `"Seeking East Africa-native AI sales SDR tools to automate B2B outbound pipeline."` | Short paraphrase of `signal`, shown in a toggleable summary/full-text view in the signal detail panel |
-| `entityType` | `"company"` \| `"individual"` | `"company"` | Drives which icon renders in the signal table row (building vs. person) — currently the frontend likely has to infer this from `company === "Individual"`, which is fragile |
-| `industry` | string | `"Enterprise AI & Cloud Services"` | Shown in the detail panel breakdown |
-| `keyTopics` | string[] | `["AI Sales SDR", "B2B Lead Generation", "Outbound Automation"]` | 2-4 tag chips in the detail panel |
-| `competitors` | string[] | `["11x.ai", "Regie.ai", "Apollo.io"]` | Named competing tools/vendors mentioned in the detail panel |
-| `followUpStrategy` | string | `"Share our East Africa B2B firmographic benchmark and demonstrate verified lead enrichment in Nairobi."` | One-sentence recommended follow-up angle, separate from `recommendedAction` |
+| Field              | Type                          | Example (from mock)                                                                                       | Used in UI for                                                                                                                                                              |
+| ------------------ | ----------------------------- | --------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `summary`          | string                        | `"Seeking East Africa-native AI sales SDR tools to automate B2B outbound pipeline."`                      | Short paraphrase of `signal`, shown in a toggleable summary/full-text view in the signal detail panel                                                                       |
+| `entityType`       | `"company"` \| `"individual"` | `"company"`                                                                                               | Drives which icon renders in the signal table row (building vs. person) — currently the frontend likely has to infer this from `company === "Individual"`, which is fragile |
+| `industry`         | string                        | `"Enterprise AI & Cloud Services"`                                                                        | Shown in the detail panel breakdown                                                                                                                                         |
+| `keyTopics`        | string[]                      | `["AI Sales SDR", "B2B Lead Generation", "Outbound Automation"]`                                          | 2-4 tag chips in the detail panel                                                                                                                                           |
+| `competitors`      | string[]                      | `["11x.ai", "Regie.ai", "Apollo.io"]`                                                                     | Named competing tools/vendors mentioned in the detail panel                                                                                                                 |
+| `followUpStrategy` | string                        | `"Share our East Africa B2B firmographic benchmark and demonstrate verified lead enrichment in Nairobi."` | One-sentence recommended follow-up angle, separate from `recommendedAction`                                                                                                 |
 
 ### Known divergence worth flagging separately (not a gap, a pre-existing UI bug)
 
@@ -146,6 +146,7 @@ Keep the existing `recommended_action` text column for backward compatibility du
 ### 2. `SocialSignal` model — `app/Models/SocialSignal.php`
 
 Add to `$fillable`:
+
 ```php
 'summary',
 'entity_type',
@@ -158,6 +159,7 @@ Add to `$fillable`:
 ```
 
 Add to `casts()`:
+
 ```php
 'key_topics' => 'array',
 'competitors' => 'array',
@@ -241,6 +243,7 @@ Add to `toArray()`:
 ### 5. Backfill
 
 Existing rows will have `null` for all new columns. Either:
+
 - Run a one-off backfill job that re-enriches existing signals through GLM, or
 - Accept `null`/empty defaults for historical signals and let new signals populate correctly going forward (frontend should already treat these as optional/nullable per the original mock's `?` fields).
 
@@ -320,27 +323,27 @@ re-derive the field list from scratch.
 
 ## Why this section exists
 
-Social Listening is currently built and marketed as an SDR (sales-development-rep) tool: it finds people showing B2B *buying intent* (someone looking to buy/switch/price software) so a sales rep can pitch Factory 23 Sales Engine to them. That is a narrow, single-purpose lens.
+Social Listening is currently built and marketed as an SDR (sales-development-rep) tool: it finds people showing B2B _buying intent_ (someone looking to buy/switch/price software) so a sales rep can pitch Factory 23 Sales Engine to them. That is a narrow, single-purpose lens.
 
-The actual product ambition is broader: Social Listening should behave like a **personal opportunity assistant** for the user — surfacing anything scraped from the internet that is relevant to what that specific user cares about (per their ICP/profile), and every time it surfaces something, it must tell the user *why this matters to them specifically* and *what they stand to gain*, not just dump a raw post at them. The Tesla-investment example the user gave is illustrative: the underlying signal type doesn't have to be "someone wants to buy software" at all — it could be a market/investment opportunity, a partnership opening, a competitive move, anything — as long as it's filtered and explained through the lens of that user's stated interests.
+The actual product ambition is broader: Social Listening should behave like a **personal opportunity assistant** for the user — surfacing anything scraped from the internet that is relevant to what that specific user cares about (per their ICP/profile), and every time it surfaces something, it must tell the user _why this matters to them specifically_ and _what they stand to gain_, not just dump a raw post at them. The Tesla-investment example the user gave is illustrative: the underlying signal type doesn't have to be "someone wants to buy software" at all — it could be a market/investment opportunity, a partnership opening, a competitive move, anything — as long as it's filtered and explained through the lens of that user's stated interests.
 
 ## Root-cause read of the current code (verified, not assumed)
 
 Three places in the backend currently hard-code the system to the narrow "vendor buying intent" interpretation, which structurally excludes the broader "opportunity relevant to this user" interpretation the product should support:
 
 1. **Query generation is hard-coded to vendor-buying phrasing.**
-   `SocialListeningOrchestrator::buildQueries()` (`app/Services/Intent/SocialListeningOrchestrator.php:164-203`) tells the LLM: *"Generate 3-5 short Google search queries to find B2B buying-intent social posts... NOT job ads, recruiting, or generic thought leadership... Include buying phrases like 'looking for', 'recommend', 'alternative to', 'switching from', 'how much', 'vendor'."* This means the search net itself is only ever cast for "someone wants to buy a tool," never for "something happened in the world that matters to this user's stated interests" (e.g. an investment opening, a market shift, a regulatory change, a competitor raising funding).
+   `SocialListeningOrchestrator::buildQueries()` (`app/Services/Intent/SocialListeningOrchestrator.php:164-203`) tells the LLM: _"Generate 3-5 short Google search queries to find B2B buying-intent social posts... NOT job ads, recruiting, or generic thought leadership... Include buying phrases like 'looking for', 'recommend', 'alternative to', 'switching from', 'how much', 'vendor'."_ This means the search net itself is only ever cast for "someone wants to buy a tool," never for "something happened in the world that matters to this user's stated interests" (e.g. an investment opening, a market shift, a regulatory change, a competitor raising funding).
 
 2. **Signals outside the sales taxonomy are silently discarded.**
    `SocialListeningOrchestrator::matchesIntentFilters()` (same file, line 209-242) and the hard floor in `SocialSignalEnricher::normalizeSignalType()` (`app/Services/Intent/SocialSignalEnricher.php:120-166`) constrain every signal to exactly one of: `recommendation`, `switching`, `pricing`, `hiring_expansion`, or `other` — and `other` is explicitly suppressed (`if ($signalType === '' || $signalType === 'other') { return false; }`, line 216-218). An investment opportunity, a market-entry signal, a partnership opening — none of these map cleanly onto that taxonomy, so under today's rules they would either get force-fit into the wrong bucket or dropped as `other` before the user ever sees them.
 
-3. **The AI never explains "why this matters to *you*."**
-   `SocialSignalEnricher::enrich()` (`app/Services/Intent/SocialSignalEnricher.php:34-89`) generates `reasons` (why this is a good *sales lead*), `problem` (the prospect's pain point), and `recommended_action` (what the *sales rep* should do next) — all framed around the rep pitching the prospect. There is no field anywhere in the pipeline framed around the *viewing user's own* goals — nothing that says "based on your ICP, you're interested in X, and this is a fit because Y, and here's what you personally gain." This is a gap in framing, not just a missing field: even the six fields already identified as missing earlier in this doc (`summary`, `entityType`, `industry`, `keyTopics`, `competitors`, `followUpStrategy`) are still written from a *seller's* point of view, not a *this-user's-personal-benefit* point of view.
+3. **The AI never explains "why this matters to _you_."**
+   `SocialSignalEnricher::enrich()` (`app/Services/Intent/SocialSignalEnricher.php:34-89`) generates `reasons` (why this is a good _sales lead_), `problem` (the prospect's pain point), and `recommended_action` (what the _sales rep_ should do next) — all framed around the rep pitching the prospect. There is no field anywhere in the pipeline framed around the _viewing user's own_ goals — nothing that says "based on your ICP, you're interested in X, and this is a fit because Y, and here's what you personally gain." This is a gap in framing, not just a missing field: even the six fields already identified as missing earlier in this doc (`summary`, `entityType`, `industry`, `keyTopics`, `competitors`, `followUpStrategy`) are still written from a _seller's_ point of view, not a _this-user's-personal-benefit_ point of view.
 
 4. **The ICP model has no explicit "what does this user want out of this" field.**
-   `IcpBrief` (`app/Services/Discovery/DTO/IcpBrief.php`) captures `industries`, `territories`, `companySizes`, `decisionMakers`, and a freeform `customPrompt`. Of these, only `customPrompt` is a plausible place today to express something like "I'm interested in investment opportunities in tech markets outside my country" — and nothing downstream currently reads `customPrompt` when generating the *personalization framing* (it's only used, weakly, in query generation). There is currently no first-class "user interest / goal statement" field distinct from the company-targeting fields, which is why the pipeline defaults to treating every ICP as "a company that sells things and wants leads," even when the user's real intent is closer to "a person who wants to be alerted to opportunities."
+   `IcpBrief` (`app/Services/Discovery/DTO/IcpBrief.php`) captures `industries`, `territories`, `companySizes`, `decisionMakers`, and a freeform `customPrompt`. Of these, only `customPrompt` is a plausible place today to express something like "I'm interested in investment opportunities in tech markets outside my country" — and nothing downstream currently reads `customPrompt` when generating the _personalization framing_ (it's only used, weakly, in query generation). There is currently no first-class "user interest / goal statement" field distinct from the company-targeting fields, which is why the pipeline defaults to treating every ICP as "a company that sells things and wants leads," even when the user's real intent is closer to "a person who wants to be alerted to opportunities."
 
-**Open question — the "preview/future" feature you mentioned:** you referenced an existing feature where the user already sees a preview of *what kind of things* Social Listening will surface for them, based on their profile, before signals start coming in. I looked for this (ICP builder modal, settings modal, onboarding flows) but could not confirm which specific screen/component you mean — the AI-refinement personalization described below should key off whatever that feature already captures, rather than introducing a second, conflicting place to state interests. Flag the exact screen/component when we're ready to scope implementation, so the new personalization fields and that existing feature read from the same source of truth instead of drifting apart.
+**Open question — the "preview/future" feature you mentioned:** you referenced an existing feature where the user already sees a preview of _what kind of things_ Social Listening will surface for them, based on their profile, before signals start coming in. I looked for this (ICP builder modal, settings modal, onboarding flows) but could not confirm which specific screen/component you mean — the AI-refinement personalization described below should key off whatever that feature already captures, rather than introducing a second, conflicting place to state interests. Flag the exact screen/component when we're ready to scope implementation, so the new personalization fields and that existing feature read from the same source of truth instead of drifting apart.
 
 ## Proposed strategy (for discussion — not yet scoped into a build plan)
 
@@ -352,15 +355,17 @@ Three places in the backend currently hard-code the system to the narrow "vendor
 3. **Rewrite query generation to search for relevance-to-user, not just buying-intent phrasing.** The system prompt in `buildQueries()` needs to stop hard-excluding "thought leadership" and non-buying content — for an investment-interested user, exactly the kind of post it currently excludes (e.g. "Company X just opened a funding round") is the highest-value hit.
 
 4. **Add a personalization layer to enrichment, distinct from the existing sales-framed fields.** Concretely, alongside (not replacing) the existing `reasons`/`problem`/`recommendedAction`, add fields explicitly framed around the viewer:
-   - `whyThisMattersToYou` — one to two sentences, written in second person, tying the signal directly back to the user's stated ICP/interest (e.g. "Based on your interest in East African fintech investment, this funding round signals a market you're actively tracking is heating up.")
-   - `benefits` (array) — concrete things the user personally stands to gain (e.g. "Early visibility before this becomes public news", "A comparable-deal benchmark for your own portfolio").
-   - `opportunityType` — replaces/extends `signal_type` per point 1.
-   - `personalRecommendedAction` — what *this user* (not a sales rep) should do next (e.g. "Review the funding terms and reach out to the lead investor's syndicate before the round closes"), as a `{title, detail}` object — same shape fix already proposed for `recommendedAction` in the technical gap analysis above.
-   These sit alongside the sales-outreach fields rather than replacing them, so Social Listening can keep serving its existing SDR use case for organizations that want that, while also serving the broader "personal opportunity assistant" use case for ICPs configured that way.
+    - `whyThisMattersToYou` — one to two sentences, written in second person, tying the signal directly back to the user's stated ICP/interest (e.g. "Based on your interest in East African fintech investment, this funding round signals a market you're actively tracking is heating up.")
+    - `benefits` (array) — concrete things the user personally stands to gain (e.g. "Early visibility before this becomes public news", "A comparable-deal benchmark for your own portfolio").
+    - `opportunityType` — replaces/extends `signal_type` per point 1.
+    - `personalRecommendedAction` — what _this user_ (not a sales rep) should do next (e.g. "Review the funding terms and reach out to the lead investor's syndicate before the round closes"), as a `{title, detail}` object — same shape fix already proposed for `recommendedAction` in the technical gap analysis above.
+      These sit alongside the sales-outreach fields rather than replacing them, so Social Listening can keep serving its existing SDR use case for organizations that want that, while also serving the broader "personal opportunity assistant" use case for ICPs configured that way.
 
 5. **Score relevance against the user's stated interest, not just a generic buying-intent heuristic.** `SocialSignalEnricher::resolveScore()` (`app/Services/Intent/SocialSignalEnricher.php:168-206`) currently boosts score only for industry/territory keyword overlap. It should also weight how directly the signal matches the user's explicit interest statement from point 2 — a strong industry match with no relevance to what the user actually asked to be alerted about should not outscore a weaker industry match that's a bullseye on their stated goal.
 
-6. **Treat this as additive to, not a replacement for, the field-gap work above.** The six missing fields and the `recommendedAction` shape fix identified earlier in this document are still correct and still needed — they're prerequisites either way. This section is the next layer on top: it changes *what the AI is asked to produce* and *what gets searched for*, not just *what gets serialized in the API response*.
+6. **Treat this as additive to, not a replacement for, the field-gap work above.** The six missing fields and the `recommendedAction` shape fix identified earlier in this document are still correct and still needed — they're prerequisites either way. This section is the next layer on top: it changes _what the AI is asked to produce_ and _what gets searched for_, not just _what gets serialized in the API response_.
+
+7. **Freshness-first (implemented 2026-09-08).** Opportunities lose value when stale. The pipeline now biases Serper with `tbs`, parses real `posted_at`, hard-drops known dates outside `freshness_window_days`, blends recency into score, and ranks by freshness-adjusted score then `posted_at`. Personalization remains ICP-grounded; freshness ensures the opportunities shown are still actionable.
 
 ## What's needed before this becomes an implementation plan
 

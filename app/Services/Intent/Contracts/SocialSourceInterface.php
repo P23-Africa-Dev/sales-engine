@@ -13,7 +13,14 @@ interface SocialSourceInterface
     public function isEnabled(IcpBrief $brief, array $enabledSources): bool;
 
     /**
+     * @param  string  $tbs  Serper time filter, e.g. qdr:d / qdr:w / qdr:m
      * @return Collection<int, RawSocialHit>
      */
-    public function search(IcpBrief $brief, string $query, int $organizationId, int $limit = 8): Collection;
+    public function search(
+        IcpBrief $brief,
+        string $query,
+        int $organizationId,
+        int $limit = 8,
+        string $tbs = 'qdr:w',
+    ): Collection;
 }

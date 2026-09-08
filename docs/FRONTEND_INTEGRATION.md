@@ -338,7 +338,7 @@ PUT /api/v1/outreach/sender-settings
 Requires an **active ICP** (422 otherwise).
 
 ```http
-GET /api/v1/social-listening/signals?page=1&per_page=20&search=&source=&signal_type=&buying_stage=
+GET /api/v1/social-listening/signals?page=1&per_page=20&search=&source=&signal_type=&buying_stage=&max_age_days=
 GET /api/v1/social-listening/signals/{id}
 GET /api/v1/social-listening/metrics
 GET /api/v1/social-listening/settings
@@ -352,6 +352,8 @@ POST /api/v1/social-listening/signals/{id}/dismiss
 ```
 
 Signals are a **personal opportunity assistant** for the viewing user, not only an SDR buying-intent feed. `signalType` extends the original sales set (`recommendation`, `switching`, `pricing`, `hiring_expansion`) with opportunity types (`investment_opportunity`, `market_signal`, `partnership_opportunity`, `competitive_move`, `funding_event`, `regulatory_change`, `other`). Enrichment is always personalized against the active ICP's `config.customPrompt` + `description` — every signal carries both the original sales fields (`suggestedMessage`, `recommendedAction`) and user-centric fields (`whyThisMattersToYou`, `benefits`, `personalRecommendedAction`).
+
+**Freshness (always-on):** Serper searches use a time bias (`tbs`, e.g. past week/month) derived from `freshness_window_days` (settings default `14`; allowed `7|14|30`). Known post dates older than the window are discarded at ingest. Scores blend ICP relevance with a freshness factor. List sort is `score` DESC, then `posted_at` DESC (nulls last). Optional list filter: `max_age_days`. `posted_at` is the parsed post time when available (never a fake timestamp).
 
 Signals list response:
 
@@ -459,6 +461,7 @@ Do not call Factory23 CRM for discovery data — discovery lives on this API.
 
 | Date       | Change                                                                         |
 | ---------- | ------------------------------------------------------------------------------ |
+| 2026-09-08 | Social Listening freshness: Serper `tbs`, real `posted_at`, `freshness_window_days`, score blend, list sort by score then `posted_at`, optional `max_age_days` |
 | 2026-09-08 | Social Listening: personal opportunity assistant framing — expanded `signalType` taxonomy, `recommendedAction`/`personalRecommendedAction` objects, `whyThisMattersToYou`/`benefits`, `summary`/`entityType`/`industry`/`keyTopics`/`competitors`/`followUpStrategy` |
 | 2026-09-02 | Chat async discovery (202 + poll), ICP-scoped sessions, clear chat history     |
 | 2026-09-02 | Social Listening API, SendGrid outreach sender settings, social signal actions |

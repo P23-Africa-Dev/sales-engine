@@ -184,6 +184,8 @@ class FreeformOpportunityRetriever
         $query = SocialSignal::query()
             ->where('organization_id', $organization->id)
             ->where('status', '!=', 'dismissed')
+            ->orderByRaw('posted_at IS NULL ASC')
+            ->orderByDesc('posted_at')
             ->orderByDesc('score')
             ->orderByDesc('id')
             ->limit(5);

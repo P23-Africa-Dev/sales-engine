@@ -21,6 +21,7 @@ class SocialListeningOrchestrator
         private readonly array $sources,
         private readonly SocialSignalEnricher $enricher,
         private readonly GlmClient $glm,
+        private readonly SignalFreshnessScorer $freshness = new SignalFreshnessScorer,
     ) {}
 
     public function run(
@@ -59,6 +60,8 @@ class SocialListeningOrchestrator
         try {
             $brief = IcpBrief::fromIcpProfile($icp);
             $enabled = $settings->enabled_sources ?? SocialListeningSetting::DEFAULT_SOURCES;
+            $windowDays = max(1, (int) ($settings->freshness_window_days ?? 14));
+            $tbs = $this->freshness->serperTbs($windowDays);
             $queries = $this->buildQueries($organization, $icp, $brief);
 
             $run->update(['stages' => ['analyzing_icp', 'searching_sources']]);
@@ -69,12 +72,12 @@ class SocialListeningOrchestrator
                     if (! $source->isEnabled($brief, $enabled)) {
                         continue;
                     }
-                    $hits = $hits->merge($source->search($brief, $query, $organization->id, 6));
+                    $hits = $hits->merge($source->search($brief, $query, $organization->id, 6, $tbs));
                 }
             }
 
             $uniqueHits = $hits
-                ->unique(fn(RawSocialHit $h) => md5(mb_strtolower($h->postUrl ?? $h->postText)))
+                ->unique(fn (RawSocialHit $h) => md5(mb_strtolower($h->postUrl ?? $h->postText)))
                 ->take(24);
 
             $run->update(['stages' => ['analyzing_icp', 'searching_sources', 'enriching']]);
@@ -82,6 +85,11 @@ class SocialListeningOrchestrator
             $created = 0;
             /** @var RawSocialHit $hit */
             foreach ($uniqueHits as $hit) {
+                // Hard freshness gate: known dates older than the window never become signals.
+                if ($this->freshness->isStale($hit->postedAt, $windowDays)) {
+                    continue;
+                }
+
                 $hash = md5(mb_strtolower($hit->postUrl ?? $hit->postText));
                 if (SocialSignal::query()
                     ->where('organization_id', $organization->id)
@@ -93,7 +101,13 @@ class SocialListeningOrchestrator
                 }
 
                 $enriched = $this->enricher->enrich($organization, $icp, $hit);
-                $score = (float) ($enriched['score'] ?? 0);
+                $relevance = (float) ($enriched['score'] ?? 0);
+                $score = $this->freshness->apply($relevance, $hit->postedAt, $windowDays);
+                $enriched['score'] = $score;
+                $enriched['urgency'] = $this->freshness->nudgeUrgency(
+                    isset($enriched['urgency']) ? (string) $enriched['urgency'] : null,
+                    $hit->postedAt,
+                );
 
                 if ($score < (float) $settings->min_score) {
                     continue;
@@ -116,7 +130,7 @@ class SocialListeningOrchestrator
                     'source_icon' => $hit->sourceIcon,
                     'post_text' => $hit->postText,
                     'summary' => $this->clip((string) ($enriched['summary'] ?? ''), 1000),
-                    'posted_at' => now()->subHours(2),
+                    'posted_at' => $hit->postedAt,
                     'profile_name' => $this->clip((string) ($enriched['profile_name'] ?? ''), 255),
                     'persona' => $this->clip((string) ($enriched['persona'] ?? ''), 255),
                     'company_name' => $this->clip((string) ($enriched['company_name'] ?? ''), 255),
@@ -144,7 +158,13 @@ class SocialListeningOrchestrator
                     'personal_recommended_action_title' => $this->clip((string) ($enriched['personal_recommended_action_title'] ?? ''), 255),
                     'personal_recommended_action_detail' => $this->clip((string) ($enriched['personal_recommended_action_detail'] ?? ''), 1000),
                     'status' => 'new',
-                    'meta' => ['title' => $hit->title, 'snippet' => $hit->snippet],
+                    'meta' => [
+                        'title' => $hit->title,
+                        'snippet' => $hit->snippet,
+                        'date_raw' => $hit->dateRaw,
+                        'relevance_score' => $relevance,
+                        'freshness_factor' => $this->freshness->factor($hit->postedAt, $windowDays),
+                    ],
                 ]);
 
                 $created++;
@@ -180,17 +200,19 @@ class SocialListeningOrchestrator
                 $json = $this->glm->chatJson([
                     [
                         'role' => 'system',
-                        'content' => 'Generate 3-5 short Google search queries to find social/web posts that are genuine opportunities for a specific user, grounded in their ICP and stated interests (custom_prompt/description). '
-                            . 'Buying-intent phrasing ("looking for", "recommend", "alternative to", "switching from", "how much", "vendor") is ONE valid angle WHEN it matches the user\'s interests — but it is not the only one. '
-                            . 'Also generate queries for funding/investment news, market moves, partnerships, competitive moves, and regulatory changes WHEN the custom_prompt/description implies the user cares about those (e.g. investing, market research, deal sourcing). '
-                            . 'Do not blanket-exclude thought-leadership or news-style content — only avoid it when it is clearly irrelevant to the stated interests. '
-                            . 'Weight custom_prompt heavily: it is the clearest statement of what this user actually wants. '
-                            . 'Return JSON: {"queries":["..."]}',
+                        'content' => 'Generate 3-5 short Google search queries to find FRESH social/web posts that are genuine opportunities for a specific user, grounded in their ICP and stated interests (custom_prompt/description). '
+                            .'Prefer timely language: "past week", "this week", "latest", "just announced", "recent", current year. '
+                            .'Buying-intent phrasing ("looking for", "recommend", "alternative to", "switching from", "how much", "vendor") is ONE valid angle WHEN it matches the user\'s interests — but it is not the only one. '
+                            .'Also generate queries for funding/investment news, market moves, partnerships, competitive moves, and regulatory changes WHEN the custom_prompt/description implies the user cares about those (e.g. investing, market research, deal sourcing). '
+                            .'Do not blanket-exclude thought-leadership or news-style content — only avoid it when it is clearly irrelevant to the stated interests. '
+                            .'Weight custom_prompt heavily: it is the clearest statement of what this user actually wants. '
+                            .'Prioritize opportunities that would still be actionable now — not historical roundups from months/years ago. '
+                            .'Return JSON: {"queries":["..."]}',
                     ],
                     [
                         'role' => 'user',
                         'content' => json_encode([
-                            'industries' => array_values(array_filter($brief->industries, fn($i) => is_string($i) && mb_strlen(trim($i)) >= 3 && ! in_array(mb_strtolower(trim($i)), ['yes', 'no', 'n/a'], true))),
+                            'industries' => array_values(array_filter($brief->industries, fn ($i) => is_string($i) && mb_strlen(trim($i)) >= 3 && ! in_array(mb_strtolower(trim($i)), ['yes', 'no', 'n/a'], true))),
                             'territories' => $brief->territories,
                             'decision_makers' => $brief->decisionMakers,
                             'custom_prompt' => $brief->customPrompt,
@@ -216,6 +238,7 @@ class SocialListeningOrchestrator
             implode(' ', array_slice($brief->industries, 0, 1)),
             implode(' ', array_slice($brief->territories, 0, 1)),
             $interestPhrase,
+            'past week OR latest OR just announced',
         ]);
 
         return [trim(implode(' ', $parts))];

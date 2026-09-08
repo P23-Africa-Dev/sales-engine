@@ -42,6 +42,7 @@ class SocialListeningController extends Controller
             'source' => ['nullable', 'string', 'max:64'],
             'signal_type' => ['nullable', 'string', 'max:64'],
             'buying_stage' => ['nullable', 'string', 'max:64'],
+            'max_age_days' => ['nullable', 'integer', 'min:1', 'max:90'],
         ]);
 
         $org = OrgContext::require();
@@ -55,7 +56,17 @@ class SocialListeningController extends Controller
             ->where('icp_profile_id', $icp->id)
             ->where('status', '!=', 'dismissed')
             ->orderByDesc('score')
+            ->orderByRaw('posted_at IS NULL ASC')
+            ->orderByDesc('posted_at')
             ->orderByDesc('id');
+
+        if (array_key_exists('max_age_days', $data) && $data['max_age_days'] !== null) {
+            $cutoff = now()->subDays((int) $data['max_age_days']);
+            $query->where(function ($q) use ($cutoff) {
+                $q->whereNull('posted_at')
+                    ->orWhere('posted_at', '>=', $cutoff);
+            });
+        }
 
         if (! empty($data['search'])) {
             $term = '%' . $data['search'] . '%';
@@ -170,6 +181,7 @@ class SocialListeningController extends Controller
             'enabled_sources' => ['nullable', 'array'],
             'cadence_days' => ['nullable', 'integer', 'in:14,30'],
             'min_score' => ['nullable', 'integer', 'min:40', 'max:90'],
+            'freshness_window_days' => ['nullable', 'integer', 'in:7,14,30'],
             'intent_filters' => ['nullable', 'array'],
             'crm_destination' => ['nullable', 'string', 'in:qualified_pipeline,human_review'],
             'outreach_channel_default' => ['nullable', 'string', 'in:email,human_follow_up'],
@@ -390,6 +402,7 @@ class SocialListeningController extends Controller
             'enabled_sources' => $setting->enabled_sources ?? SocialListeningSetting::DEFAULT_SOURCES,
             'cadence_days' => $setting->cadence_days,
             'min_score' => $setting->min_score,
+            'freshness_window_days' => (int) ($setting->freshness_window_days ?? 14),
             'intent_filters' => $setting->intent_filters ?? SocialListeningSetting::DEFAULT_INTENT_FILTERS,
             'crm_destination' => $setting->crm_destination,
             'outreach_channel_default' => $setting->outreach_channel_default,

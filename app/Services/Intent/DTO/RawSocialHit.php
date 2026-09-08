@@ -2,6 +2,8 @@
 
 namespace App\Services\Intent\DTO;
 
+use Carbon\CarbonInterface;
+
 readonly class RawSocialHit
 {
     public function __construct(
@@ -13,5 +15,7 @@ readonly class RawSocialHit
         public ?string $snippet,
         public ?string $title,
         public ?string $authorName = null,
+        public ?CarbonInterface $postedAt = null,
+        public ?string $dateRaw = null,
     ) {}
 }

@@ -475,4 +475,192 @@ class SocialListeningTest extends TestCase
             ->assertJsonPath('data.entityType', 'company')
             ->assertJsonPath('data.keyTopics.0', 'funding');
     }
+
+    public function test_serper_search_sends_tbs_and_persists_parsed_posted_at(): void
+    {
+        config([
+            'services.serper.api_key' => 'test-serper',
+            'services.serper.base_url' => 'https://google.serper.dev',
+            'services.glm.api_key' => '',
+            'services.social_listening.daily_api_cap' => 500,
+        ]);
+
+        Http::fake([
+            'google.serper.dev/*' => Http::response([
+                'organic' => [[
+                    'title' => 'Anyone recommend FMCG logistics software in Lagos?',
+                    'link' => 'https://linkedin.com/posts/fresh-1',
+                    'snippet' => 'Looking for recommendations on FMCG distribution tools in Lagos.',
+                    'date' => '2 days ago',
+                ]],
+            ], 200),
+        ]);
+
+        [$user, $org] = $this->actingAsOrgMember();
+        $icp = IcpProfile::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'FMCG',
+            'is_active' => true,
+            'config' => array_merge(IcpProfile::defaultConfig(), [
+                'industries' => ['FMCG & Retail'],
+                'territories' => ['Lagos, NG'],
+            ]),
+        ]);
+
+        $settings = SocialListeningSetting::query()->create(array_merge(
+            SocialListeningSetting::defaultsForOrg($org->id, $icp->id),
+            ['min_score' => 40, 'freshness_window_days' => 14]
+        ));
+
+        $run = app(SocialListeningOrchestrator::class)->run($org, $icp, $settings, $user);
+
+        $this->assertSame('completed', $run->status);
+        $this->assertGreaterThan(0, $run->signals_created);
+
+        Http::assertSent(function ($request) {
+            if (! str_contains($request->url(), 'google.serper.dev')) {
+                return true;
+            }
+            $data = $request->data();
+
+            return ($data['tbs'] ?? null) === 'qdr:m';
+        });
+
+        $signal = SocialSignal::query()->where('organization_id', $org->id)->firstOrFail();
+        $this->assertNotNull($signal->posted_at);
+        $this->assertTrue($signal->posted_at->greaterThan(now()->subDays(5)));
+        $this->assertSame('2 days ago', $signal->meta['date_raw'] ?? null);
+    }
+
+    public function test_stale_dated_hits_are_not_created(): void
+    {
+        config([
+            'services.serper.api_key' => 'test-serper',
+            'services.serper.base_url' => 'https://google.serper.dev',
+            'services.glm.api_key' => '',
+            'services.social_listening.daily_api_cap' => 500,
+        ]);
+
+        Http::fake([
+            'google.serper.dev/*' => Http::response([
+                'organic' => [[
+                    'title' => 'Anyone recommend FMCG logistics software in Lagos?',
+                    'link' => 'https://linkedin.com/posts/stale-1',
+                    'snippet' => 'Looking for recommendations on FMCG distribution tools in Lagos.',
+                    'date' => '40 days ago',
+                ]],
+            ], 200),
+        ]);
+
+        [$user, $org] = $this->actingAsOrgMember();
+        $icp = IcpProfile::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'FMCG',
+            'is_active' => true,
+            'config' => array_merge(IcpProfile::defaultConfig(), [
+                'industries' => ['FMCG & Retail'],
+                'territories' => ['Lagos, NG'],
+            ]),
+        ]);
+
+        $settings = SocialListeningSetting::query()->create(array_merge(
+            SocialListeningSetting::defaultsForOrg($org->id, $icp->id),
+            ['min_score' => 40, 'freshness_window_days' => 14]
+        ));
+
+        $run = app(SocialListeningOrchestrator::class)->run($org, $icp, $settings, $user);
+
+        $this->assertSame('completed', $run->status);
+        $this->assertSame(0, $run->signals_created);
+        $this->assertDatabaseCount('social_signals', 0);
+    }
+
+    public function test_signals_list_orders_by_score_then_posted_at_and_supports_max_age(): void
+    {
+        [, $org] = $this->actingAsOrgMember();
+        $icp = IcpProfile::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'ICP',
+            'is_active' => true,
+            'config' => IcpProfile::defaultConfig(),
+        ]);
+
+        $older = SocialSignal::query()->create([
+            'organization_id' => $org->id,
+            'icp_profile_id' => $icp->id,
+            'platform' => 'linkedin',
+            'source_label' => 'LinkedIn Post',
+            'source_icon' => 'in',
+            'post_text' => 'Older same score',
+            'score' => 80,
+            'status' => 'new',
+            'posted_at' => now()->subDays(5),
+        ]);
+
+        $newer = SocialSignal::query()->create([
+            'organization_id' => $org->id,
+            'icp_profile_id' => $icp->id,
+            'platform' => 'linkedin',
+            'source_label' => 'LinkedIn Post',
+            'source_icon' => 'in',
+            'post_text' => 'Newer same score',
+            'score' => 80,
+            'status' => 'new',
+            'posted_at' => now()->subHours(6),
+        ]);
+
+        $stale = SocialSignal::query()->create([
+            'organization_id' => $org->id,
+            'icp_profile_id' => $icp->id,
+            'platform' => 'linkedin',
+            'source_label' => 'LinkedIn Post',
+            'source_icon' => 'in',
+            'post_text' => 'Too old for max_age filter',
+            'score' => 80,
+            'status' => 'new',
+            'posted_at' => now()->subDays(30),
+        ]);
+
+        $this->withHeaders($this->orgHeaders($org))
+            ->getJson('/api/v1/social-listening/signals?per_page=10')
+            ->assertOk()
+            ->assertJsonPath('data.0.id', $newer->id)
+            ->assertJsonPath('data.1.id', $older->id)
+            ->assertJsonPath('data.2.id', $stale->id);
+
+        $filtered = $this->withHeaders($this->orgHeaders($org))
+            ->getJson('/api/v1/social-listening/signals?max_age_days=7')
+            ->assertOk();
+
+        $ids = collect($filtered->json('data'))->pluck('id')->all();
+        $this->assertSame([$newer->id, $older->id], $ids);
+        $this->assertSame(2, $filtered->json('meta.total'));
+    }
+
+    public function test_settings_include_freshness_window_days(): void
+    {
+        [, $org] = $this->actingAsOrgMember();
+        $icp = IcpProfile::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'ICP',
+            'is_active' => true,
+            'config' => IcpProfile::defaultConfig(),
+        ]);
+
+        SocialListeningSetting::query()->create(
+            SocialListeningSetting::defaultsForOrg($org->id, $icp->id)
+        );
+
+        $this->withHeaders($this->orgHeaders($org))
+            ->getJson('/api/v1/social-listening/settings')
+            ->assertOk()
+            ->assertJsonPath('data.freshness_window_days', 14);
+
+        $this->withHeaders($this->orgHeaders($org))
+            ->putJson('/api/v1/social-listening/settings', [
+                'freshness_window_days' => 7,
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.freshness_window_days', 7);
+    }
 }
