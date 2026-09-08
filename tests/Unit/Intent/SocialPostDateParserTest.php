@@ -47,6 +47,21 @@ class SocialPostDateParserTest extends TestCase
         $this->assertNull((new SocialPostDateParser)->parse(null, null));
         $this->assertNull((new SocialPostDateParser)->parse('', ''));
     }
+
+    public function test_parses_compact_year_and_linkedin_activity_url(): void
+    {
+        $now = Carbon::parse('2026-09-08 12:00:00');
+        $parser = new SocialPostDateParser;
+
+        $yr = $parser->parse('1yr', null, $now);
+        $this->assertNotNull($yr);
+        $this->assertSame('2025-09-08', $yr->toDateString());
+
+        $url = 'https://www.linkedin.com/posts/bloom-public-health_lagos-free-zone-activity-7330955130554466307-Nacg';
+        $fromUrl = $parser->parse(null, null, $now, $url);
+        $this->assertNotNull($fromUrl);
+        $this->assertSame('2025-05-21', $fromUrl->toDateString());
+    }
 }
 
 class SignalFreshnessScorerTest extends TestCase

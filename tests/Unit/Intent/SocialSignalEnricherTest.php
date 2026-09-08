@@ -62,6 +62,14 @@ class SocialSignalEnricherTest extends TestCase
             'funding_event',
             $enricher->normalizeSignalType('', '', 'Startup raises $10M in Series A funding round led by top VC.')
         );
+        $this->assertSame(
+            'market_signal',
+            $enricher->normalizeSignalType('', '', 'Bloom invites pharma companies seeking to expand their footprint in West Africa.')
+        );
+        $this->assertSame(
+            'hiring_expansion',
+            $enricher->normalizeSignalType('', '', 'We are hiring a Head of Sales for our Lagos team.')
+        );
     }
 
     public function test_heuristic_enrich_populates_personalization_fields(): void

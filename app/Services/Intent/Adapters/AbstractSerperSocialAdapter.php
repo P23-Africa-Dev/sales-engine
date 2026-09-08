@@ -96,7 +96,7 @@ abstract class AbstractSerperSocialAdapter implements SocialSourceInterface
                 $link = isset($item['link']) ? (string) $item['link'] : null;
                 $dateRaw = isset($item['date']) ? (string) $item['date'] : null;
                 $postText = trim($snippet !== '' ? $snippet : $title);
-                $postedAt = $this->dateParser->parse($dateRaw, $snippet ?: null);
+                $postedAt = $this->dateParser->parse($dateRaw, $snippet ?: null, null, $link);
 
                 return new RawSocialHit(
                     platform: $this->platform(),

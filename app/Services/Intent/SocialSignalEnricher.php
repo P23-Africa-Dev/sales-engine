@@ -53,18 +53,18 @@ class SocialSignalEnricher
                     [
                         'role' => 'system',
                         'content' => 'Extract a structured opportunity from a social post for a specific viewing user, grounded in their ICP / stated interests. '
-                            .'Return JSON only with keys: profile_name, persona, company_name, location_text, entity_type, industry, key_topics, competitors, '
-                            .'signal_type, buying_stage, intent_label, intent_description, problem, urgency, buying_intent_score (0-100 integer for overall relevance/opportunity strength for this user), '
-                            .'reasons (array of strings citing ICP/interest match when applicable), suggested_message, recommended_action_title, recommended_action_detail, follow_up_strategy, '
-                            .'summary (concise neutral summary of the signal), why_this_matters_to_you (2nd person, cite the user\'s ICP/interest fields explicitly), '
-                            .'benefits (array of concrete personal/user gains), personal_recommended_action_title, personal_recommended_action_detail (the single best next step for THIS user). '
-                            .'signal_type MUST be exactly one of: recommendation, switching, pricing, hiring_expansion, investment_opportunity, market_signal, partnership_opportunity, competitive_move, funding_event, regulatory_change, other. '
-                            .'Use investment_opportunity/funding_event for funding rounds, capital raises, or investable openings. Use market_signal for market shifts, expansions, or trend news relevant to the user\'s interests. '
-                            .'Use partnership_opportunity for potential collaborations. Use competitive_move for competitor actions worth knowing about. Use regulatory_change for policy/regulatory news. '
-                            .'Use hiring_expansion for hiring/recruiting/expansion posts. Use recommendation/switching/pricing when the author is asking for vendors, alternatives, costs, or tools. '
-                            .'Use other only for content with no plausible relevance to the user\'s ICP/interests, or spam. Do not force unrelated content into a sales bucket — pick the type that best matches WHY this matters to the user. '
-                            .'Prefer timely angles: if the post is recent or time-sensitive, say so in why_this_matters_to_you and urgency. '
-                            .'Every field must be populated (use empty string/array rather than omitting a key).',
+                            . 'Return JSON only with keys: profile_name, persona, company_name, location_text, entity_type, industry, key_topics, competitors, '
+                            . 'signal_type, buying_stage, intent_label, intent_description, problem, urgency, buying_intent_score (0-100 integer for overall relevance/opportunity strength for this user), '
+                            . 'reasons (array of strings citing ICP/interest match when applicable), suggested_message, recommended_action_title, recommended_action_detail, follow_up_strategy, '
+                            . 'summary (concise neutral summary of the signal), why_this_matters_to_you (2nd person, cite the user\'s ICP/interest fields explicitly), '
+                            . 'benefits (array of concrete personal/user gains), personal_recommended_action_title, personal_recommended_action_detail (the single best next step for THIS user). '
+                            . 'signal_type MUST be exactly one of: recommendation, switching, pricing, hiring_expansion, investment_opportunity, market_signal, partnership_opportunity, competitive_move, funding_event, regulatory_change, other. '
+                            . 'Use investment_opportunity/funding_event for funding rounds, capital raises, or investable openings. Use market_signal for market shifts, expansions, or trend news relevant to the user\'s interests. '
+                            . 'Use partnership_opportunity for potential collaborations. Use competitive_move for competitor actions worth knowing about. Use regulatory_change for policy/regulatory news. '
+                            . 'Use hiring_expansion for hiring/recruiting/expansion posts. Use recommendation/switching/pricing when the author is asking for vendors, alternatives, costs, or tools. '
+                            . 'Use other only for content with no plausible relevance to the user\'s ICP/interests, or spam. Do not force unrelated content into a sales bucket — pick the type that best matches WHY this matters to the user. '
+                            . 'Prefer timely angles: if the post is recent or time-sensitive, say so in why_this_matters_to_you and urgency. '
+                            . 'Every field must be populated (use empty string/array rather than omitting a key).',
                     ],
                     [
                         'role' => 'user',
@@ -243,9 +243,9 @@ class SocialSignalEnricher
         }
 
         $items = array_values(array_filter(array_map(
-            static fn ($item) => trim((string) $item),
+            static fn($item) => trim((string) $item),
             $value
-        ), static fn ($item) => $item !== ''));
+        ), static fn($item) => $item !== ''));
 
         return array_slice($items, 0, $limit);
     }
@@ -263,7 +263,6 @@ class SocialSignalEnricher
             'pricing' => 'pricing',
             'hiring' => 'hiring_expansion',
             'hiring_expansion' => 'hiring_expansion',
-            'expansion' => 'hiring_expansion',
             'job post' => 'hiring_expansion',
             'job posting' => 'hiring_expansion',
             'job opening' => 'hiring_expansion',
@@ -288,11 +287,22 @@ class SocialSignalEnricher
             return $aliases[$normalized];
         }
 
+        // "expansion" alone is ambiguous (market expansion ≠ hiring). Only keep the hiring
+        // alias when the label clearly means recruiting.
+        if ($normalized === 'expansion' || $normalized === 'expanding') {
+            $probe = mb_strtolower(trim($intentLabel . ' ' . $postText));
+            if (preg_match('/\b(hiring|hire|recruit|job|vacancy|headcount|open role|we.?re hiring)\b/u', $probe)) {
+                return 'hiring_expansion';
+            }
+
+            return 'market_signal';
+        }
+
         if (in_array($normalized, self::CANONICAL_SIGNAL_TYPES, true)) {
             return $normalized;
         }
 
-        $haystack = mb_strtolower(trim($signalType.' '.$intentLabel.' '.$postText));
+        $haystack = mb_strtolower(trim($signalType . ' ' . $intentLabel . ' ' . $postText));
 
         if ($haystack === '') {
             return 'other';
@@ -301,13 +311,13 @@ class SocialSignalEnricher
         // ICP interest language takes priority: if the user's custom prompt / description
         // signals a non-sales focus (e.g. investing), classify opportunity-shaped content
         // into that bucket instead of defaulting to sales buckets or discarding it.
-        $interest = $brief !== null ? mb_strtolower(trim($brief->customPrompt.' '.$brief->description)) : '';
+        $interest = $brief !== null ? mb_strtolower(trim($brief->customPrompt . ' ' . $brief->description)) : '';
 
         if (preg_match('/\b(raises?|raised|funding round|series [a-e]|seed round|venture capital|invest(or|ment|ing)?)\b/u', $haystack)) {
             return 'funding_event';
         }
 
-        if (preg_match('/\b(partnership|collaborat|joint venture|alliance)\b/u', $haystack)) {
+        if (preg_match('/\b(partnership|collaborat|joint venture|alliance|invitation to .+ companies)\b/u', $haystack)) {
             return 'partnership_opportunity';
         }
 
@@ -323,11 +333,17 @@ class SocialSignalEnricher
             return 'pricing';
         }
 
-        if (preg_match('/\b(hiring|hire|recruit|job|vacancy|expansion|expanding|headcount|we.?re looking for)/u', $haystack)) {
+        // Hiring only when recruiting language is present — NOT bare "expand/expansion"
+        // (those are market/growth signals, e.g. "expand their footprint").
+        if (preg_match('/\b(hiring|hire|recruit|job opening|job post|vacancy|headcount|open roles?|we.?re hiring|looking for a .*(manager|director|engineer|rep|sdr|ae))\b/u', $haystack)) {
             return 'hiring_expansion';
         }
 
-        if (preg_match('/\b(recommend|recommendation|looking for|any tool|vendor|software|solution|suggest)/u', $haystack)) {
+        if (preg_match('/\b(expand(ing|s)?(\s+\w+){0,2}\s+(footprint|into|operations|presence|market)|market expansion|geographic expansion|enter(ing)? (the )?market)\b/u', $haystack)) {
+            return 'market_signal';
+        }
+
+        if (preg_match('/\b(recommend|recommendation|looking for|any tool|vendor|software|solution|suggest)\b/u', $haystack)) {
             return 'recommendation';
         }
 
@@ -413,7 +429,7 @@ class SocialSignalEnricher
      */
     private function interestTokens(IcpBrief $brief): array
     {
-        $raw = mb_strtolower(trim($brief->customPrompt.' '.$brief->description));
+        $raw = mb_strtolower(trim($brief->customPrompt . ' ' . $brief->description));
         if ($raw === '') {
             return [];
         }
@@ -421,7 +437,7 @@ class SocialSignalEnricher
         $words = preg_split('/[^\p{L}\p{N}]+/u', $raw) ?: [];
         $stopwords = ['the', 'and', 'for', 'with', 'that', 'this', 'from', 'want', 'looking', 'high', 'outside', 'home', 'market'];
 
-        return array_values(array_filter($words, static fn ($w) => mb_strlen($w) >= 4 && ! in_array($w, $stopwords, true)));
+        return array_values(array_filter($words, static fn($w) => mb_strlen($w) >= 4 && ! in_array($w, $stopwords, true)));
     }
 
     private function intentLabelForType(string $signalType, string $fallback): string
