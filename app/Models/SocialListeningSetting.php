@@ -25,6 +25,7 @@ class SocialListeningSetting extends Model
         'organization_id',
         'icp_profile_id',
         'enabled_sources',
+        'meta_page_ids',
         'cadence_days',
         'min_score',
         'freshness_window_days',
@@ -42,6 +43,7 @@ class SocialListeningSetting extends Model
     {
         return [
             'enabled_sources' => 'array',
+            'meta_page_ids' => 'array',
             'intent_filters' => 'array',
             'last_run_at' => 'datetime',
         ];
@@ -63,6 +65,7 @@ class SocialListeningSetting extends Model
             'organization_id' => $organizationId,
             'icp_profile_id' => $icpProfileId,
             'enabled_sources' => self::DEFAULT_SOURCES,
+            'meta_page_ids' => [],
             'cadence_days' => 14,
             'min_score' => 55,
             'freshness_window_days' => 14,

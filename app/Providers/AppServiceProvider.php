@@ -71,6 +71,7 @@ class AppServiceProvider extends ServiceProvider
                     $app->make(\App\Services\Intent\Adapters\SerperXAdapter::class),
                     $app->make(\App\Services\Intent\Adapters\SerperRedditAdapter::class),
                     $app->make(\App\Services\Intent\Adapters\SerperMetaAdapter::class),
+                    $app->make(\App\Services\Intent\Adapters\MetaGraphPagesAdapter::class),
                 ],
                 enricher: $app->make(\App\Services\Intent\SocialSignalEnricher::class),
                 glm: $app->make(\App\Services\Llm\GlmClient::class),

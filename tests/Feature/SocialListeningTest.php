@@ -663,4 +663,38 @@ class SocialListeningTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.freshness_window_days', 7);
     }
+
+    public function test_settings_persist_meta_page_ids(): void
+    {
+        [, $org] = $this->actingAsOrgMember();
+        $icp = IcpProfile::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'ICP',
+            'is_active' => true,
+            'config' => IcpProfile::defaultConfig(),
+        ]);
+
+        SocialListeningSetting::query()->create(
+            SocialListeningSetting::defaultsForOrg($org->id, $icp->id)
+        );
+
+        $this->withHeaders($this->orgHeaders($org))
+            ->getJson('/api/v1/social-listening/settings')
+            ->assertOk()
+            ->assertJsonPath('data.meta_page_ids', []);
+
+        $this->withHeaders($this->orgHeaders($org))
+            ->putJson('/api/v1/social-listening/settings', [
+                'enabled_sources' => ['meta_graph_pages', 'linkedin_public'],
+                'meta_page_ids' => ['@AcmeCorp', ' 123456789 ', '', 'competitor-page'],
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.meta_page_ids', ['AcmeCorp', '123456789', 'competitor-page'])
+            ->assertJsonPath('data.enabled_sources', ['meta_graph_pages', 'linkedin_public']);
+
+        $this->withHeaders($this->orgHeaders($org))
+            ->getJson('/api/v1/social-listening/settings')
+            ->assertOk()
+            ->assertJsonPath('data.meta_page_ids', ['AcmeCorp', '123456789', 'competitor-page']);
+    }
 }

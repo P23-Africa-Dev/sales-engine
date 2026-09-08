@@ -45,8 +45,9 @@ abstract class AbstractSerperSocialAdapter implements SocialSourceInterface
         int $organizationId,
         int $limit = 8,
         string $tbs = 'qdr:w',
+        array $context = [],
     ): Collection {
-        $siteClause = implode(' OR ', array_map(fn (string $s) => "site:{$s}", $this->siteFilters()));
+        $siteClause = implode(' OR ', array_map(fn(string $s) => "site:{$s}", $this->siteFilters()));
         $fullQuery = trim("({$siteClause}) {$query}");
 
         $baseUrl = rtrim((string) config('services.serper.base_url'), '/');
@@ -64,12 +65,12 @@ abstract class AbstractSerperSocialAdapter implements SocialSourceInterface
                     'X-API-KEY' => (string) config('services.serper.api_key'),
                     'Content-Type' => 'application/json',
                 ])
-                ->post($baseUrl.'/search', $payload);
+                ->post($baseUrl . '/search', $payload);
 
             ApiUsage::query()->create([
                 'organization_id' => $organizationId,
                 'provider' => 'serper',
-                'endpoint' => 'social_'.$this->sourceKey(),
+                'endpoint' => 'social_' . $this->sourceKey(),
                 'units' => 1,
                 'estimated_cost' => 0.005,
                 'meta' => [
@@ -109,7 +110,7 @@ abstract class AbstractSerperSocialAdapter implements SocialSourceInterface
                     postedAt: $postedAt,
                     dateRaw: $dateRaw,
                 );
-            })->filter(fn (RawSocialHit $h) => $h->postText !== '')->values();
+            })->filter(fn(RawSocialHit $h) => $h->postText !== '')->values();
         } catch (\Throwable $e) {
             Log::warning('Serper social search exception', [
                 'source' => $this->sourceKey(),

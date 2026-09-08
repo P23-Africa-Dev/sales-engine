@@ -33,11 +33,15 @@ class SocialListeningOrchestrator
     ): SocialListeningRun {
         $dailyCap = (int) config('services.social_listening.daily_api_cap', 200);
         if ($dailyCap > 0) {
-            // Only count social-listening Serper calls — not discovery/chat/enrichment usage.
+            // Count social-listening Serper + Meta Graph calls — not discovery/chat/enrichment usage.
             $usageToday = \App\Models\ApiUsage::query()
                 ->where('organization_id', $organization->id)
-                ->where('provider', 'serper')
-                ->where('endpoint', 'like', 'social_%')
+                ->where(function ($q) {
+                    $q->where(function ($inner) {
+                        $inner->where('provider', 'serper')
+                            ->where('endpoint', 'like', 'social_%');
+                    })->orWhere('provider', 'meta_graph');
+                })
                 ->whereDate('created_at', today())
                 ->count();
 
@@ -66,13 +70,20 @@ class SocialListeningOrchestrator
 
             $run->update(['stages' => ['analyzing_icp', 'searching_sources']]);
 
+            $context = [
+                'meta_page_ids' => array_values(array_filter(
+                    array_map('strval', $settings->meta_page_ids ?? []),
+                    fn(string $id) => trim($id) !== ''
+                )),
+            ];
+
             $hits = collect();
             foreach ($queries as $query) {
                 foreach ($this->sources as $source) {
                     if (! $source->isEnabled($brief, $enabled)) {
                         continue;
                     }
-                    $hits = $hits->merge($source->search($brief, $query, $organization->id, 6, $tbs));
+                    $hits = $hits->merge($source->search($brief, $query, $organization->id, 6, $tbs, $context));
                 }
             }
 

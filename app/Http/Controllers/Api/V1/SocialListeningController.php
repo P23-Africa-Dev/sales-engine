@@ -179,6 +179,8 @@ class SocialListeningController extends Controller
 
         $data = $request->validate([
             'enabled_sources' => ['nullable', 'array'],
+            'meta_page_ids' => ['nullable', 'array'],
+            'meta_page_ids.*' => ['nullable', 'string', 'max:255'],
             'cadence_days' => ['nullable', 'integer', 'in:14,30'],
             'min_score' => ['nullable', 'integer', 'min:40', 'max:90'],
             'freshness_window_days' => ['nullable', 'integer', 'in:7,14,30'],
@@ -190,6 +192,13 @@ class SocialListeningController extends Controller
             'org_verified_domain' => ['nullable', 'string', 'max:255'],
             'verification_status' => ['nullable', 'string', 'in:pending,verified,failed'],
         ]);
+
+        if (array_key_exists('meta_page_ids', $data) && is_array($data['meta_page_ids'])) {
+            $data['meta_page_ids'] = array_values(array_filter(
+                array_map(fn($id) => ltrim(trim((string) $id), '@'), $data['meta_page_ids']),
+                fn(string $id) => $id !== ''
+            ));
+        }
 
         $setting = $this->settings->update($org, $icp, $data);
 
@@ -400,6 +409,7 @@ class SocialListeningController extends Controller
     {
         return [
             'enabled_sources' => $setting->enabled_sources ?? SocialListeningSetting::DEFAULT_SOURCES,
+            'meta_page_ids' => $setting->meta_page_ids ?? [],
             'cadence_days' => $setting->cadence_days,
             'min_score' => $setting->min_score,
             'freshness_window_days' => (int) ($setting->freshness_window_days ?? 14),

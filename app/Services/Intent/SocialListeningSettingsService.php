@@ -33,6 +33,7 @@ class SocialListeningSettingsService
 
         $allowed = [
             'enabled_sources',
+            'meta_page_ids',
             'cadence_days',
             'min_score',
             'freshness_window_days',
