@@ -95,7 +95,7 @@ class SerperDiscoveryAdapter implements DiscoverySourceInterface
                         return false;
                     }
 
-                    if (! $allowListicle && $this->queryIntent->looksLikeArticleTitle($h->name)) {
+                    if (! $allowListicle && $this->queryIntent->looksLikeContentOrGenericPhrase($h->name)) {
                         return false;
                     }
 

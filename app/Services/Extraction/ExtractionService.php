@@ -54,7 +54,7 @@ class ExtractionService
             $result = $this->glm->chatJson([
                 [
                     'role' => 'system',
-                    'content' => 'Extract structured company intelligence as JSON with keys: name, sector, location, summary, business_fields (object), commercial_signals (array of strings). Never use the ICP profile name as the company name unless the hit explicitly refers to that exact company. No markdown.',
+                    'content' => 'Extract structured company intelligence as JSON with keys: name, sector, location, summary, business_fields (object), commercial_signals (array of strings). The name must be a real company/organization name — never an article title, tip list, award, requirement phrase, blog post, or generic advice headline. If the hit is not a real company, set name to an empty string. Never use the ICP profile name as the company name unless the hit explicitly refers to that exact company. No markdown.',
                 ],
                 [
                     'role' => 'user',
@@ -80,6 +80,19 @@ class ExtractionService
 
             if (($result['name'] ?? '') === $brief->name) {
                 $result['name'] = $hit->name;
+            }
+
+            $companyName = trim((string) ($result['name'] ?? ''));
+            if ($companyName === '' || $this->queryIntent->looksLikeContentOrGenericPhrase($companyName)) {
+                return [
+                    'name' => '',
+                    'sector' => $result['sector'] ?? $hit->sector,
+                    'location' => $result['location'] ?? $hit->location,
+                    'summary' => $result['summary'] ?? ($hit->snippet ?? ''),
+                    'business_fields' => $result['business_fields'] ?? ['website' => $hit->website],
+                    'commercial_signals' => $result['commercial_signals'] ?? [],
+                    'low_confidence' => true,
+                ];
             }
 
             return $result;
@@ -275,8 +288,21 @@ class ExtractionService
      */
     private function fallbackCompany(RawDiscoveryHit $hit): array
     {
+        $name = $hit->name;
+        if ($this->queryIntent->looksLikeContentOrGenericPhrase($name)) {
+            return [
+                'name' => '',
+                'sector' => $hit->sector,
+                'location' => $hit->location,
+                'summary' => $hit->snippet ?? '',
+                'business_fields' => ['website' => $hit->website],
+                'commercial_signals' => [],
+                'low_confidence' => true,
+            ];
+        }
+
         return [
-            'name' => $hit->name,
+            'name' => $name,
             'sector' => $hit->sector,
             'location' => $hit->location,
             'summary' => $hit->snippet ?? $hit->name,

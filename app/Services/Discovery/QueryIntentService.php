@@ -111,8 +111,40 @@ class QueryIntentService
 
     public function looksLikeArticleTitle(string $name): bool
     {
-        $lower = mb_strtolower(trim($name));
+        return $this->looksLikeContentOrGenericPhrase($name);
+    }
 
-        return (bool) preg_match('/\b(top|best|how to|what is|guide to|careers? in|jobs in|trends in|salary|hiring|learn|certification|degree|courses?|training|list of|ways to|\d+\s+(best|top|ways|careers|jobs|skills|companies|wealthiest|richest|people|men|women))\b/u', $lower);
+    /**
+     * Detect article/advice/listicle/generic-content phrases that should never become Lead.name.
+     */
+    public function looksLikeContentOrGenericPhrase(string $name): bool
+    {
+        $lower = mb_strtolower(trim($name));
+        if ($lower === '') {
+            return false;
+        }
+
+        if (preg_match('/\b(top|best|how to|how i|what is|guide to|careers? in|jobs in|trends in|salary|hiring|learn|certification|degree|courses?|training|list of|ways to|tips?|checklist|playbook|webinar|template|case study|roadmap|blueprint|strategy|framework)\b/u', $lower)) {
+            return true;
+        }
+
+        if (preg_match('/\b(signs|reasons|steps|ways|tips|questions)\s+(to|you|for|about)\b/u', $lower)) {
+            return true;
+        }
+
+        if (preg_match('/\b\d+\s+(best|top|ways|tips|careers|jobs|skills|companies|wealthiest|richest|people|men|women|qualified\s+leads|leads)\b/u', $lower)) {
+            return true;
+        }
+
+        if (preg_match('/\b(qualified\s+leads?|matching\s+requirement|requirement|award)\b/u', $lower)) {
+            return true;
+        }
+
+        // Gerund-led marketing headlines: "Scaling CEO Peer Groups with Targeted Outreach"
+        if (preg_match('/^\p{L}+ing\s+.+\b(with|for|to|via|using)\b/ui', $lower)) {
+            return true;
+        }
+
+        return false;
     }
 }

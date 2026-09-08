@@ -10,10 +10,13 @@ class PersonNameValidatorTest extends TestCase
 {
     private PersonNameValidator $validator;
 
+    private QueryIntentService $queryIntent;
+
     protected function setUp(): void
     {
         parent::setUp();
         $this->validator = app(PersonNameValidator::class);
+        $this->queryIntent = app(QueryIntentService::class);
     }
 
     public function test_rejects_fragment_names(): void
@@ -38,5 +41,23 @@ class PersonNameValidatorTest extends TestCase
             'company' => 'Nvidia',
             'low_confidence' => false,
         ]));
+    }
+
+    public function test_rejects_screenshot_non_person_headlines(): void
+    {
+        $this->assertFalse($this->validator->isValidPersonName('Scaling CEO Peer Groups with Targeted Outreach'));
+        $this->assertFalse($this->validator->isValidPersonName('11 Tips to Generate Sales Leads'));
+        $this->assertFalse($this->validator->isValidPersonName('How I Find 100 Qualified Leads'));
+    }
+
+    public function test_content_phrase_detector_catches_advice_titles(): void
+    {
+        $this->assertTrue($this->queryIntent->looksLikeContentOrGenericPhrase('11 Tips to Generate Sales Leads'));
+        $this->assertTrue($this->queryIntent->looksLikeContentOrGenericPhrase('How I Find 100 Qualified Leads'));
+        $this->assertTrue($this->queryIntent->looksLikeContentOrGenericPhrase('Scaling CEO Peer Groups with Targeted Outreach'));
+        $this->assertTrue($this->queryIntent->looksLikeContentOrGenericPhrase('Matching Requirement'));
+        $this->assertTrue($this->queryIntent->looksLikeContentOrGenericPhrase('500 Qualified Leads Award'));
+        $this->assertFalse($this->queryIntent->looksLikeContentOrGenericPhrase('Acme Distributors Lagos'));
+        $this->assertFalse($this->queryIntent->looksLikeContentOrGenericPhrase('Elon Musk'));
     }
 }

@@ -77,6 +77,133 @@ class LeadProfileEnrichmentService
         return $profile;
     }
 
+    /**
+     * Best-effort decision-maker lookup for company-target leads.
+     *
+     * @param  array<string, mixed>  $extracted
+     * @return array<string, mixed>
+     */
+    public function enrichCompanyDecisionMaker(
+        Organization $organization,
+        IcpProfile $icp,
+        string $companyName,
+        \App\Services\Discovery\DTO\IcpBrief $brief,
+        array $extracted,
+    ): array {
+        if (! $this->shouldEnrich($icp)) {
+            return $extracted;
+        }
+
+        $titleHints = $brief->decisionMakers !== []
+            ? array_slice($brief->decisionMakers, 0, 2)
+            : ['CEO', 'founder'];
+        $titleQuery = implode(' OR ', array_map(fn (string $t) => '"'.trim($t).'"', $titleHints));
+
+        $searchResults = $this->searchDecisionMaker($organization, $companyName, $titleQuery);
+        if ($searchResults === []) {
+            return $extracted;
+        }
+
+        $personName = $this->guessPersonNameFromResults($searchResults, $companyName);
+        if ($personName === null) {
+            // Still try to pull title/linkedin from snippets without a named person.
+            $profile = $this->parseWithGlm(
+                $organization,
+                $companyName.' contact',
+                $brief->query,
+                $searchResults,
+                trim((string) ($titleHints[0] ?? '')),
+                $companyName,
+            );
+
+            if ($profile->title !== '' || $profile->profileUrls !== []) {
+                $merged = $profile->mergeIntoExtraction($extracted);
+                if (trim((string) ($merged['company'] ?? '')) === '') {
+                    $merged['company'] = $companyName;
+                }
+
+                return $merged;
+            }
+
+            return $extracted;
+        }
+
+        $enriched = $this->enrich($organization, $icp, $personName, $brief->query, array_merge($extracted, [
+            'company' => $companyName,
+            'title' => trim((string) ($extracted['title'] ?? ($titleHints[0] ?? ''))),
+        ]));
+
+        $merged = $enriched->mergeIntoExtraction($extracted);
+        if (trim((string) ($merged['company'] ?? '')) === '') {
+            $merged['company'] = $companyName;
+        }
+        // Keep Lead.name as the company; store person as contact context in title if missing.
+        if (trim((string) ($merged['title'] ?? '')) === '' && $personName !== '') {
+            $merged['title'] = trim((string) ($titleHints[0] ?? 'Decision maker')).' ('.$personName.')';
+        } elseif (trim((string) ($merged['title'] ?? '')) !== '' && ! str_contains((string) $merged['title'], $personName)) {
+            // Prefer explicit person name in meta for CRM contactability.
+            $merged['contact_person'] = $personName;
+        } else {
+            $merged['contact_person'] = $personName;
+        }
+
+        return $merged;
+    }
+
+    /**
+     * @return list<array{title: string, snippet: ?string, url: ?string}>
+     */
+    private function searchDecisionMaker(Organization $organization, string $companyName, string $titleQuery): array
+    {
+        if (! $this->serper->isEnabled() || $this->serperCallsThisRun >= self::MAX_SERPER_CALLS_PER_RUN) {
+            return [];
+        }
+
+        $this->serperCallsThisRun++;
+
+        return $this->serper->searchPerson(
+            $organization,
+            $companyName,
+            trim($titleQuery.' site:linkedin.com/in'),
+        );
+    }
+
+    /**
+     * @param  list<array{title: string, snippet: ?string, url: ?string}>  $results
+     */
+    private function guessPersonNameFromResults(array $results, string $companyName): ?string
+    {
+        foreach ($results as $result) {
+            $title = (string) ($result['title'] ?? '');
+            $url = (string) ($result['url'] ?? '');
+
+            if ($url !== '' && str_contains(mb_strtolower($url), 'linkedin.com/in/')) {
+                $path = parse_url($url, PHP_URL_PATH) ?? '';
+                if (preg_match('#/in/([^/?]+)#', $path, $matches)) {
+                    $slug = str_replace(['-', '_'], ' ', $matches[1]);
+                    $candidate = ucwords($slug);
+                    if ($this->queryIntent->looksLikeContentOrGenericPhrase($candidate)) {
+                        continue;
+                    }
+                    if (mb_strtolower($candidate) !== mb_strtolower($companyName)) {
+                        return $candidate;
+                    }
+                }
+            }
+
+            // "Jane Doe - CEO at Acme | LinkedIn"
+            if (preg_match('/^([A-Z][\p{L}\'-]+(?:\s+[A-Z][\p{L}\'-]+)+)\s*[-–|]/u', $title, $m)) {
+                $candidate = trim($m[1]);
+                if (! $this->queryIntent->looksLikeContentOrGenericPhrase($candidate)
+                    && mb_strtolower($candidate) !== mb_strtolower($companyName)) {
+                    return $candidate;
+                }
+            }
+        }
+
+        return null;
+    }
+
     public function shouldEnrich(IcpProfile $icp): bool
     {
         $config = is_array($icp->config) ? $icp->config : [];

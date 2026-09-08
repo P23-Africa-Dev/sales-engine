@@ -40,6 +40,7 @@ class AppServiceProvider extends ServiceProvider
                 scoring: $app->make(ScoringService::class),
                 queryIntent: $app->make(\App\Services\Discovery\QueryIntentService::class),
                 personNameValidator: $app->make(\App\Services\Discovery\PersonNameValidator::class),
+                companyNameValidator: $app->make(\App\Services\Discovery\CompanyNameValidator::class),
                 factualListSynthesizer: $app->make(\App\Services\Discovery\FactualListSynthesizer::class),
                 enrichment: $app->make(\App\Services\Enrichment\LeadProfileEnrichmentService::class),
             );

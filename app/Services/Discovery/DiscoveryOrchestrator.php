@@ -15,6 +15,7 @@ use App\Services\Discovery\DTO\RawDiscoveryHit;
 use App\Services\Discovery\DTO\SearchContext;
 use App\Services\Discovery\QueryIntentService;
 use App\Services\Discovery\PersonNameValidator;
+use App\Services\Discovery\CompanyNameValidator;
 use App\Services\Discovery\FactualListSynthesizer;
 use App\Services\Extraction\ExtractionService;
 use App\Services\Enrichment\LeadProfileEnrichmentService;
@@ -31,6 +32,7 @@ class DiscoveryOrchestrator
         private readonly ScoringService $scoring,
         private readonly QueryIntentService $queryIntent,
         private readonly PersonNameValidator $personNameValidator,
+        private readonly CompanyNameValidator $companyNameValidator,
         private readonly FactualListSynthesizer $factualListSynthesizer,
         private readonly LeadProfileEnrichmentService $enrichment,
     ) {}
@@ -264,15 +266,6 @@ class DiscoveryOrchestrator
                     continue;
                 }
 
-                $fromListicle = (bool) ($extracted['from_listicle'] ?? false);
-                if ($brief->isPeopleSearch() && ! $this->personNameValidator->isValidPersonName($displayName, $extracted)) {
-                    continue;
-                }
-
-                if (! $fromListicle && $this->queryIntent->looksLikeArticleTitle($displayName)) {
-                    continue;
-                }
-
                 $seenNames[$nameKey] = true;
                 $candidates[] = ['hit' => $hit, 'extracted' => $extracted];
             }
@@ -346,6 +339,10 @@ class DiscoveryOrchestrator
             $hit = $candidate['hit'];
             $fromListicle = $candidate['fromListicle'];
 
+            if (! $this->passesCreatabilityGate($brief, $displayName, $extracted, $fromListicle)) {
+                continue;
+            }
+
             $icpRecommended = $scores['icp_fit_score'] >= $brief->minMatchScore;
             $queryMatch = $this->resolveQueryMatch(
                 $hasUserQuery,
@@ -369,6 +366,14 @@ class DiscoveryOrchestrator
                     $extracted,
                 );
                 $extracted = $enrichedProfile->mergeIntoExtraction($extracted);
+            } elseif (! $brief->isPeopleSearch()) {
+                $extracted = $this->enrichment->enrichCompanyDecisionMaker(
+                    $organization,
+                    $icp,
+                    $displayName,
+                    $brief,
+                    $extracted,
+                );
             }
 
             $leadPayload = $this->createLeadFromExtraction(
@@ -416,6 +421,54 @@ class DiscoveryOrchestrator
         }
 
         return ($scores['query_relevance_score'] ?? 0) >= 50;
+    }
+
+    /**
+     * Final creatability gate: only persist leads that look like real people or companies.
+     *
+     * @param  array<string, mixed>  $extracted
+     */
+    private function passesCreatabilityGate(
+        IcpBrief $brief,
+        string $displayName,
+        array $extracted,
+        bool $fromListicle,
+    ): bool {
+        if ($displayName === '') {
+            return false;
+        }
+
+        if (! $fromListicle && $this->queryIntent->looksLikeContentOrGenericPhrase($displayName)) {
+            return false;
+        }
+
+        if ($brief->isPeopleSearch() || filled($extracted['person_name'] ?? null)) {
+            return $this->personNameValidator->isValidPersonName($displayName, $extracted);
+        }
+
+        return $this->companyNameValidator->isValidCompanyName($displayName, $extracted);
+    }
+
+    /**
+     * @param  array<string, mixed>  $extracted
+     */
+    private function isContactReady(array $extracted, array $profileUrls): bool
+    {
+        $email = trim((string) ($extracted['email'] ?? ''));
+        $phone = trim((string) ($extracted['phone'] ?? ''));
+        $linkedin = trim((string) ($extracted['linkedin_url'] ?? ''));
+        $title = trim((string) ($extracted['title'] ?? ''));
+        $company = trim((string) ($extracted['company'] ?? ''));
+
+        if ($email !== '' || $phone !== '') {
+            return true;
+        }
+
+        if ($linkedin !== '' || $profileUrls !== []) {
+            return true;
+        }
+
+        return $title !== '' && $company !== '';
     }
 
     private function isAuthoritativeUrl(?string $url): bool
@@ -494,6 +547,11 @@ class DiscoveryOrchestrator
             $summary = $scores['rationale'];
         }
 
+        $email = trim((string) ($extracted['email'] ?? ''));
+        $phone = trim((string) ($extracted['phone'] ?? ''));
+        $linkedinUrl = trim((string) ($extracted['linkedin_url'] ?? ($profileUrls[0] ?? '')));
+        $contactReady = $this->isContactReady($extracted, $profileUrls);
+
         $lead = Lead::query()->create([
             'organization_id' => $organization->id,
             'company_id' => $company->id,
@@ -510,14 +568,15 @@ class DiscoveryOrchestrator
                 'title' => $extracted['title'] ?? null,
                 'company' => $extracted['company'] ?? null,
                 'location' => $extracted['location'] ?? null,
-                'email' => $extracted['email'] ?? null,
-                'phone' => $extracted['phone'] ?? null,
+                'email' => $email !== '' ? $email : null,
+                'phone' => $phone !== '' ? $phone : null,
                 'website' => $extracted['website'] ?? null,
                 'profile_urls' => $profileUrls !== [] ? $profileUrls : null,
-                'linkedin_url' => $extracted['linkedin_url'] ?? ($profileUrls[0] ?? null),
+                'linkedin_url' => $linkedinUrl !== '' ? $linkedinUrl : null,
                 'source_url' => $sourceUrl !== '' ? $sourceUrl : null,
                 'next_action' => $nextAction,
                 'enrichment_confidence' => $extracted['enrichment_confidence'] ?? null,
+                'contact_ready' => $contactReady,
                 'icp_recommended' => $icpRecommended,
                 'icp_fit_score' => (int) round($scores['icp_fit_score']),
                 'intent_score' => (int) round($scores['intent_score']),
@@ -538,7 +597,11 @@ class DiscoveryOrchestrator
                 'company' => $extracted['company'] ?? null,
                 'location' => $extracted['location'] ?? null,
                 'website' => $extracted['website'] ?? null,
+                'email' => $email !== '' ? $email : null,
+                'phone' => $phone !== '' ? $phone : null,
+                'linkedin_url' => $linkedinUrl !== '' ? $linkedinUrl : null,
                 'profile_urls' => $profileUrls,
+                'contact_ready' => $contactReady,
                 'next_action' => $nextAction,
                 'source_url' => $sourceUrl !== '' ? $sourceUrl : null,
                 'save_status' => $lead->save_status,
@@ -630,7 +693,7 @@ class DiscoveryOrchestrator
             $scores['rationale'] .= ' Penalized: name matched ICP profile.';
         }
 
-        if (! $fromListicle && ! $brief->isListiclePeopleQuery() && $this->queryIntent->looksLikeArticleTitle($displayName)) {
+        if (! $fromListicle && ! $brief->isListiclePeopleQuery() && $this->queryIntent->looksLikeContentOrGenericPhrase($displayName)) {
             $scores['priority_score'] = max(0, $scores['priority_score'] - 35);
             $scores['rationale'] .= ' Penalized: looks like article content.';
         }

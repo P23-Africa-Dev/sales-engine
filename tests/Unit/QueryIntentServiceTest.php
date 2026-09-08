@@ -37,4 +37,12 @@ class QueryIntentServiceTest extends TestCase
         $this->assertSame(QueryIntentService::TARGET_COMPANIES, $result['target']);
         $this->assertFalse($this->service->isListiclePeopleQuery('FMCG distributors in Lagos'));
     }
+
+    public function test_looks_like_content_or_generic_phrase(): void
+    {
+        $this->assertTrue($this->service->looksLikeContentOrGenericPhrase('11 Tips to Generate Sales Leads'));
+        $this->assertTrue($this->service->looksLikeContentOrGenericPhrase('How I Find 100 Qualified Leads'));
+        $this->assertTrue($this->service->looksLikeArticleTitle('Matching Requirement'));
+        $this->assertFalse($this->service->looksLikeContentOrGenericPhrase('Acme Distributors'));
+    }
 }

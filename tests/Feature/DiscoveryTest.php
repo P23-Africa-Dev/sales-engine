@@ -208,4 +208,145 @@ class DiscoveryTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.stage', 'qualified');
     }
+
+    public function test_article_and_advice_hits_do_not_become_leads(): void
+    {
+        config([
+            'services.serper.api_key' => 'test-serper',
+            'services.glm.api_key' => '',
+        ]);
+
+        [, $org] = $this->actingAsOrgMember();
+
+        IcpProfile::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'Sales ICP',
+            'is_active' => true,
+            'config' => array_merge(IcpProfile::defaultConfig(), [
+                'industries' => ['SaaS'],
+                'territories' => ['Lagos, NG'],
+                'minMatchScore' => 1,
+            ]),
+        ]);
+
+        Http::fake([
+            'google.serper.dev/*' => Http::response([
+                'organic' => [
+                    [
+                        'title' => '11 Tips to Generate Sales Leads',
+                        'link' => 'https://example.com/blog/11-tips-sales-leads',
+                        'snippet' => 'Advice content about finding leads.',
+                    ],
+                    [
+                        'title' => 'How I Find 100 Qualified Leads',
+                        'link' => 'https://example.com/articles/how-i-find-leads',
+                        'snippet' => 'Personal advice article.',
+                    ],
+                    [
+                        'title' => 'Scaling CEO Peer Groups with Targeted Outreach',
+                        'link' => 'https://linkedin.com/posts/someone-scaling-ceo',
+                        'snippet' => 'LinkedIn post about peer groups.',
+                    ],
+                    [
+                        'title' => 'Matching Requirement',
+                        'link' => 'https://example.com/matching-requirement',
+                        'snippet' => 'Generic requirement phrase.',
+                    ],
+                    [
+                        'title' => '500 Qualified Leads Award',
+                        'link' => 'https://example.com/awards/500-leads',
+                        'snippet' => 'Award announcement content.',
+                    ],
+                ],
+            ], 200),
+        ]);
+
+        $response = $this->withHeaders($this->orgHeaders($org))
+            ->postJson('/api/v1/discovery/runs', [
+                'query' => 'SaaS companies in Lagos',
+                'intent' => 'generate_leads',
+            ]);
+
+        $response->assertCreated()
+            ->assertJsonPath('data.status', 'completed');
+
+        $leads = $response->json('data.leads') ?? [];
+        $this->assertSame([], $leads);
+        $this->assertDatabaseCount('leads', 0);
+    }
+
+    public function test_discovery_payload_exposes_contact_fields(): void
+    {
+        config([
+            'services.serper.api_key' => 'test-serper',
+            'services.glm.api_key' => '',
+        ]);
+
+        [, $org] = $this->actingAsOrgMember();
+
+        IcpProfile::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'FMCG',
+            'is_active' => true,
+            'config' => array_merge(IcpProfile::defaultConfig(), [
+                'industries' => ['FMCG & Retail'],
+                'territories' => ['Lagos, NG'],
+                'minMatchScore' => 1,
+                'enrichContactDetails' => false,
+            ]),
+        ]);
+
+        Http::fake([
+            'google.serper.dev/*' => Http::response([
+                'organic' => [
+                    [
+                        'title' => 'Acme Distributors Lagos | Home',
+                        'link' => 'https://acme.example.com',
+                        'snippet' => 'Leading FMCG distributor in Lagos.',
+                    ],
+                ],
+            ], 200),
+        ]);
+
+        $response = $this->withHeaders($this->orgHeaders($org))
+            ->postJson('/api/v1/discovery/runs', [
+                'query' => 'FMCG distributors Lagos',
+                'intent' => 'generate_leads',
+            ]);
+
+        $response->assertCreated()
+            ->assertJsonPath('data.leads.0.name', 'Acme Distributors Lagos')
+            ->assertJsonPath('data.leads.0.contact_ready', false);
+
+        $this->assertArrayHasKey('email', $response->json('data.leads.0'));
+        $this->assertArrayHasKey('phone', $response->json('data.leads.0'));
+        $this->assertArrayHasKey('linkedin_url', $response->json('data.leads.0'));
+    }
+
+    public function test_lead_resource_exposes_contact_fields(): void
+    {
+        [, $org] = $this->actingAsOrgMember();
+        $lead = Lead::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'Jane Doe',
+            'stage' => 'new',
+            'score' => 80,
+            'meta' => [
+                'title' => 'CEO',
+                'company' => 'Acme',
+                'email' => 'jane@acme.example.com',
+                'phone' => '+1234567890',
+                'linkedin_url' => 'https://linkedin.com/in/jane-doe',
+                'contact_ready' => true,
+            ],
+        ]);
+
+        $this->withHeaders($this->orgHeaders($org))
+            ->patchJson("/api/v1/crm/leads/{$lead->id}", ['stage' => 'contacted'])
+            ->assertOk()
+            ->assertJsonPath('data.email', 'jane@acme.example.com')
+            ->assertJsonPath('data.phone', '+1234567890')
+            ->assertJsonPath('data.linkedin_url', 'https://linkedin.com/in/jane-doe')
+            ->assertJsonPath('data.contact_ready', true);
+    }
 }
