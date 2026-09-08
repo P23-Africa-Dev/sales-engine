@@ -115,10 +115,16 @@ class SocialListeningOrchestrator
                     'source_label' => $hit->sourceLabel,
                     'source_icon' => $hit->sourceIcon,
                     'post_text' => $hit->postText,
+                    'summary' => $this->clip((string) ($enriched['summary'] ?? ''), 1000),
                     'posted_at' => now()->subHours(2),
                     'profile_name' => $this->clip((string) ($enriched['profile_name'] ?? ''), 255),
                     'persona' => $this->clip((string) ($enriched['persona'] ?? ''), 255),
                     'company_name' => $this->clip((string) ($enriched['company_name'] ?? ''), 255),
+                    'entity_type' => $this->clip((string) ($enriched['entity_type'] ?? ''), 16),
+                    'industry' => $this->clip((string) ($enriched['industry'] ?? ''), 255),
+                    'key_topics' => $enriched['key_topics'] ?? [],
+                    'competitors' => $enriched['competitors'] ?? [],
+                    'follow_up_strategy' => $this->clip((string) ($enriched['follow_up_strategy'] ?? ''), 1000),
                     'location_text' => $this->clip((string) ($enriched['location_text'] ?? ''), 255),
                     'intent_label' => $this->clip($intentLabel, 64),
                     'intent_color' => SocialSignalEnricher::intentColor($intentLabel),
@@ -131,6 +137,12 @@ class SocialListeningOrchestrator
                     'reasons' => $enriched['reasons'] ?? [],
                     'suggested_message' => $enriched['suggested_message'] ?? null,
                     'recommended_action' => $this->clip((string) ($enriched['recommended_action'] ?? ''), 1000),
+                    'recommended_action_title' => $this->clip((string) ($enriched['recommended_action_title'] ?? ''), 255),
+                    'recommended_action_detail' => $this->clip((string) ($enriched['recommended_action_detail'] ?? ''), 1000),
+                    'why_this_matters_to_you' => $this->clip((string) ($enriched['why_this_matters_to_you'] ?? ''), 1000),
+                    'benefits' => $enriched['benefits'] ?? [],
+                    'personal_recommended_action_title' => $this->clip((string) ($enriched['personal_recommended_action_title'] ?? ''), 255),
+                    'personal_recommended_action_detail' => $this->clip((string) ($enriched['personal_recommended_action_detail'] ?? ''), 1000),
                     'status' => 'new',
                     'meta' => ['title' => $hit->title, 'snippet' => $hit->snippet],
                 ]);
@@ -168,9 +180,11 @@ class SocialListeningOrchestrator
                 $json = $this->glm->chatJson([
                     [
                         'role' => 'system',
-                        'content' => 'Generate 3-5 short Google search queries to find B2B buying-intent social posts matching an ICP. '
-                            . 'Focus on people asking for recommendations, switching vendors, pricing, tools, or software — NOT job ads, recruiting, or generic thought leadership. '
-                            . 'Include buying phrases like "looking for", "recommend", "alternative to", "switching from", "how much", "vendor". '
+                        'content' => 'Generate 3-5 short Google search queries to find social/web posts that are genuine opportunities for a specific user, grounded in their ICP and stated interests (custom_prompt/description). '
+                            . 'Buying-intent phrasing ("looking for", "recommend", "alternative to", "switching from", "how much", "vendor") is ONE valid angle WHEN it matches the user\'s interests — but it is not the only one. '
+                            . 'Also generate queries for funding/investment news, market moves, partnerships, competitive moves, and regulatory changes WHEN the custom_prompt/description implies the user cares about those (e.g. investing, market research, deal sourcing). '
+                            . 'Do not blanket-exclude thought-leadership or news-style content — only avoid it when it is clearly irrelevant to the stated interests. '
+                            . 'Weight custom_prompt heavily: it is the clearest statement of what this user actually wants. '
                             . 'Return JSON: {"queries":["..."]}',
                     ],
                     [
@@ -180,6 +194,7 @@ class SocialListeningOrchestrator
                             'territories' => $brief->territories,
                             'decision_makers' => $brief->decisionMakers,
                             'custom_prompt' => $brief->customPrompt,
+                            'description' => $brief->description,
                         ]),
                     ],
                 ], 'extract', $organization);
@@ -193,10 +208,14 @@ class SocialListeningOrchestrator
             }
         }
 
+        $interestPhrase = trim($brief->customPrompt) !== ''
+            ? $brief->customPrompt
+            : 'looking for recommendations OR switching OR pricing';
+
         $parts = array_filter([
             implode(' ', array_slice($brief->industries, 0, 1)),
             implode(' ', array_slice($brief->territories, 0, 1)),
-            'looking for recommendations OR switching OR pricing',
+            $interestPhrase,
         ]);
 
         return [trim(implode(' ', $parts))];
@@ -208,6 +227,8 @@ class SocialListeningOrchestrator
      */
     private function matchesIntentFilters(array $enriched, array $filters): bool
     {
+        // Empty filters = allow all non-spam relevant types; `other` is still gated by min_score
+        // (SocialSignalEnricher caps its score low), so it isn't blindly discarded here.
         if ($filters === []) {
             return true;
         }
@@ -227,6 +248,12 @@ class SocialListeningOrchestrator
             'switching' => ['switching', 'switch'],
             'pricing' => ['price', 'pricing'],
             'hiring_expansion' => ['hiring', 'expansion', 'growth', 'job'],
+            'investment_opportunity' => ['investment', 'invest'],
+            'funding_event' => ['funding', 'fundraise', 'raise'],
+            'market_signal' => ['market'],
+            'partnership_opportunity' => ['partnership', 'partner'],
+            'competitive_move' => ['competitive', 'competitor'],
+            'regulatory_change' => ['regulatory', 'regulation'],
         ];
 
         foreach ($filters as $filter) {

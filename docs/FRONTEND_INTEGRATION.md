@@ -351,6 +351,8 @@ POST /api/v1/social-listening/signals/{id}/sync-to-crm
 POST /api/v1/social-listening/signals/{id}/dismiss
 ```
 
+Signals are a **personal opportunity assistant** for the viewing user, not only an SDR buying-intent feed. `signalType` extends the original sales set (`recommendation`, `switching`, `pricing`, `hiring_expansion`) with opportunity types (`investment_opportunity`, `market_signal`, `partnership_opportunity`, `competitive_move`, `funding_event`, `regulatory_change`, `other`). Enrichment is always personalized against the active ICP's `config.customPrompt` + `description` — every signal carries both the original sales fields (`suggestedMessage`, `recommendedAction`) and user-centric fields (`whyThisMattersToYou`, `benefits`, `personalRecommendedAction`).
+
 Signals list response:
 
 ```json
@@ -359,15 +361,30 @@ Signals list response:
         {
             "id": 1,
             "signal": "post text",
+            "summary": "Concise neutral summary of the signal.",
             "source": "LinkedIn Post",
             "sourceIcon": "in",
+            "entityType": "company",
+            "industry": "FMCG & Retail",
+            "keyTopics": ["distribution", "logistics"],
+            "competitors": ["Vendor X"],
+            "followUpStrategy": "Reply within 24h referencing their stated pain point.",
             "score": 73,
-            "suggestedMessage": "..."
+            "reasons": ["Matches ICP industry", "Public post shows active need"],
+            "suggestedMessage": "...",
+            "recommendedAction": { "title": "Reach out soon", "detail": "..." },
+            "whyThisMattersToYou": "This matches your interest in high-conviction tech investments outside your home market.",
+            "benefits": ["Early access to a funding round", "Direct founder contact"],
+            "personalRecommendedAction": { "title": "Review the raise", "detail": "..." }
         }
     ],
     "meta": { "current_page": 1, "last_page": 1, "per_page": 20, "total": 1 }
 }
 ```
+
+**Default `intent_filters` is now `[]`** (was the 4 sales types) — an org that never touches Listen Settings gets every opportunity type, gated only by `min_score`; narrowing to a sales-only feed is still available in Listen Settings.
+
+`recommendedAction` and `personalRecommendedAction` are always objects (`{ title, detail }`). Legacy rows created before this change populate them by splitting the old flat `recommended_action` string on an em-dash (or first sentence) — frontends should still tolerate a plain string for defensive compatibility with cached/older responses. New nullable columns (`summary`, `entityType`, `industry`, `keyTopics`, `competitors`, `followUpStrategy`, `whyThisMattersToYou`, `benefits`, `personalRecommendedAction`) may be empty/null on signals created before this change — no backfill is planned for v1.
 
 Metrics:
 
@@ -442,6 +459,7 @@ Do not call Factory23 CRM for discovery data — discovery lives on this API.
 
 | Date       | Change                                                                         |
 | ---------- | ------------------------------------------------------------------------------ |
+| 2026-09-08 | Social Listening: personal opportunity assistant framing — expanded `signalType` taxonomy, `recommendedAction`/`personalRecommendedAction` objects, `whyThisMattersToYou`/`benefits`, `summary`/`entityType`/`industry`/`keyTopics`/`competitors`/`followUpStrategy` |
 | 2026-09-02 | Chat async discovery (202 + poll), ICP-scoped sessions, clear chat history     |
 | 2026-09-02 | Social Listening API, SendGrid outreach sender settings, social signal actions |
 | 2026-08-31 | Agent assertion path; 401 troubleshooting; link to F23 frontend guide          |

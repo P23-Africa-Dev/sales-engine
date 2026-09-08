@@ -14,12 +14,12 @@ class SocialListeningSetting extends Model
         'meta_pages',
     ];
 
-    public const DEFAULT_INTENT_FILTERS = [
-        'recommendation',
-        'switching',
-        'pricing',
-        'hiring_expansion',
-    ];
+    /**
+     * Empty by default so no opportunity type (sales or otherwise) is excluded out of the box —
+     * matchesIntentFilters() treats [] as "allow all types that pass min_score". Orgs that want
+     * a sales-only feed can still narrow this down in Listen Settings.
+     */
+    public const DEFAULT_INTENT_FILTERS = [];
 
     protected $fillable = [
         'organization_id',

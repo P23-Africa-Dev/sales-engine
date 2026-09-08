@@ -50,4 +50,61 @@ class SocialSignalEnricherTest extends TestCase
         $this->assertSame('switching', $enriched['signal_type']);
         $this->assertGreaterThanOrEqual(55, $enriched['score']);
     }
+
+    public function test_normalizes_new_opportunity_signal_types(): void
+    {
+        $enricher = app(SocialSignalEnricher::class);
+
+        $this->assertSame('funding_event', $enricher->normalizeSignalType('funding_event'));
+        $this->assertSame('investment_opportunity', $enricher->normalizeSignalType('investment'));
+        $this->assertSame('partnership_opportunity', $enricher->normalizeSignalType('', '', 'We are exploring a partnership with a logistics firm.'));
+        $this->assertSame(
+            'funding_event',
+            $enricher->normalizeSignalType('', '', 'Startup raises $10M in Series A funding round led by top VC.')
+        );
+    }
+
+    public function test_heuristic_enrich_populates_personalization_fields(): void
+    {
+        config(['services.glm.api_key' => '']);
+
+        [, $org] = $this->actingAsOrgMember();
+        $icp = \App\Models\IcpProfile::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'Investor',
+            'is_active' => true,
+            'config' => array_merge(\App\Models\IcpProfile::defaultConfig(), [
+                'customPrompt' => 'I want high-conviction tech investment opportunities outside my home market.',
+            ]),
+        ]);
+
+        $hit = new RawSocialHit(
+            platform: 'x',
+            sourceLabel: 'X/Twitter Post',
+            sourceIcon: 'x',
+            postText: 'Excited to share we just closed our Series A funding round to expand into new markets.',
+            postUrl: 'https://x.com/posts/example',
+            snippet: 'Excited to share we just closed our Series A funding round.',
+            title: 'Funding announcement',
+        );
+
+        $enriched = app(SocialSignalEnricher::class)->enrich($org, $icp, $hit);
+
+        $this->assertSame('funding_event', $enriched['signal_type']);
+        $this->assertArrayHasKey('why_this_matters_to_you', $enriched);
+        $this->assertNotSame('', $enriched['why_this_matters_to_you']);
+        $this->assertArrayHasKey('benefits', $enriched);
+        $this->assertArrayHasKey('personal_recommended_action_title', $enriched);
+        $this->assertArrayHasKey('personal_recommended_action_detail', $enriched);
+    }
+
+    public function test_normalize_entity_type(): void
+    {
+        $enricher = app(SocialSignalEnricher::class);
+
+        $this->assertSame('individual', $enricher->normalizeEntityType('', ''));
+        $this->assertSame('individual', $enricher->normalizeEntityType('', 'Individual'));
+        $this->assertSame('company', $enricher->normalizeEntityType('', 'Acme Inc'));
+        $this->assertSame('company', $enricher->normalizeEntityType('company', ''));
+    }
 }

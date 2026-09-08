@@ -3,9 +3,12 @@
 namespace Tests\Feature;
 
 use App\Models\IcpProfile;
+use App\Models\Organization;
 use App\Models\SocialListeningRun;
 use App\Models\SocialListeningSetting;
 use App\Models\SocialSignal;
+use App\Services\Intent\SocialListeningOrchestrator;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
@@ -272,5 +275,204 @@ class SocialListeningTest extends TestCase
             ->assertOk()
             ->assertJsonPath('meta.total', 1)
             ->assertJsonPath('data.0.signalType', 'Switching');
+    }
+
+    public function test_signal_resource_exposes_recommended_action_as_object_from_split_columns(): void
+    {
+        [, $org] = $this->actingAsOrgMember();
+        $icp = IcpProfile::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'ICP',
+            'is_active' => true,
+            'config' => IcpProfile::defaultConfig(),
+        ]);
+
+        $signal = SocialSignal::query()->create([
+            'organization_id' => $org->id,
+            'icp_profile_id' => $icp->id,
+            'platform' => 'linkedin',
+            'source_label' => 'LinkedIn Post',
+            'source_icon' => 'in',
+            'post_text' => 'Just closed our Series A',
+            'signal_type' => 'funding_event',
+            'score' => 80,
+            'status' => 'new',
+            'recommended_action_title' => 'Review the raise',
+            'recommended_action_detail' => 'Check the term sheet and reach out to the founder.',
+            'why_this_matters_to_you' => 'This matches your interest in early-stage tech investments.',
+            'benefits' => ['Early access to a hot round'],
+            'personal_recommended_action_title' => 'Request an intro',
+            'personal_recommended_action_detail' => 'Ask a mutual connection for a warm intro this week.',
+        ]);
+
+        $this->withHeaders($this->orgHeaders($org))
+            ->getJson("/api/v1/social-listening/signals/{$signal->id}")
+            ->assertOk()
+            ->assertJsonPath('data.recommendedAction.title', 'Review the raise')
+            ->assertJsonPath('data.recommendedAction.detail', 'Check the term sheet and reach out to the founder.')
+            ->assertJsonPath('data.personalRecommendedAction.title', 'Request an intro')
+            ->assertJsonPath('data.whyThisMattersToYou', 'This matches your interest in early-stage tech investments.')
+            ->assertJsonPath('data.benefits.0', 'Early access to a hot round');
+    }
+
+    public function test_signal_resource_splits_legacy_flat_recommended_action_string(): void
+    {
+        [, $org] = $this->actingAsOrgMember();
+        $icp = IcpProfile::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'ICP',
+            'is_active' => true,
+            'config' => IcpProfile::defaultConfig(),
+        ]);
+
+        $signal = SocialSignal::query()->create([
+            'organization_id' => $org->id,
+            'icp_profile_id' => $icp->id,
+            'platform' => 'linkedin',
+            'source_label' => 'LinkedIn Post',
+            'source_icon' => 'in',
+            'post_text' => 'Legacy row',
+            'signal_type' => 'recommendation',
+            'score' => 70,
+            'status' => 'new',
+            'recommended_action' => 'Reach out within 24 hours — this prospect may be actively looking for solutions.',
+        ]);
+
+        $this->withHeaders($this->orgHeaders($org))
+            ->getJson("/api/v1/social-listening/signals/{$signal->id}")
+            ->assertOk()
+            ->assertJsonPath('data.recommendedAction.title', 'Reach out within 24 hours')
+            ->assertJsonPath('data.recommendedAction.detail', 'this prospect may be actively looking for solutions.');
+    }
+
+    public function test_filter_no_longer_drops_funding_signal_when_filters_empty_and_score_passes(): void
+    {
+        $orchestrator = app(\App\Services\Intent\SocialListeningOrchestrator::class);
+        $reflection = new \ReflectionClass($orchestrator);
+        $method = $reflection->getMethod('matchesIntentFilters');
+        $method->setAccessible(true);
+
+        $enriched = ['signal_type' => 'funding_event'];
+
+        $this->assertTrue($method->invoke($orchestrator, $enriched, []));
+        $this->assertTrue($method->invoke($orchestrator, $enriched, ['funding_event']));
+        $this->assertFalse($method->invoke($orchestrator, $enriched, ['recommendation']));
+    }
+
+    public function test_default_intent_filters_do_not_exclude_new_opportunity_types(): void
+    {
+        $defaults = SocialListeningSetting::defaultsForOrg(1, 1);
+
+        $this->assertSame([], $defaults['intent_filters']);
+    }
+
+    public function test_investment_style_custom_prompt_produces_and_keeps_funding_signal_end_to_end(): void
+    {
+        config([
+            'services.glm.api_key' => 'test-glm-key',
+            'services.serper.api_key' => 'test-serper-key',
+        ]);
+
+        [$user, $org] = $this->actingAsOrgMember();
+        $icp = IcpProfile::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'Investor Radar',
+            'is_active' => true,
+            'config' => array_merge(IcpProfile::defaultConfig(), [
+                'customPrompt' => 'I want high-conviction tech investment opportunities outside my home market.',
+                'industries' => [],
+                'territories' => [],
+            ]),
+        ]);
+
+        $settings = SocialListeningSetting::query()->create(array_merge(
+            SocialListeningSetting::defaultsForOrg($org->id, $icp->id),
+            ['enabled_sources' => ['linkedin_public'], 'min_score' => 55, 'intent_filters' => []],
+        ));
+
+        Http::fake([
+            'open.bigmodel.cn/*' => Http::sequence()
+                // 1) buildQueries() call — assert custom_prompt was sent, return an investment-flavored query.
+                ->push([
+                    'choices' => [[
+                        'message' => ['content' => json_encode(['queries' => ['tech startup raises Series A funding']])],
+                    ]],
+                ])
+                // 2) enrich() call for the single hit — full GLM-shaped payload.
+                ->push([
+                    'choices' => [[
+                        'message' => ['content' => json_encode([
+                            'profile_name' => 'Jane Founder',
+                            'persona' => 'Founder',
+                            'company_name' => 'Voltify',
+                            'location_text' => 'Nairobi, KE',
+                            'entity_type' => 'company',
+                            'industry' => 'Fintech',
+                            'key_topics' => ['funding', 'expansion'],
+                            'competitors' => [],
+                            'signal_type' => 'funding_event',
+                            'buying_stage' => 'N/A',
+                            'intent_label' => 'Funding Event',
+                            'intent_description' => 'Company raised a Series A round.',
+                            'problem' => 'N/A',
+                            'urgency' => 'Medium',
+                            'buying_intent_score' => 82,
+                            'reasons' => ['Matches your interest in high-conviction tech investments outside your home market.'],
+                            'suggested_message' => 'Congrats on the raise — would love to learn more.',
+                            'recommended_action_title' => 'Review the raise',
+                            'recommended_action_detail' => 'Check the term sheet and investor list.',
+                            'follow_up_strategy' => 'Follow up after their next funding announcement.',
+                            'summary' => 'Voltify closed a Series A round to expand into new markets.',
+                            'why_this_matters_to_you' => 'This is a high-conviction tech investment opportunity outside your home market, matching what you asked for.',
+                            'benefits' => ['Early visibility into a funded startup', 'Direct founder access'],
+                            'personal_recommended_action_title' => 'Request an intro',
+                            'personal_recommended_action_detail' => 'Ask your network for a warm intro to Jane this week.',
+                        ])],
+                    ]],
+                ]),
+            'google.serper.dev/*' => Http::response([
+                'organic' => [[
+                    'title' => 'Voltify raises $8M Series A to expand fintech platform',
+                    'snippet' => 'Voltify just closed a Series A funding round led by top investors to expand into new markets.',
+                    'link' => 'https://linkedin.com/posts/voltify-raise',
+                ]],
+            ], 200),
+        ]);
+
+        $orchestrator = app(SocialListeningOrchestrator::class);
+        $run = $orchestrator->run($org, $icp, $settings, $user);
+
+        $this->assertSame('completed', $run->status);
+        $this->assertSame(1, $run->signals_created);
+
+        Http::assertSent(function ($request) {
+            if (! str_contains($request->url(), 'bigmodel.cn')) {
+                return true;
+            }
+            $body = $request->body();
+
+            return str_contains($body, 'high-conviction tech investment opportunities outside my home market');
+        });
+
+        $signal = SocialSignal::query()->where('organization_id', $org->id)->firstOrFail();
+
+        $this->assertSame('funding_event', $signal->signal_type);
+        $this->assertSame('company', $signal->entity_type);
+        $this->assertSame('Fintech', $signal->industry);
+        $this->assertSame(['funding', 'expansion'], $signal->key_topics);
+        $this->assertSame('Review the raise', $signal->recommended_action_title);
+        $this->assertSame('Request an intro', $signal->personal_recommended_action_title);
+        $this->assertNotEmpty($signal->why_this_matters_to_you);
+        $this->assertSame(['Early visibility into a funded startup', 'Direct founder access'], $signal->benefits);
+        $this->assertGreaterThanOrEqual(55, (float) $signal->score);
+
+        $this->withHeaders($this->orgHeaders($org))
+            ->getJson("/api/v1/social-listening/signals/{$signal->id}")
+            ->assertOk()
+            ->assertJsonPath('data.signalType', 'funding_event')
+            ->assertJsonPath('data.recommendedAction.title', 'Review the raise')
+            ->assertJsonPath('data.personalRecommendedAction.title', 'Request an intro')
+            ->assertJsonPath('data.entityType', 'company')
+            ->assertJsonPath('data.keyTopics.0', 'funding');
     }
 }
