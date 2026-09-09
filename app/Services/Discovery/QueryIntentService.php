@@ -8,7 +8,7 @@ class QueryIntentService
 
     public const TARGET_COMPANIES = 'companies';
 
-    public const DEFAULT_LEAD_LIMIT = 20;
+    public const DEFAULT_LEAD_LIMIT = 40;
 
     public const MAX_LEAD_LIMIT = 150;
 

@@ -40,8 +40,8 @@ class HighCapacityDiscoveryTest extends TestCase
 
             $serperCalls++;
             $organic = [];
-            for ($i = 0; $i < 10; $i++) {
-                $n = ($serperCalls * 10) + $i;
+            for ($i = 0; $i < 20; $i++) {
+                $n = ($serperCalls * 20) + $i;
                 $organic[] = [
                     'title' => "Northstar Labs {$n} Inc | Home",
                     'link' => "https://northstar-labs-{$n}.example.com",
@@ -113,8 +113,8 @@ class HighCapacityDiscoveryTest extends TestCase
 
             $serperCalls++;
             $organic = [];
-            for ($i = 0; $i < 10; $i++) {
-                $n = ($serperCalls * 10) + $i;
+            for ($i = 0; $i < 20; $i++) {
+                $n = ($serperCalls * 20) + $i;
                 $organic[] = [
                     'title' => "Brightpath Software {$n} LLC | Home",
                     'link' => "https://brightpath-{$n}.example.com",

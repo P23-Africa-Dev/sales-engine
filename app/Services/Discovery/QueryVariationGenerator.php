@@ -134,10 +134,83 @@ class QueryVariationGenerator
 
     public function queryBudget(int $targetCount): int
     {
-        // Roughly 8 usable hits per query after filters → budget enough queries to hit target.
-        $estimated = (int) ceil(max(1, $targetCount) / 8);
+        // Roughly 5 usable hits per query after filters → budget enough queries to hit target.
+        $estimated = (int) ceil(max(1, $targetCount) / 5);
 
-        return min(self::MAX_QUERIES, max(3, $estimated));
+        return min(self::MAX_QUERIES, max(4, $estimated));
+    }
+
+    /**
+     * Broader follow-up queries when the first fan-out pass yields too few leads.
+     * Drops location constraints, rotates unused titles/industries/signals, and excludes
+     * queries already executed in earlier passes.
+     *
+     * @param  list<string>  $excludeQueries
+     * @return list<string>
+     */
+    public function generateBackfill(IcpBrief $brief, int $targetCount, array $excludeQueries = []): array
+    {
+        $needed = min(self::MAX_QUERIES, max(4, (int) ceil(max(1, $targetCount) / 4)));
+        $variations = [];
+
+        $industries = array_values(array_filter(array_map('trim', $brief->industries)));
+        $titles = array_values(array_filter(array_map('trim', $brief->decisionMakers)));
+        if ($titles === []) {
+            $titles = $brief->isPeopleSearch() ? self::DEFAULT_PEOPLE_TITLES : self::DEFAULT_COMPANY_MODIFIERS;
+        }
+
+        $base = trim($brief->query);
+        $seed = $base !== '' ? $base : ($industries[0] ?? 'B2B');
+
+        // Broader people/company searches without territory lock-in.
+        foreach (array_slice($titles, 0, 8) as $title) {
+            $variations[] = $this->composePeopleOrCompany($brief, $seed, $title, null);
+        }
+
+        foreach (array_slice($industries !== [] ? $industries : ['B2B'], 0, 5) as $industry) {
+            foreach (array_slice($titles, 0, 4) as $title) {
+                $variations[] = $this->composePeopleOrCompany($brief, $industry, $title, null);
+            }
+            foreach (array_slice(self::SIGNAL_MODIFIERS, 0, 4) as $signal) {
+                $variations[] = $this->composePeopleOrCompany($brief, $industry.' '.$signal, $titles[0] ?? null, null);
+            }
+        }
+
+        foreach (array_slice(self::AUTHORITATIVE_LIST_HINTS, 0, 3) as $hint) {
+            $variations[] = trim($seed.' '.$hint);
+            if ($industries !== []) {
+                $variations[] = trim($industries[0].' '.$hint);
+            }
+        }
+
+        // Synonym / alternate framing without location.
+        foreach (['executives', 'founders', 'leadership team', 'decision makers'] as $roleHint) {
+            $variations[] = $this->composePeopleOrCompany($brief, $seed.' '.$roleHint, null, null);
+        }
+
+        $excluded = [];
+        foreach ($excludeQueries as $q) {
+            $normalized = mb_strtolower(preg_replace('/\s+/u', ' ', trim((string) $q)) ?? '');
+            if ($normalized !== '') {
+                $excluded[$normalized] = true;
+            }
+        }
+
+        $seen = $excluded;
+        $out = [];
+        foreach ($variations as $variation) {
+            $normalized = mb_strtolower(preg_replace('/\s+/u', ' ', trim($variation)) ?? '');
+            if ($normalized === '' || isset($seen[$normalized])) {
+                continue;
+            }
+            $seen[$normalized] = true;
+            $out[] = trim($variation);
+            if (count($out) >= $needed) {
+                break;
+            }
+        }
+
+        return $out;
     }
 
     private function composePeopleOrCompany(

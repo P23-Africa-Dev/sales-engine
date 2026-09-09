@@ -19,6 +19,7 @@ use App\Services\Discovery\CompanyNameValidator;
 use App\Services\Discovery\FactualListSynthesizer;
 use App\Services\Extraction\ExtractionService;
 use App\Services\Enrichment\LeadProfileEnrichmentService;
+use App\Services\Enrichment\ProfileUrlValidator;
 use App\Services\Scoring\ScoringService;
 use Illuminate\Support\Collection;
 
@@ -31,6 +32,8 @@ class DiscoveryOrchestrator
     public const QUALITY_BALANCED = 'balanced';
 
     public const QUALITY_VOLUME = 'volume';
+
+    public const MAX_BACKFILL_PASSES = 2;
 
     private string $qualityThreshold = self::QUALITY_STRICT;
 
@@ -46,6 +49,7 @@ class DiscoveryOrchestrator
         private readonly FactualListSynthesizer $factualListSynthesizer,
         private readonly LeadProfileEnrichmentService $enrichment,
         private readonly QueryVariationGenerator $queryVariationGenerator,
+        private readonly ProfileUrlValidator $profileUrlValidator,
     ) {}
 
     public function setQualityThreshold(string $threshold): self
@@ -102,45 +106,121 @@ class DiscoveryOrchestrator
             $this->updateProgress($run, 1, 0, 0);
 
             $this->appendStage($run, 'searching_sources');
-
-            [$hits, $sourcesChecked, $fanOutMeta] = $this->collectHits($brief, $ctx, $effectiveLimit);
-
-            $this->updateProgress($run, 2, $sourcesChecked, 0);
-
-            $this->appendStage($run, 'extracting');
             $this->enrichment->resetBudget();
+            $this->profileUrlValidator->resetBudget();
+
             $isAuthoritativeQuery = $brief->isAuthoritativePeopleQuery();
             $leadsPayload = [];
             $companies = collect();
             $candidatesFound = 0;
+            $allQueriesExecuted = [];
+            $allSourcesHitCount = [];
+            $fanOutUsed = false;
+            $sourcesChecked = 0;
+            $backfillPasses = 0;
+            $seenLeadNames = [];
 
-            if ($isAuthoritativeQuery) {
-                [$leadsPayload, $companies, $candidatesFound] = $this->processAuthoritativePeopleQuery(
-                    $organization,
-                    $icp,
-                    $brief,
-                    $hits,
-                    $intent,
-                    $hasUserQuery,
-                    $effectiveLimit,
-                    $sourcesChecked,
-                    $run,
-                );
-            } else {
-                [$leadsPayload, $companies, $candidatesFound] = $this->processStandardQuery(
-                    $organization,
-                    $icp,
-                    $brief,
-                    $hits,
-                    $intent,
-                    $hasUserQuery,
-                    $effectiveLimit,
-                    $sourcesChecked,
-                    $run,
-                );
+            $minAcceptableYield = max(8, (int) ceil($effectiveLimit / 2));
+
+            for ($pass = 0; $pass <= self::MAX_BACKFILL_PASSES; $pass++) {
+                $remaining = $effectiveLimit - count($leadsPayload);
+                if ($remaining <= 0) {
+                    break;
+                }
+
+                $isBackfill = $pass > 0;
+                if ($isBackfill) {
+                    if (count($leadsPayload) >= $minAcceptableYield) {
+                        break;
+                    }
+
+                    $this->qualityThreshold = self::QUALITY_VOLUME;
+                    $this->appendStage($run, 'backfill_pass_'.$pass);
+                    $backfillPasses++;
+
+                    $backfillQueries = $this->queryVariationGenerator->generateBackfill(
+                        $brief,
+                        $effectiveLimit,
+                        $allQueriesExecuted,
+                    );
+
+                    if ($backfillQueries === []) {
+                        break;
+                    }
+
+                    [$hits, $sourcesChecked, $fanOutMeta] = $this->collectHits(
+                        $brief,
+                        $ctx,
+                        $effectiveLimit,
+                        $backfillQueries,
+                    );
+                } else {
+                    [$hits, $sourcesChecked, $fanOutMeta] = $this->collectHits($brief, $ctx, $effectiveLimit);
+                }
+
+                $allQueriesExecuted = array_values(array_unique(array_merge(
+                    $allQueriesExecuted,
+                    $fanOutMeta['queries_executed'] ?? [],
+                )));
+                foreach ($fanOutMeta['sources_hit_count'] ?? [] as $key => $count) {
+                    $allSourcesHitCount[$key] = ($allSourcesHitCount[$key] ?? 0) + (int) $count;
+                }
+                $fanOutUsed = $fanOutUsed || (bool) ($fanOutMeta['fan_out_strategy_used'] ?? false);
+
+                $this->updateProgress($run, 2, $sourcesChecked, $candidatesFound);
+                if (! $isBackfill) {
+                    $this->appendStage($run, 'extracting');
+                }
+
+                if ($isAuthoritativeQuery && ! $isBackfill) {
+                    [$passLeads, $passCompanies, $passFound] = $this->processAuthoritativePeopleQuery(
+                        $organization,
+                        $icp,
+                        $brief,
+                        $hits,
+                        $intent,
+                        $hasUserQuery,
+                        $effectiveLimit,
+                        $sourcesChecked,
+                        $run,
+                        $seenLeadNames,
+                    );
+                } else {
+                    [$passLeads, $passCompanies, $passFound] = $this->processStandardQuery(
+                        $organization,
+                        $icp,
+                        $brief,
+                        $hits,
+                        $intent,
+                        $hasUserQuery,
+                        $remaining,
+                        $sourcesChecked,
+                        $run,
+                        $seenLeadNames,
+                    );
+                }
+
+                foreach ($passLeads as $lead) {
+                    $nameKey = mb_strtolower(trim((string) ($lead['name'] ?? '')));
+                    if ($nameKey !== '') {
+                        $seenLeadNames[$nameKey] = true;
+                    }
+                    $leadsPayload[] = $lead;
+                }
+                $companies = $companies->merge($passCompanies);
+                $candidatesFound += $passFound;
+
+                if (count($leadsPayload) >= $effectiveLimit) {
+                    break;
+                }
+
+                // Only continue into backfill when first/prior pass under-yielded.
+                if (! $isBackfill && count($leadsPayload) >= $minAcceptableYield) {
+                    break;
+                }
             }
 
-            $leadsPayload = $this->sortLeadsPayload($leadsPayload);
+            $leadsPayload = array_slice($this->sortLeadsPayload($leadsPayload), 0, $effectiveLimit);
 
             $this->appendStage($run, 'compiling_results');
             $this->updateProgress($run, 4, $sourcesChecked, $candidatesFound);
@@ -158,12 +238,13 @@ class DiscoveryOrchestrator
                     [
                         'lead_count' => count($leadsPayload),
                         'sources_enabled' => collect($this->sources)->filter->isEnabled()->map->key()->values()->all(),
-                        'queries_executed' => $fanOutMeta['queries_executed'],
-                        'sources_hit_count' => $fanOutMeta['sources_hit_count'],
-                        'candidates_extracted' => $fanOutMeta['candidates_extracted'] ?? $hits->count(),
+                        'queries_executed' => $allQueriesExecuted,
+                        'sources_hit_count' => $allSourcesHitCount,
+                        'candidates_extracted' => array_sum($allSourcesHitCount),
                         'candidates_passed_gates' => $candidatesFound,
-                        'fan_out_strategy_used' => $fanOutMeta['fan_out_strategy_used'],
+                        'fan_out_strategy_used' => $fanOutUsed,
                         'quality_threshold' => $this->qualityThreshold,
+                        'backfill_passes' => $backfillPasses,
                     ]
                 ),
                 'finished_at' => now(),
@@ -199,22 +280,39 @@ class DiscoveryOrchestrator
     }
 
     /**
+     * @param  list<string>|null  $overrideQueries  When set, run these queries instead of generating a fresh fan-out set.
      * @return array{0: Collection<int, RawDiscoveryHit>, 1: int, 2: array{queries_executed: list<string>, sources_hit_count: array<string, int>, fan_out_strategy_used: bool, candidates_extracted?: int}}
      */
-    private function collectHits(IcpBrief $brief, SearchContext $ctx, int $effectiveLimit): array
-    {
+    private function collectHits(
+        IcpBrief $brief,
+        SearchContext $ctx,
+        int $effectiveLimit,
+        ?array $overrideQueries = null,
+    ): array {
         $hits = collect();
-        $sourcesChecked = 0;
         $sourcesHitCount = [];
         $queriesExecuted = [];
-        $fanOut = $this->shouldUseFanOut($effectiveLimit);
+        $fanOut = $overrideQueries !== null || $this->shouldUseFanOut($effectiveLimit);
         $enabledSources = array_values(array_filter(
             $this->sources,
             fn (DiscoverySourceInterface $source): bool => $source->isEnabled()
         ));
         $sourcesChecked = count($enabledSources);
 
-        if ($fanOut) {
+        if ($overrideQueries !== null) {
+            $variations = $overrideQueries;
+            foreach ($variations as $variationQuery) {
+                $queriesExecuted[] = $variationQuery;
+                $variantBrief = $brief->withSearchQueryOverride($variationQuery);
+
+                foreach ($enabledSources as $source) {
+                    $batch = $source->search($variantBrief, $ctx);
+                    $key = $source->key();
+                    $sourcesHitCount[$key] = ($sourcesHitCount[$key] ?? 0) + $batch->count();
+                    $hits = $hits->merge($batch);
+                }
+            }
+        } elseif ($fanOut) {
             $variations = $this->queryVariationGenerator->generate($brief, $effectiveLimit);
             foreach ($variations as $variationQuery) {
                 $queriesExecuted[] = $variationQuery;
@@ -287,6 +385,7 @@ class DiscoveryOrchestrator
 
     /**
      * @param  Collection<int, RawDiscoveryHit>  $hits
+     * @param  array<string, true>  $seenLeadNames
      * @return array{0: list<array<string, mixed>>, 1: Collection, 2: int}
      */
     private function processAuthoritativePeopleQuery(
@@ -299,9 +398,10 @@ class DiscoveryOrchestrator
         int $effectiveLimit,
         int $sourcesChecked,
         DiscoveryRun $run,
+        array $seenLeadNames = [],
     ): array {
         $candidates = [];
-        $seenNames = [];
+        $seenNames = $seenLeadNames;
 
         /** @var RawDiscoveryHit $hit */
         foreach ($hits->unique(fn(RawDiscoveryHit $h) => mb_strtolower($h->name . ($h->url ?? ''))) as $hit) {
@@ -346,6 +446,7 @@ class DiscoveryOrchestrator
 
     /**
      * @param  Collection<int, RawDiscoveryHit>  $hits
+     * @param  array<string, true>  $seenLeadNames
      * @return array{0: list<array<string, mixed>>, 1: Collection, 2: int}
      */
     private function processStandardQuery(
@@ -358,13 +459,15 @@ class DiscoveryOrchestrator
         int $effectiveLimit,
         int $sourcesChecked,
         DiscoveryRun $run,
+        array $seenLeadNames = [],
     ): array {
         $candidates = [];
-        $seenNames = [];
+        $seenNames = $seenLeadNames;
+        $gatherCap = $effectiveLimit * 3;
 
         /** @var RawDiscoveryHit $hit */
         foreach ($hits->unique(fn(RawDiscoveryHit $h) => mb_strtolower($h->name)) as $hit) {
-            if (count($candidates) >= $effectiveLimit * 2) {
+            if (count($candidates) >= $gatherCap) {
                 break;
             }
 
@@ -418,6 +521,7 @@ class DiscoveryOrchestrator
         bool $factualQuery,
     ): array {
         $leadsPayload = [];
+        $secondaryPayload = [];
         $companies = collect();
         $candidatesFound = 0;
         $scoredCandidates = [];
@@ -445,7 +549,7 @@ class DiscoveryOrchestrator
         });
 
         foreach ($scoredCandidates as $candidate) {
-            if (count($leadsPayload) >= $effectiveLimit) {
+            if (count($leadsPayload) + count($secondaryPayload) >= $effectiveLimit) {
                 break;
             }
 
@@ -469,10 +573,12 @@ class DiscoveryOrchestrator
                 $scores,
             );
 
+            // Below-threshold ICP-only leads go into a secondary pool (shown after qualifying ones)
+            // instead of being hard-dropped — ICP min score stays unchanged as an ordering signal.
             $minPriority = $this->effectiveMinMatchScore($brief);
-            if ($intent === 'generate_leads' && ! $hasUserQuery && $scores['priority_score'] < $minPriority) {
-                continue;
-            }
+            $isSecondary = $intent === 'generate_leads'
+                && ! $hasUserQuery
+                && $scores['priority_score'] < $minPriority;
 
             if ($brief->isPeopleSearch() || filled($extracted['person_name'] ?? null)) {
                 $enrichedProfile = $this->enrichment->enrich(
@@ -505,12 +611,19 @@ class DiscoveryOrchestrator
             );
 
             $companies->push($leadPayload['company']);
-            $leadsPayload[] = $leadPayload['payload'];
+            if ($isSecondary) {
+                $secondaryPayload[] = $leadPayload['payload'];
+            } else {
+                $leadsPayload[] = $leadPayload['payload'];
+            }
             $candidatesFound++;
             $this->updateProgress($run, 3, $sourcesChecked, $candidatesFound);
         }
 
-        return [$leadsPayload, $companies, $candidatesFound];
+        // Qualifying / primary leads first, then below-threshold secondary pool.
+        $combined = array_merge($leadsPayload, $secondaryPayload);
+
+        return [$combined, $companies, $candidatesFound];
     }
 
     /**
@@ -647,8 +760,48 @@ class DiscoveryOrchestrator
             ? array_values(array_filter($extracted['profile_urls'], fn($u) => is_string($u) && trim($u) !== ''))
             : [];
 
+        $candidateUrls = [];
+        foreach (array_merge(
+            [trim((string) ($extracted['linkedin_url'] ?? ''))],
+            $profileUrls,
+        ) as $candidateUrl) {
+            if (is_string($candidateUrl) && trim($candidateUrl) !== '') {
+                $candidateUrls[] = trim($candidateUrl);
+            }
+        }
+
+        $trustedUrls = [];
+        if (filled($hit->url)) {
+            $trustedUrls[] = (string) $hit->url;
+        }
+
+        $validUrls = $this->profileUrlValidator->filterValid($candidateUrls, $trustedUrls);
+        $profileUrls = array_values(array_filter(
+            $validUrls,
+            fn (string $url): bool => ! str_contains(mb_strtolower(parse_url($url, PHP_URL_HOST) ?: ''), 'linkedin.com')
+                || (bool) preg_match('~/in/~', (string) parse_url($url, PHP_URL_PATH))
+        ));
+
+        $linkedinUrl = '';
+        foreach ($validUrls as $url) {
+            $host = mb_strtolower((string) parse_url($url, PHP_URL_HOST));
+            $path = (string) parse_url($url, PHP_URL_PATH);
+            if (str_contains($host, 'linkedin.com') && preg_match('~/in/~', $path)) {
+                $linkedinUrl = $url;
+                break;
+            }
+        }
+        if ($linkedinUrl === '' && $validUrls !== []) {
+            // Prefer first valid URL as linkedin_url only when it is LinkedIn-shaped; otherwise leave blank.
+            $first = $validUrls[0];
+            if (str_contains(mb_strtolower((string) parse_url($first, PHP_URL_HOST)), 'linkedin.com')) {
+                $linkedinUrl = $first;
+            }
+        }
+
+        // Keep hit URL as source_url fallback even if not a profile link.
         $sourceUrl = trim((string) (
-            $extracted['linkedin_url']
+            ($linkedinUrl !== '' ? $linkedinUrl : null)
             ?? ($profileUrls[0] ?? null)
             ?? ($extracted['business_fields']['source_url'] ?? null)
             ?? $hit->url
@@ -666,8 +819,10 @@ class DiscoveryOrchestrator
 
         $email = trim((string) ($extracted['email'] ?? ''));
         $phone = trim((string) ($extracted['phone'] ?? ''));
-        $linkedinUrl = trim((string) ($extracted['linkedin_url'] ?? ($profileUrls[0] ?? '')));
-        $contactReady = $this->isContactReady($extracted, $profileUrls);
+        $contactReady = $this->isContactReady(
+            array_merge($extracted, ['linkedin_url' => $linkedinUrl !== '' ? $linkedinUrl : null]),
+            $profileUrls,
+        );
 
         $lead = Lead::query()->create([
             'organization_id' => $organization->id,

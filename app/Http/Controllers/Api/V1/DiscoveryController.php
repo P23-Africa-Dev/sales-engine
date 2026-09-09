@@ -38,7 +38,7 @@ class DiscoveryController extends Controller
             $data['query'] ?? '',
             $data['intent'] ?? 'generate_leads',
             null,
-            $data['limit'] ?? 20,
+            $data['limit'] ?? 40,
         );
 
         return response()->json([

@@ -35,8 +35,8 @@ class SerperDiscoveryAdapter implements DiscoverySourceInterface
         $query = $brief->searchQuery();
         $baseUrl = rtrim((string) config('services.serper.base_url'), '/');
         $resultLimit = match (true) {
-            $brief->isAuthoritativePeopleQuery() => min(15, max($ctx->limit, 10)),
-            $ctx->limit >= 20 => 10,
+            $brief->isAuthoritativePeopleQuery() => min(20, max($ctx->limit, 10)),
+            $ctx->limit >= 20 => 20,
             default => min(10, max(5, $ctx->limit)),
         };
 

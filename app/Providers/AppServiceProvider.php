@@ -44,6 +44,7 @@ class AppServiceProvider extends ServiceProvider
                 factualListSynthesizer: $app->make(\App\Services\Discovery\FactualListSynthesizer::class),
                 enrichment: $app->make(\App\Services\Enrichment\LeadProfileEnrichmentService::class),
                 queryVariationGenerator: $app->make(\App\Services\Discovery\QueryVariationGenerator::class),
+                profileUrlValidator: $app->make(\App\Services\Enrichment\ProfileUrlValidator::class),
             );
         });
 

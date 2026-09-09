@@ -23,6 +23,7 @@ class LeadProfileEnrichmentService
         private readonly GlmClient $glm,
         private readonly ContactEnrichmentOrchestrator $contactOrchestrator,
         private readonly QueryIntentService $queryIntent,
+        private readonly ProfileUrlValidator $profileUrlValidator,
     ) {}
 
     public function resetBudget(): void
@@ -272,7 +273,14 @@ class LeadProfileEnrichmentService
                 ],
             ], 'extract', $organization);
 
-            $profileUrls = $this->filterProfileUrls($result['profile_urls'] ?? []);
+            $trustedFromSearch = [];
+            foreach ($searchResults as $sr) {
+                $u = trim((string) ($sr['url'] ?? ''));
+                if ($u !== '') {
+                    $trustedFromSearch[] = $u;
+                }
+            }
+            $profileUrls = $this->filterProfileUrls($result['profile_urls'] ?? [], $trustedFromSearch);
             $sourceUrls = $this->collectSourceUrls($searchResults, $profileUrls);
 
             $summary = trim((string) ($result['summary'] ?? ''));
@@ -391,9 +399,10 @@ class LeadProfileEnrichmentService
 
     /**
      * @param  mixed  $urls
+     * @param  list<string>  $trustedUrls
      * @return list<string>
      */
-    private function filterProfileUrls(mixed $urls): array
+    private function filterProfileUrls(mixed $urls, array $trustedUrls = []): array
     {
         if (! is_array($urls)) {
             return [];
@@ -415,7 +424,9 @@ class LeadProfileEnrichmentService
             }
         }
 
-        return array_values(array_unique($filtered));
+        $unique = array_values(array_unique($filtered));
+
+        return $this->profileUrlValidator->filterValid($unique, $trustedUrls);
     }
 
     private function isPreferredProfileUrl(string $url): bool
