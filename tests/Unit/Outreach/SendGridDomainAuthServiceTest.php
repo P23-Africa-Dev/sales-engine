@@ -102,4 +102,42 @@ class SendGridDomainAuthServiceTest extends TestCase
         $this->assertSame('failed', $record->verification_status);
         $this->assertFalse($record->valid);
     }
+
+    public function test_reauth_same_domain_reuses_existing_sendgrid_id(): void
+    {
+        Http::fake([
+            'api.sendgrid.com/v3/whitelabel/domains/555' => Http::response([
+                'id' => 555,
+                'domain' => 'client.com',
+                'subdomain' => 'em1234',
+                'valid' => false,
+                'dns' => [
+                    'mail_cname' => ['host' => 'em1234.client.com', 'type' => 'cname', 'data' => 'u1.wl.sendgrid.net', 'valid' => false],
+                ],
+            ], 200),
+        ]);
+
+        $org = Organization::query()->create(['name' => 'Org', 'slug' => 'org-'.uniqid()]);
+        OutreachDomainAuthentication::query()->create([
+            'organization_id' => $org->id,
+            'domain' => 'client.com',
+            'sendgrid_domain_id' => '555',
+            'from_email' => 'sales@client.com',
+            'verification_status' => 'pending',
+            'dns_records' => [],
+        ]);
+
+        $service = app(SendGridDomainAuthService::class);
+        $record = $service->authenticate($org, 'client.com', 'hello@client.com');
+
+        $this->assertSame('555', $record->sendgrid_domain_id);
+        $this->assertSame('hello@client.com', $record->from_email);
+        $this->assertSame('pending', $record->verification_status);
+        $this->assertCount(1, $record->dns_records);
+
+        Http::assertSent(fn ($request) => $request->method() === 'GET'
+            && str_contains($request->url(), '/whitelabel/domains/555'));
+        Http::assertNotSent(fn ($request) => $request->method() === 'POST'
+            && $request->url() === 'https://api.sendgrid.com/v3/whitelabel/domains');
+    }
 }

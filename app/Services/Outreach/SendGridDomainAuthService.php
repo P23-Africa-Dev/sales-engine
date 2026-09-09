@@ -27,6 +27,12 @@ class SendGridDomainAuthService
             ->where('organization_id', $organization->id)
             ->first();
 
+        // Re-auth on the same domain: reuse the SendGrid whitelabel and refresh DNS
+        // instead of creating orphan remote domains on every "Generate" click.
+        if ($existing && $existing->domain === $domain && filled($existing->sendgrid_domain_id)) {
+            return $this->refreshExistingDomain($existing, $organization, $fromEmail);
+        }
+
         // If switching domains, clean up the previous SendGrid-side record first.
         if ($existing && $existing->domain !== $domain && $existing->sendgrid_domain_id) {
             $this->deleteRemote($existing->sendgrid_domain_id);
@@ -59,6 +65,47 @@ class SendGridDomainAuthService
                 'last_checked_at' => now(),
             ]
         );
+    }
+
+    private function refreshExistingDomain(
+        OutreachDomainAuthentication $existing,
+        Organization $organization,
+        string $fromEmail,
+    ): OutreachDomainAuthentication {
+        $response = $this->client()->get(
+            self::API_BASE.'/whitelabel/domains/'.$existing->sendgrid_domain_id
+        );
+
+        if ($response->successful()) {
+            $payload = $response->json();
+            $dnsRecords = $this->extractDnsRecords($payload['dns'] ?? []);
+            $valid = (bool) ($payload['valid'] ?? false);
+
+            $existing->update([
+                'from_email' => $fromEmail,
+                'from_name' => $organization->name,
+                'subdomain' => $payload['subdomain'] ?? $existing->subdomain,
+                'dns_records' => $dnsRecords !== [] ? $dnsRecords : $existing->dns_records,
+                'valid' => $valid,
+                // Keep verified if SendGrid still reports valid; otherwise stay pending/failed.
+                'verification_status' => $valid
+                    ? 'verified'
+                    : ($existing->verification_status === 'verified' ? 'pending' : ($existing->verification_status ?: 'pending')),
+                'verified_at' => $valid ? ($existing->verified_at ?? now()) : null,
+                'last_checked_at' => now(),
+            ]);
+
+            return $existing->refresh();
+        }
+
+        // Remote lookup failed — still allow updating the from-email locally.
+        $existing->update([
+            'from_email' => $fromEmail,
+            'from_name' => $organization->name,
+            'last_checked_at' => now(),
+        ]);
+
+        return $existing->refresh();
     }
 
     public function verify(Organization $organization): OutreachDomainAuthentication

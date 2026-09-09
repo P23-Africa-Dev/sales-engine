@@ -34,7 +34,9 @@ class OutreachSenderController extends Controller
                 'reply_to_email' => $identity?->reply_to_email ?? $user->email,
                 'org_verified_from_email' => $domainAuth?->from_email,
                 'org_verified_domain' => $domainAuth?->domain,
+                // Legacy field: missing domain used to surface as "pending" and confused the UI.
                 'verification_status' => $domainAuth?->verification_status ?? 'pending',
+                'org_connection_status' => $this->orgConnectionStatus($domainAuth),
                 'platform_from_email' => config('services.sendgrid.platform_from_email'),
             ],
         ]);
@@ -80,5 +82,18 @@ class OutreachSenderController extends Controller
         );
 
         return $this->show($request);
+    }
+
+    private function orgConnectionStatus(?OutreachDomainAuthentication $domainAuth): string
+    {
+        if (! $domainAuth) {
+            return 'not_connected';
+        }
+
+        return match ($domainAuth->verification_status) {
+            'verified' => 'verified',
+            'failed' => 'failed',
+            default => 'pending',
+        };
     }
 }
