@@ -135,7 +135,7 @@ class DiscoveryOrchestrator
                     }
 
                     $this->qualityThreshold = self::QUALITY_VOLUME;
-                    $this->appendStage($run, 'backfill_pass_'.$pass);
+                    $this->appendStage($run, 'backfill_pass_' . $pass);
                     $backfillPasses++;
 
                     $backfillQueries = $this->queryVariationGenerator->generateBackfill(
@@ -295,7 +295,7 @@ class DiscoveryOrchestrator
         $fanOut = $overrideQueries !== null || $this->shouldUseFanOut($effectiveLimit);
         $enabledSources = array_values(array_filter(
             $this->sources,
-            fn (DiscoverySourceInterface $source): bool => $source->isEnabled()
+            fn(DiscoverySourceInterface $source): bool => $source->isEnabled()
         ));
         $sourcesChecked = count($enabledSources);
 
@@ -360,7 +360,7 @@ class DiscoveryOrchestrator
         return $hits->filter(function (RawDiscoveryHit $hit) use (&$seen): bool {
             $nameKey = mb_strtolower(trim($hit->name));
             $urlKey = mb_strtolower(trim((string) ($hit->url ?? '')));
-            $dedupeKey = $urlKey !== '' ? $nameKey.'|'.$urlKey : $nameKey;
+            $dedupeKey = $urlKey !== '' ? $nameKey . '|' . $urlKey : $nameKey;
 
             if ($dedupeKey === '' || isset($seen[$dedupeKey])) {
                 return false;
@@ -599,6 +599,19 @@ class DiscoveryOrchestrator
                 );
             }
 
+            // Prefer a real person name on the card when enrichment found a contact.
+            $contactPerson = trim((string) ($extracted['contact_person'] ?? $extracted['person_name'] ?? ''));
+            if (
+                $contactPerson !== ''
+                && $contactPerson !== $displayName
+                && $this->personNameValidator->isValidPersonName($contactPerson, $extracted)
+            ) {
+                if (trim((string) ($extracted['company'] ?? '')) === '') {
+                    $extracted['company'] = $displayName;
+                }
+                $displayName = $contactPerson;
+            }
+
             $leadPayload = $this->createLeadFromExtraction(
                 $organization,
                 $icp,
@@ -761,10 +774,12 @@ class DiscoveryOrchestrator
             : [];
 
         $candidateUrls = [];
-        foreach (array_merge(
-            [trim((string) ($extracted['linkedin_url'] ?? ''))],
-            $profileUrls,
-        ) as $candidateUrl) {
+        foreach (
+            array_merge(
+                [trim((string) ($extracted['linkedin_url'] ?? ''))],
+                $profileUrls,
+            ) as $candidateUrl
+        ) {
             if (is_string($candidateUrl) && trim($candidateUrl) !== '') {
                 $candidateUrls[] = trim($candidateUrl);
             }
@@ -778,7 +793,7 @@ class DiscoveryOrchestrator
         $validUrls = $this->profileUrlValidator->filterValid($candidateUrls, $trustedUrls);
         $profileUrls = array_values(array_filter(
             $validUrls,
-            fn (string $url): bool => ! str_contains(mb_strtolower(parse_url($url, PHP_URL_HOST) ?: ''), 'linkedin.com')
+            fn(string $url): bool => ! str_contains(mb_strtolower(parse_url($url, PHP_URL_HOST) ?: ''), 'linkedin.com')
                 || (bool) preg_match('~/in/~', (string) parse_url($url, PHP_URL_PATH))
         ));
 

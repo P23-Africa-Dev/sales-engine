@@ -183,7 +183,7 @@ class ChatService
                     ->where('id', '>', $userMessage->id)
                     ->orderByDesc('id')
                     ->get()
-                    ->first(fn (ChatMessage $message) => ! ($message->meta['pending'] ?? false))
+                    ->first(fn(ChatMessage $message) => ! ($message->meta['pending'] ?? false))
                     ?? ChatMessage::query()
                     ->where('chat_session_id', $session->id)
                     ->where('role', 'assistant')
@@ -400,7 +400,7 @@ class ChatService
                 ->where('id', '>', $userMessage->id)
                 ->orderBy('id')
                 ->get()
-                ->first(fn (ChatMessage $message) => (bool) ($message->meta['pending'] ?? false));
+                ->first(fn(ChatMessage $message) => (bool) ($message->meta['pending'] ?? false));
 
             if ($placeholder) {
                 $placeholder->update([
@@ -428,11 +428,11 @@ class ChatService
                 ->where('id', '>', $userMessage->id)
                 ->orderBy('id')
                 ->get()
-                ->first(fn (ChatMessage $message) => (bool) ($message->meta['pending'] ?? false));
+                ->first(fn(ChatMessage $message) => (bool) ($message->meta['pending'] ?? false));
 
             if ($placeholder) {
                 $placeholder->update([
-                    'body' => 'Sorry, that request failed: '.$e->getMessage(),
+                    'body' => 'Sorry, that request failed: ' . $e->getMessage(),
                     'intent' => $intent,
                     'meta' => array_merge($meta, ['error' => $e->getMessage(), 'pending' => false]),
                 ]);
@@ -440,7 +440,7 @@ class ChatService
                 ChatMessage::query()->create([
                     'chat_session_id' => $session->id,
                     'role' => 'assistant',
-                    'body' => 'Sorry, that request failed: '.$e->getMessage(),
+                    'body' => 'Sorry, that request failed: ' . $e->getMessage(),
                     'intent' => $intent,
                     'meta' => array_merge($meta, ['error' => $e->getMessage()]),
                 ]);
@@ -450,6 +450,11 @@ class ChatService
     }
 
     /**
+     * Build a grounded discovery reply from the structured leads payload only.
+     * Never ask GLM to list leads — prior chat context caused invented names that
+     * disagreed with the cards below.
+     *
+     * @param  list<array<string, mixed>>  $leads
      * @param  list<array{role: string, content: string}>  $historySlice
      */
     private function narrateDiscovery(
@@ -472,49 +477,54 @@ class ChatService
             return "No leads met the match threshold for ICP \"{$icp->name}\". Try refining territories or industries.";
         }
 
-        $icpRecommendedCount = count(array_filter($leads, fn (array $lead) => (bool) ($lead['icp_recommended'] ?? false)));
+        $icpRecommendedCount = count(array_filter($leads, fn(array $lead) => (bool) ($lead['icp_recommended'] ?? false)));
         $advisoryNote = $this->buildIcpAdvisoryNote($icp, $count, $icpRecommendedCount, $hasUserQuery);
 
-        if (! $this->glm->isConfigured()) {
-            return "Found {$count} leads for your search.{$advisoryNote}";
-        }
+        return $this->formatGroundedLeadNarration($leads, $count, $advisoryNote);
+    }
 
-        try {
-            $publicLeads = array_map(fn (array $lead) => array_filter([
-                'name' => $lead['name'] ?? '',
-                'score' => $lead['score'] ?? 0,
-                'summary' => $lead['summary'] ?? '',
-                'title' => $lead['title'] ?? null,
-                'company' => $lead['company'] ?? null,
-                'icp_fit_score' => $lead['icp_fit_score'] ?? null,
-                'intent_score' => $lead['intent_score'] ?? null,
-                'query_relevance_score' => $lead['query_relevance_score'] ?? null,
-            ], fn ($v) => $v !== null && $v !== ''), $leads);
+    /**
+     * @param  list<array<string, mixed>>  $leads
+     */
+    private function formatGroundedLeadNarration(array $leads, int $count, string $advisoryNote): string
+    {
+        $noun = $count === 1 ? 'lead' : 'leads';
+        $lines = ["Found {$count} {$noun} for your search.", ''];
 
-            $messages = [
-                ['role' => 'system', 'content' => 'You are Sales Engine. Summarize ranked lead prospects for a sales team. Use sequential numbering (1, 2, 3...) — never repeat "1." for every item. Use each lead\'s actual name field — never substitute the ICP profile name as a lead name. Write in plain prose: name, role/company if known, and why they matter for the active ICP. Do NOT include internal fields like Match Quality, Query Match, ICP Fit Score, or Recommended Next Action. Do NOT label leads as "ICP match" or "Outside ICP" — refer to overall score and fit in plain language only. Tell the user they can review cards below (Overall / Search / ICP / Intent scores) and save selected leads to CRM. When prior chat turns are provided, briefly acknowledge continuity with that conversation. '.TimeGreeting::promptContext($clientTimezone)],
-            ];
+        foreach (array_values($leads) as $index => $lead) {
+            $name = trim((string) ($lead['name'] ?? 'Unknown'));
+            $title = trim((string) ($lead['title'] ?? ''));
+            $company = trim((string) ($lead['company'] ?? ''));
+            $role = match (true) {
+                $title !== '' && $company !== '' => "{$title} at {$company}",
+                $title !== '' => $title,
+                $company !== '' => $company,
+                default => '',
+            };
 
-            foreach (array_slice($historySlice, -4) as $turn) {
-                if (($turn['role'] ?? '') === 'user' || ($turn['role'] ?? '') === 'assistant') {
-                    $messages[] = ['role' => $turn['role'], 'content' => (string) ($turn['content'] ?? '')];
-                }
+            $why = trim((string) ($lead['icp_relevance_reason'] ?? ''));
+            if ($why === '') {
+                $why = trim((string) ($lead['summary'] ?? ''));
+            }
+            // Keep bullet bodies short so the cards remain the detailed view.
+            if (mb_strlen($why) > 220) {
+                $why = rtrim(mb_substr($why, 0, 217)) . '…';
             }
 
-            $messages[] = ['role' => 'user', 'content' => json_encode([
-                'intent' => $intent,
-                'active_icp' => $this->icpChatContext->toPromptPayload($icp),
-                'query' => $query,
-                'leads' => $publicLeads,
-                'icp_recommended_count' => $icpRecommendedCount,
-            ], JSON_UNESCAPED_UNICODE)];
-
-            $narrative = $this->glm->chat($messages, 'chat', $organization);
-
-            return rtrim($this->listNumbering->normalize($narrative)).$advisoryNote;
-        } catch (\Throwable) {
-            return "Found {$count} leads for your search.{$advisoryNote}";
+            $heading = ($index + 1) . '. ' . $name;
+            if ($role !== '') {
+                $heading .= ' — ' . $role;
+            }
+            $lines[] = $heading;
+            if ($why !== '') {
+                $lines[] = $why;
+            }
+            $lines[] = '';
         }
+
+        $lines[] = 'Review the cards below (Overall / Search / ICP / Intent scores) and save selected leads to CRM.' . $advisoryNote;
+
+        return trim(implode("\n", $lines));
     }
 
     private function buildIcpAdvisoryNote(IcpProfile $icp, int $total, int $icpRecommendedCount, bool $hasUserQuery): string
@@ -554,7 +564,7 @@ class ChatService
         $firstName = trim(explode(' ', trim($user->name ?? ''), 2)[0] ?? '');
         $system = $this->icpChatContext->buildFreeformSystemPrompt($icp, $firstName, $clientTimezone);
         if ($summary) {
-            $system .= "\n\nConversation memory (older turns summarized):\n".$summary;
+            $system .= "\n\nConversation memory (older turns summarized):\n" . $summary;
         }
 
         $messages = [['role' => 'system', 'content' => $system]];
@@ -572,7 +582,7 @@ class ChatService
         try {
             return $this->listNumbering->normalize($this->glm->chat($messages, 'chat', $organization));
         } catch (\Throwable $e) {
-            return 'Chat temporarily unavailable: '.$e->getMessage();
+            return 'Chat temporarily unavailable: ' . $e->getMessage();
         }
     }
 }
