@@ -137,6 +137,9 @@ class CrmSyncServiceTest extends TestCase
         ]);
 
         Http::fake([
+            'api.example.com/api/v1/crm/leads/check-duplicate*' => Http::response([
+                'data' => ['exists' => false, 'lead' => null, 'match_reason' => null],
+            ], 200),
             'api.example.com/*' => Http::response(['data' => ['lead' => ['id' => 501]]], 201),
         ]);
 
@@ -147,5 +150,39 @@ class CrmSyncServiceTest extends TestCase
         $this->assertSame('501', $result['f23_lead_id']);
         $this->assertSame('501', $lead->fresh()->f23_lead_id);
         $this->assertNotNull($lead->fresh()->synced_to_f23_at);
+    }
+
+    public function test_push_lead_retries_on_transient_server_error(): void
+    {
+        config([
+            'services.factory23.api_url' => 'https://api.example.com',
+            'services.factory23.api_token' => 'token',
+            'services.factory23.crm_sync_enabled' => true,
+        ]);
+
+        [, $org] = $this->actingAsOrgMember();
+        $org->update(['f23_company_id' => 42, 'factory23_crm_sync_enabled' => true]);
+
+        $lead = Lead::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'Retry Co',
+            'stage' => 'new',
+            'score' => 70,
+        ]);
+
+        Http::fake([
+            'api.example.com/api/v1/crm/leads/check-duplicate*' => Http::response([
+                'data' => ['exists' => false, 'lead' => null, 'match_reason' => null],
+            ], 200),
+            'api.example.com/api/v1/crm/labels*' => Http::response(['data' => ['items' => [['slug' => 'new_lead']]]], 200),
+            'api.example.com/api/v1/crm/leads' => Http::sequence()
+                ->push(['message' => 'Unavailable'], 503)
+                ->push(['data' => ['lead' => ['id' => 777]]], 201),
+        ]);
+
+        $result = app(CrmSyncService::class)->pushLead($org, $lead);
+
+        $this->assertTrue($result['synced']);
+        $this->assertSame('777', $result['f23_lead_id']);
     }
 }

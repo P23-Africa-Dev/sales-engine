@@ -71,6 +71,9 @@ class OutreachDraftService
                 'score' => (int) round((float) $l->score),
                 'summary' => $l->summary,
                 'crm_synced' => filled($l->synced_to_f23_at),
+                'crm_duplicate' => filled($l->crm_duplicate_of),
+                'crm_duplicate_reason' => $l->crm_duplicate_reason,
+                'crm_fields_updated' => $l->crm_fields_updated ?? [],
                 'f23_lead_id' => $l->f23_lead_id,
                 'icp_relevance_reason' => is_array($l->meta)
                     ? (trim((string) ($l->meta['icp_relevance_reason'] ?? '')) ?: null)

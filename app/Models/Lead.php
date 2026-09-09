@@ -26,6 +26,9 @@ class Lead extends Model
         'save_status',
         'f23_lead_id',
         'synced_to_f23_at',
+        'crm_duplicate_of',
+        'crm_duplicate_reason',
+        'crm_fields_updated',
         'meta',
     ];
 
@@ -34,6 +37,7 @@ class Lead extends Model
         return [
             'score' => 'float',
             'meta' => 'array',
+            'crm_fields_updated' => 'array',
             'synced_to_f23_at' => 'datetime',
         ];
     }

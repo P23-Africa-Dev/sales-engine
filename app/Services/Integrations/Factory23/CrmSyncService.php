@@ -21,7 +21,11 @@ class CrmSyncService
     /** @var array<string, string> */
     private array $defaultStatusByCompany = [];
 
-    public function __construct(private readonly Factory23CrmTokenService $tokenService) {}
+    public function __construct(
+        private readonly Factory23CrmTokenService $tokenService,
+        private readonly DuplicateLeadChecker $duplicateChecker,
+        private readonly LeadFieldValidator $fieldValidator,
+    ) {}
 
     public function isConfigured(): bool
     {
@@ -170,7 +174,15 @@ class CrmSyncService
     /**
      * Push a single lead to Factory23 CRM (any stage).
      *
-     * @return array{synced: bool, f23_lead_id: ?string, already_synced?: bool}
+     * @return array{
+     *   synced: bool,
+     *   f23_lead_id: ?string,
+     *   already_synced?: bool,
+     *   updated?: bool,
+     *   fields_updated?: list<string>,
+     *   skipped_reason?: string,
+     *   crm_duplicate?: bool
+     * }
      */
     public function pushLead(Organization $organization, Lead $lead): array
     {
@@ -179,6 +191,7 @@ class CrmSyncService
                 'synced' => true,
                 'f23_lead_id' => (string) $lead->f23_lead_id,
                 'already_synced' => true,
+                'crm_duplicate' => filled($lead->crm_duplicate_of),
             ];
         }
 
@@ -194,24 +207,13 @@ class CrmSyncService
             throw new CrmSyncException($this->syncBlockMessage(self::REASON_NOT_CONFIGURED), self::REASON_NOT_CONFIGURED);
         }
 
-        $response = Http::timeout(20)
-            ->withToken($token)
-            ->post($base . '/api/v1/crm/leads', $this->buildLeadPayload($organization, $lead));
-
-        if (in_array($response->status(), [401, 403], true) && filled($organization->f23_api_token)) {
-            $this->tokenService->clearForOrganization($organization);
-            throw new CrmSyncException($this->syncBlockMessage(self::REASON_TOKEN_INVALID), self::REASON_TOKEN_INVALID);
+        $duplicate = $this->duplicateChecker->checkDuplicate($organization, $lead);
+        if ($duplicate !== null && ($duplicate['exists'] ?? false) === true) {
+            return $this->handleExistingCrmLead($organization, $lead, $duplicate, $base, $token);
         }
 
-        if (! $response->successful()) {
-            $message = (string) ($response->json('message') ?? 'Unknown error');
-            Log::warning('F23 CRM single lead sync failed', [
-                'lead_id' => $lead->id,
-                'status' => $response->status(),
-                'message' => $message,
-            ]);
-            throw new CrmSyncException('Failed to push lead to CRM (HTTP ' . $response->status() . '): ' . $message, 'push_failed');
-        }
+        $payload = $this->buildLeadPayload($organization, $lead);
+        $response = $this->postWithRetry($base.'/api/v1/crm/leads', $token, $payload, $organization, $lead);
 
         $f23LeadId = (string) ($response->json('data.lead.id') ?? $response->json('data.id') ?? $response->json('id') ?? '');
 
@@ -219,12 +221,209 @@ class CrmSyncService
             'f23_lead_id' => $f23LeadId,
             'synced_to_f23_at' => now(),
             'save_status' => Lead::SAVE_SAVED,
+            'crm_duplicate_of' => null,
+            'crm_duplicate_reason' => null,
+            'crm_fields_updated' => null,
         ]);
 
         return [
             'synced' => true,
             'f23_lead_id' => $f23LeadId,
+            'crm_duplicate' => false,
         ];
+    }
+
+    /**
+     * @param  array{exists: bool, f23_lead: ?array<string, mixed>, match_reason: ?string}  $duplicate
+     * @return array<string, mixed>
+     */
+    private function handleExistingCrmLead(
+        Organization $organization,
+        Lead $lead,
+        array $duplicate,
+        string $base,
+        string $token,
+    ): array {
+        $f23Lead = $duplicate['f23_lead'] ?? [];
+        $f23LeadId = (string) ($f23Lead['id'] ?? '');
+        $matchReason = (string) ($duplicate['match_reason'] ?? 'existing');
+
+        if ($f23LeadId === '') {
+            throw new CrmSyncException(
+                'A matching lead already exists in CRM, but its ID could not be resolved.',
+                'duplicate_unresolved',
+            );
+        }
+
+        $comparison = $this->duplicateChecker->compareQuality($lead, $f23Lead);
+        $fieldsUpdated = [];
+        $updated = false;
+
+        if ($comparison['has_new_data']) {
+            $mergePayload = array_merge($comparison['merge_payload'], [
+                'company_id' => $organization->f23_company_id,
+                'strategy' => 'better_quality',
+            ]);
+
+            $response = $this->requestWithRetry(
+                'patch',
+                $base.'/api/v1/crm/leads/'.$f23LeadId.'/merge',
+                $token,
+                $mergePayload,
+                $organization,
+                $lead,
+            );
+
+            $updated = (bool) ($response->json('data.updated') ?? false);
+            $fieldsUpdated = $response->json('data.fields_changed') ?? $comparison['new_fields'];
+            if (! is_array($fieldsUpdated)) {
+                $fieldsUpdated = [];
+            }
+            $fieldsUpdated = array_values(array_map('strval', $fieldsUpdated));
+        }
+
+        $reasonLabel = match ($matchReason) {
+            'email' => 'Matched existing CRM lead by email',
+            'name_company' => 'Matched existing CRM lead by name and company',
+            'name' => 'Matched existing CRM lead by name',
+            default => 'Matched an existing CRM lead',
+        };
+
+        $lead->update([
+            'f23_lead_id' => $f23LeadId,
+            'synced_to_f23_at' => now(),
+            'save_status' => Lead::SAVE_SAVED,
+            'crm_duplicate_of' => $f23LeadId,
+            'crm_duplicate_reason' => $reasonLabel,
+            'crm_fields_updated' => $fieldsUpdated !== [] ? $fieldsUpdated : null,
+        ]);
+
+        return [
+            'synced' => true,
+            'f23_lead_id' => $f23LeadId,
+            'already_synced' => ! $updated,
+            'updated' => $updated,
+            'fields_updated' => $fieldsUpdated,
+            'skipped_reason' => $updated ? null : 'identical',
+            'crm_duplicate' => true,
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     */
+    private function postWithRetry(
+        string $url,
+        string $token,
+        array $payload,
+        Organization $organization,
+        Lead $lead,
+    ): \Illuminate\Http\Client\Response {
+        return $this->requestWithRetry('post', $url, $token, $payload, $organization, $lead);
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     */
+    private function requestWithRetry(
+        string $method,
+        string $url,
+        string $token,
+        array $payload,
+        Organization $organization,
+        Lead $lead,
+    ): \Illuminate\Http\Client\Response {
+        $attempts = 3;
+        $lastException = null;
+
+        for ($attempt = 1; $attempt <= $attempts; $attempt++) {
+            try {
+                $pending = Http::timeout(20)->withToken($token);
+                $response = $method === 'patch'
+                    ? $pending->patch($url, $payload)
+                    : $pending->post($url, $payload);
+
+                if (in_array($response->status(), [401, 403], true) && filled($organization->f23_api_token)) {
+                    $this->tokenService->clearForOrganization($organization);
+                    throw new CrmSyncException($this->syncBlockMessage(self::REASON_TOKEN_INVALID), self::REASON_TOKEN_INVALID);
+                }
+
+                if ($response->successful()) {
+                    return $response;
+                }
+
+                if (in_array($response->status(), [500, 502, 503, 504], true) && $attempt < $attempts) {
+                    usleep((int) (1000000 * (2 ** ($attempt - 1))));
+                    continue;
+                }
+
+                if ($response->status() === 422) {
+                    throw new CrmSyncException($this->formatValidationMessage($response), 'validation_failed');
+                }
+
+                if (in_array($response->status(), [500, 502, 503, 504], true)) {
+                    throw new RetryableCrmSyncException(
+                        'CRM is temporarily unavailable. Please try again in a moment.',
+                        'transient_failure',
+                    );
+                }
+
+                $message = (string) ($response->json('message') ?? 'Unknown error');
+                Log::warning('F23 CRM lead sync failed', [
+                    'lead_id' => $lead->id,
+                    'status' => $response->status(),
+                    'message' => $message,
+                    'method' => $method,
+                ]);
+                throw new CrmSyncException(
+                    'Could not save lead to CRM (HTTP '.$response->status().'): '.$message,
+                    'push_failed',
+                );
+            } catch (CrmSyncException $e) {
+                throw $e;
+            } catch (\Throwable $e) {
+                $lastException = $e;
+                if ($attempt < $attempts) {
+                    usleep((int) (1000000 * (2 ** ($attempt - 1))));
+                    continue;
+                }
+            }
+        }
+
+        throw new RetryableCrmSyncException(
+            'CRM sync timed out after several attempts. Please try again.',
+            'timeout',
+        );
+    }
+
+    private function formatValidationMessage(\Illuminate\Http\Client\Response $response): string
+    {
+        $errors = $response->json('errors');
+        if (is_array($errors) && $errors !== []) {
+            $parts = [];
+            foreach ($errors as $field => $messages) {
+                $label = is_string($field) ? str_replace('_', ' ', $field) : 'field';
+                $first = is_array($messages) ? (string) ($messages[0] ?? '') : (string) $messages;
+                if ($first !== '') {
+                    $parts[] = $first;
+                } else {
+                    $parts[] = "Invalid {$label}.";
+                }
+            }
+
+            if ($parts !== []) {
+                return 'Some lead details could not be saved: '.implode(' ', $parts);
+            }
+        }
+
+        $message = (string) ($response->json('message') ?? 'Validation failed.');
+
+        // Friendlier rewrite for common URL validation failures (website often mislabeled as mobile in older clients).
+        if (preg_match('/\b(website|mobile|url)\b.*valid URL/i', $message)) {
+            return 'A website/profile URL on this lead was invalid, so it was not sent. Other details can still be saved — try again.';
+        }
+
+        return 'Could not save lead to CRM: '.$message;
     }
 
     /**
@@ -246,7 +445,7 @@ class CrmSyncService
             $nextAction = 'Review and qualify this lead';
         }
 
-        return array_filter([
+        $raw = array_filter([
             'name' => $lead->name,
             'source' => 'sales_engine',
             'status' => $this->resolveDefaultLeadStatus($organization),
@@ -267,7 +466,9 @@ class CrmSyncService
                 'source_url' => $sourceUrl !== '' ? $sourceUrl : null,
                 'enrichment_confidence' => $meta['enrichment_confidence'] ?? null,
             ]),
-        ], fn($value) => $value !== null);
+        ], fn ($value) => $value !== null);
+
+        return $this->fieldValidator->sanitizePayload($raw)['payload'];
     }
 
     /**

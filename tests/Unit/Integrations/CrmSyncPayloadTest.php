@@ -79,7 +79,11 @@ class CrmSyncPayloadTest extends TestCase
         ]);
 
         Http::fake([
-            'api.example.com/*' => Http::response(['data' => ['lead' => ['id' => 900]]], 201),
+            'api.example.com/api/v1/crm/leads/check-duplicate*' => Http::response([
+                'data' => ['exists' => false, 'lead' => null, 'match_reason' => null],
+            ], 200),
+            'api.example.com/api/v1/crm/labels*' => Http::response(['data' => ['items' => [['slug' => 'new_lead']]]], 200),
+            'api.example.com/api/v1/crm/leads' => Http::response(['data' => ['lead' => ['id' => 900]]], 201),
         ]);
 
         app(CrmSyncService::class)->pushLead($org, $lead);

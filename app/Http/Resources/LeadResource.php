@@ -44,6 +44,12 @@ class LeadResource extends JsonResource
             'icp_relevance_reason' => isset($meta['icp_relevance_reason']) && trim((string) $meta['icp_relevance_reason']) !== ''
                 ? trim((string) $meta['icp_relevance_reason'])
                 : null,
+            'save_status' => $this->save_status,
+            'crm_synced' => filled($this->synced_to_f23_at),
+            'crm_duplicate' => filled($this->crm_duplicate_of),
+            'crm_duplicate_reason' => $this->crm_duplicate_reason,
+            'crm_fields_updated' => $this->crm_fields_updated ?? [],
+            'f23_lead_id' => $this->f23_lead_id,
             'created_at' => $this->created_at?->toIso8601String(),
         ];
     }
