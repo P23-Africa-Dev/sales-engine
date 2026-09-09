@@ -15,6 +15,7 @@ readonly class RawSocialHit
         public ?string $snippet,
         public ?string $title,
         public ?string $authorName = null,
+        public ?string $authorProfileUrl = null,
         public ?CarbonInterface $postedAt = null,
         public ?string $dateRaw = null,
     ) {}

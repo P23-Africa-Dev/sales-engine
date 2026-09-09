@@ -132,6 +132,10 @@ class SocialSignalEnricher
                     'personal_recommended_action_detail' => $personalActionDetail,
                     'why_this_matters_to_you' => (string) ($json['why_this_matters_to_you'] ?? $this->fallbackWhyThisMatters($brief, $signalType)),
                     'summary' => (string) ($json['summary'] ?? mb_substr($hit->postText, 0, 240)),
+                    'author_profile_url' => $hit->authorProfileUrl,
+                    'profile_name' => trim((string) ($json['profile_name'] ?? '')) !== ''
+                        ? (string) $json['profile_name']
+                        : ($hit->authorName ?? 'Unknown'),
                 ]);
             } catch (\Throwable) {
                 // fall through to heuristic enrichment
@@ -153,6 +157,7 @@ class SocialSignalEnricher
 
         return [
             'profile_name' => $hit->authorName ?? 'Unknown',
+            'author_profile_url' => $hit->authorProfileUrl,
             'persona' => $brief->decisionMakers[0] ?? 'Decision maker',
             'company_name' => 'Individual',
             'entity_type' => 'individual',

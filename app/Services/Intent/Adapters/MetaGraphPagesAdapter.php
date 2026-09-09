@@ -148,6 +148,12 @@ class MetaGraphPagesAdapter implements SocialSourceInterface
         }
 
         $authorName = isset($post['from']['name']) ? (string) $post['from']['name'] : null;
+        $authorProfileUrl = null;
+        if (isset($post['from']['id']) && trim((string) $post['from']['id']) !== '') {
+            $authorProfileUrl = 'https://www.facebook.com/'.trim((string) $post['from']['id']);
+        } elseif (isset($post['from']['link']) && trim((string) $post['from']['link']) !== '') {
+            $authorProfileUrl = trim((string) $post['from']['link']);
+        }
         $permalink = isset($post['permalink_url']) ? (string) $post['permalink_url'] : null;
         if ($permalink === null && isset($post['id'])) {
             $permalink = 'https://www.facebook.com/' . (string) $post['id'];
@@ -194,6 +200,7 @@ class MetaGraphPagesAdapter implements SocialSourceInterface
             snippet: $snippet,
             title: $title,
             authorName: $authorName,
+            authorProfileUrl: $authorProfileUrl,
             postedAt: $postedAt,
             dateRaw: $createdRaw,
         );

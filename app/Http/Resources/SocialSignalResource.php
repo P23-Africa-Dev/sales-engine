@@ -33,6 +33,8 @@ class SocialSignalResource extends JsonResource
             'description' => $this->intent_description,
             'score' => (int) round((float) $this->score),
             'profile' => $this->profile_name,
+            'author_profile_url' => $this->author_profile_url,
+            'platform' => $this->platform,
             'reasons' => $this->reasons ?? [],
             'signalType' => $this->signal_type,
             'buyingStage' => $this->buying_stage,

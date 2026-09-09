@@ -174,6 +174,7 @@ class CrmSyncService
     /**
      * Push a single lead to Factory23 CRM (any stage).
      *
+     * @param  array{status?: string, pipeline_stage?: string}  $options
      * @return array{
      *   synced: bool,
      *   f23_lead_id: ?string,
@@ -184,7 +185,7 @@ class CrmSyncService
      *   crm_duplicate?: bool
      * }
      */
-    public function pushLead(Organization $organization, Lead $lead): array
+    public function pushLead(Organization $organization, Lead $lead, array $options = []): array
     {
         if (filled($lead->synced_to_f23_at) && filled($lead->f23_lead_id)) {
             return [
@@ -212,7 +213,7 @@ class CrmSyncService
             return $this->handleExistingCrmLead($organization, $lead, $duplicate, $base, $token);
         }
 
-        $payload = $this->buildLeadPayload($organization, $lead);
+        $payload = $this->buildLeadPayload($organization, $lead, $options);
         $response = $this->postWithRetry($base.'/api/v1/crm/leads', $token, $payload, $organization, $lead);
 
         $f23LeadId = (string) ($response->json('data.lead.id') ?? $response->json('data.id') ?? $response->json('id') ?? '');
@@ -427,9 +428,10 @@ class CrmSyncService
     }
 
     /**
+     * @param  array{status?: string, pipeline_stage?: string}  $options
      * @return array<string, mixed>
      */
-    private function buildLeadPayload(Organization $organization, Lead $lead): array
+    private function buildLeadPayload(Organization $organization, Lead $lead, array $options = []): array
     {
         $meta = is_array($lead->meta) ? $lead->meta : [];
         $title = trim((string) ($meta['title'] ?? ''));
@@ -445,10 +447,16 @@ class CrmSyncService
             $nextAction = 'Review and qualify this lead';
         }
 
+        $statusOverride = trim((string) ($options['status'] ?? $meta['crm_status'] ?? ''));
+        $pipelineStage = trim((string) ($options['pipeline_stage'] ?? $meta['crm_destination'] ?? ''));
+        $status = $statusOverride !== ''
+            ? $statusOverride
+            : $this->resolveDefaultLeadStatus($organization);
+
         $raw = array_filter([
             'name' => $lead->name,
             'source' => 'sales_engine',
-            'status' => $this->resolveDefaultLeadStatus($organization),
+            'status' => $status,
             'priority' => 'medium',
             'company_id' => $organization->f23_company_id,
             'position' => $title !== '' ? $title : null,
@@ -465,6 +473,8 @@ class CrmSyncService
                 'summary' => $lead->summary,
                 'source_url' => $sourceUrl !== '' ? $sourceUrl : null,
                 'enrichment_confidence' => $meta['enrichment_confidence'] ?? null,
+                'pipeline_stage' => $pipelineStage !== '' ? $pipelineStage : null,
+                'social_signal_id' => $meta['social_signal_id'] ?? null,
             ]),
         ], fn ($value) => $value !== null);
 
