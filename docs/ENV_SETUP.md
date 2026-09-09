@@ -185,3 +185,27 @@ curl -s -H "Authorization: Bearer $TOKEN" \
   -H "Accept: application/json" \
   https://api.salesengine.thefactory23.com/api/v1/icp-profiles
 ```
+
+---
+
+## 10. SendGrid outreach (webhook + domain authentication)
+
+`SENDGRID_API_KEY` and `SENDGRID_PLATFORM_FROM_EMAIL` must already be set (Secret + ConfigMap respectively) before this step.
+
+1. Run the one-time setup command against the environment whose API key is configured (it hits SendGrid's API, not the local DB):
+
+   ```bash
+   php artisan outreach:setup-sendgrid https://api.salesengine.thefactory23.com/api/v1/webhooks/sendgrid
+   ```
+
+2. It prints `SENDGRID_WEBHOOK_PUBLIC_KEY` and `SENDGRID_UNSUBSCRIBE_GROUP_ID`. Put the public key in `k8s/secret.yaml` and the group id in `k8s/configmap.yaml`, then:
+
+   ```bash
+   kubectl apply -f k8s/configmap.yaml -n sales-engine
+   kubectl apply -f k8s/secret.yaml -n sales-engine
+   kubectl rollout restart deployment/sales-engine-api -n sales-engine
+   ```
+
+3. **Organization ("send as my own domain") sending** requires no extra env vars — an org authenticates their own domain from the Sales Engine UI (Outreach settings → Email sender → Connect your domain). That flow calls SendGrid's Domain Authentication API directly per-organization; there is nothing to configure here beyond the API key already set above.
+
+4. Re-running `outreach:setup-sendgrid` is safe — it reuses the existing ASM group and re-points the Event Webhook URL if it changed.

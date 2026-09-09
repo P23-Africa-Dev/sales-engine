@@ -3,8 +3,8 @@
 namespace App\Services\Outreach;
 
 use App\Models\Organization;
+use App\Models\OutreachDomainAuthentication;
 use App\Models\OutreachIdentity;
-use App\Models\SocialListeningSetting;
 use App\Models\User;
 
 readonly class OutboundIdentity
@@ -29,14 +29,13 @@ class OutreachIdentityResolver
         $senderMode = $identity?->sender_mode ?? 'platform';
         $replyTo = $identity?->reply_to_email ?? $user->email;
 
-        $settings = SocialListeningSetting::query()
+        $domainAuth = OutreachDomainAuthentication::query()
             ->where('organization_id', $organization->id)
-            ->orderByDesc('id')
             ->first();
 
-        if ($senderMode === 'organization' && $settings?->verification_status === 'verified' && filled($settings->org_verified_from_email)) {
+        if ($senderMode === 'organization' && $domainAuth?->isVerified()) {
             return new OutboundIdentity(
-                fromEmail: $settings->org_verified_from_email,
+                fromEmail: $domainAuth->from_email,
                 fromName: $user->name,
                 replyTo: $replyTo,
                 senderType: 'organization',

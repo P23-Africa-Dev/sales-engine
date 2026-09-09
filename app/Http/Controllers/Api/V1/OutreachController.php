@@ -4,7 +4,6 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use App\Models\CompanyContact;
-use App\Models\IcpProfile;
 use App\Models\OutreachActivity;
 use App\Services\Icp\IcpProfileService;
 use App\Services\Outreach\OutreachDraftService;
@@ -38,6 +37,9 @@ class OutreachController extends Controller
                 'accentBg' => $a->accent_bg,
                 'accentIcon' => $a->accent_icon,
                 'occurred_at' => $a->occurred_at?->toIso8601String(),
+                'delivery_status' => $a->delivery_status ?? (filled($a->sent_at) ? 'sent' : null),
+                'last_event_at' => $a->last_event_at?->toIso8601String(),
+                'bounce_reason' => $a->bounce_reason,
             ]);
 
         return response()->json(['data' => $items]);
@@ -87,6 +89,15 @@ class OutreachController extends Controller
             if (! $toEmail) {
                 return response()->json(['message' => 'to_email is required when send=true.'], 422);
             }
+
+            $primaryActivity = null;
+            $activityIds = $draft['activity_ids'] ?? [];
+            if ($activityIds !== []) {
+                $primaryActivity = OutreachActivity::query()
+                    ->where('organization_id', $org->id)
+                    ->find($activityIds[0]);
+            }
+
             try {
                 $this->sendService->sendEmail(
                     $org,
@@ -94,6 +105,7 @@ class OutreachController extends Controller
                     $toEmail,
                     (string) ($draft['subject'] ?? 'Outreach'),
                     $draft['body'],
+                    $primaryActivity,
                 );
             } catch (\Throwable $e) {
                 return response()->json(['message' => $e->getMessage()], 422);
@@ -103,5 +115,48 @@ class OutreachController extends Controller
         }
 
         return response()->json(['data' => $draft]);
+    }
+
+    /**
+     * Send an already-drafted outreach activity (from chat's create_outreach
+     * intent or the social-listening outreach draft) to a chosen recipient,
+     * sending exactly the subject/body the user reviewed.
+     */
+    public function sendActivity(Request $request, int $id): JsonResponse
+    {
+        $data = $request->validate([
+            'to_email' => ['required', 'email'],
+            'subject' => ['nullable', 'string', 'max:255'],
+            'body' => ['required', 'string', 'max:20000'],
+        ]);
+
+        $org = OrgContext::require();
+        $user = $request->user();
+        if (! $user) {
+            return response()->json(['message' => 'Authenticated user required to send email.'], 401);
+        }
+
+        $activity = OutreachActivity::query()
+            ->where('organization_id', $org->id)
+            ->find($id);
+
+        if (! $activity) {
+            return response()->json(['message' => 'Outreach draft not found.'], 404);
+        }
+
+        try {
+            $result = $this->sendService->sendEmail(
+                $org,
+                $user,
+                $data['to_email'],
+                (string) ($data['subject'] ?? 'Outreach'),
+                $data['body'],
+                $activity,
+            );
+        } catch (\Throwable $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response()->json(['data' => array_merge($result, ['activity_id' => $activity->id])]);
     }
 }

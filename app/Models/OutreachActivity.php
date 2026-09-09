@@ -22,6 +22,9 @@ class OutreachActivity extends Model
         'sendgrid_message_id',
         'sent_at',
         'sender_type',
+        'delivery_status',
+        'last_event_at',
+        'bounce_reason',
     ];
 
     protected function casts(): array
@@ -29,6 +32,7 @@ class OutreachActivity extends Model
         return [
             'occurred_at' => 'datetime',
             'sent_at' => 'datetime',
+            'last_event_at' => 'datetime',
             'meta' => 'array',
         ];
     }

@@ -44,8 +44,9 @@ class OutreachDraftService
         $body = $this->compose($organization, $icp, $prompt, $channel, $leads->all(), $clientTimezone, $historySlice);
         $alignmentNote = $this->buildIcpAlignmentNote($icp, $leads->all());
 
+        $activityIds = [];
         foreach ($leads as $lead) {
-            OutreachActivity::query()->create([
+            $activity = OutreachActivity::query()->create([
                 'organization_id' => $organization->id,
                 'lead_id' => $lead->id,
                 'company_id' => $lead->company_id,
@@ -57,6 +58,7 @@ class OutreachDraftService
                 'occurred_at' => now(),
                 'meta' => ['sent' => false],
             ]);
+            $activityIds[] = $activity->id;
         }
 
         return [
@@ -65,6 +67,7 @@ class OutreachDraftService
             'body' => $body,
             'sent' => false,
             'target_lead_ids' => $leads->pluck('id')->map(fn($id) => (int) $id)->all(),
+            'activity_ids' => $activityIds,
             'icp_alignment_note' => $alignmentNote,
             'leads' => $leads->map(fn(Lead $l) => [
                 'id' => $l->id,
@@ -72,6 +75,8 @@ class OutreachDraftService
                 'source' => $l->source,
                 'score' => (int) round((float) $l->score),
                 'summary' => $l->summary,
+                'email' => is_array($l->meta) ? (trim((string) ($l->meta['email'] ?? '')) ?: null) : null,
+                'phone' => is_array($l->meta) ? (trim((string) ($l->meta['phone'] ?? '')) ?: null) : null,
                 'crm_synced' => filled($l->synced_to_f23_at),
                 'crm_duplicate' => filled($l->crm_duplicate_of),
                 'crm_duplicate_reason' => $l->crm_duplicate_reason,

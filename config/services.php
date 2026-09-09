@@ -112,6 +112,8 @@ return [
         'api_key' => env('SENDGRID_API_KEY'),
         'platform_from_email' => env('SENDGRID_PLATFORM_FROM_EMAIL', 'outreach@thefactory23.com'),
         'webhook_secret' => env('SENDGRID_WEBHOOK_SECRET'),
+        'webhook_public_key' => env('SENDGRID_WEBHOOK_PUBLIC_KEY'),
+        'unsubscribe_group_id' => env('SENDGRID_UNSUBSCRIBE_GROUP_ID'),
     ],
 
     'social_listening' => [

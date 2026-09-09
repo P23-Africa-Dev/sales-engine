@@ -66,5 +66,7 @@ data:
   FYLINGS_BASE_URL: "https://api.fylings.com"
 
   # ── SendGrid (email outreach) ──────────────────────────────────────────────────
-  SENDGRID_PLATFORM_FROM_EMAIL: "outreach@thefactory23.com"
+  SENDGRID_PLATFORM_FROM_EMAIL: "outreach@thefactory23.org"
   SENDGRID_PLATFORM_FROM_NAME: "Sales Engine"
+  # Filled by `php artisan outreach:setup-sendgrid <webhook-url>` during rollout.
+  SENDGRID_UNSUBSCRIBE_GROUP_ID: "53250"

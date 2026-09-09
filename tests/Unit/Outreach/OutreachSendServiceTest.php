@@ -3,12 +3,14 @@
 namespace Tests\Unit\Outreach;
 
 use App\Models\Organization;
+use App\Models\OutreachDomainAuthentication;
 use App\Models\OutreachIdentity;
-use App\Models\SocialListeningSetting;
+use App\Models\OutreachSuppression;
 use App\Models\User;
 use App\Services\Outreach\OutreachIdentityResolver;
 use App\Services\Outreach\OutreachSendService;
 use Illuminate\Support\Facades\Http;
+use InvalidArgumentException;
 use Tests\TestCase;
 
 class OutreachSendServiceTest extends TestCase
@@ -35,8 +37,29 @@ class OutreachSendServiceTest extends TestCase
             $payload = $request->data();
 
             return $payload['from']['email'] === 'outreach@thefactory23.com'
-                && $payload['reply_to']['email'] === 'ada@example.com';
+                && $payload['reply_to']['email'] === 'ada@example.com'
+                && $payload['personalizations'][0]['custom_args']['organization_id'] !== null;
         });
+    }
+
+    public function test_send_email_blocks_suppressed_recipient(): void
+    {
+        config(['services.sendgrid.api_key' => 'sg-test']);
+
+        $org = Organization::query()->create(['name' => 'Org', 'slug' => 'org-' . uniqid()]);
+        $user = User::factory()->create(['email' => 'ada@example.com']);
+
+        OutreachSuppression::query()->create([
+            'organization_id' => null,
+            'email' => 'bounced@example.com',
+            'reason' => 'bounce',
+            'suppressed_at' => now(),
+        ]);
+
+        $service = app(OutreachSendService::class);
+
+        $this->expectException(InvalidArgumentException::class);
+        $service->sendEmail($org, $user, 'bounced@example.com', 'Hello', 'Body text');
     }
 
     public function test_resolve_outbound_identity_falls_back_to_platform_when_org_unverified(): void
@@ -53,10 +76,10 @@ class OutreachSendServiceTest extends TestCase
             'reply_to_email' => 'rep@example.com',
         ]);
 
-        SocialListeningSetting::query()->create([
+        OutreachDomainAuthentication::query()->create([
             'organization_id' => $org->id,
-            'sender_mode' => 'organization',
-            'org_verified_from_email' => 'sales@client.com',
+            'domain' => 'client.com',
+            'from_email' => 'sales@client.com',
             'verification_status' => 'pending',
         ]);
 
@@ -78,10 +101,10 @@ class OutreachSendServiceTest extends TestCase
             'reply_to_email' => 'rep@example.com',
         ]);
 
-        SocialListeningSetting::query()->create([
+        OutreachDomainAuthentication::query()->create([
             'organization_id' => $org->id,
-            'sender_mode' => 'organization',
-            'org_verified_from_email' => 'sales@client.com',
+            'domain' => 'client.com',
+            'from_email' => 'sales@client.com',
             'verification_status' => 'verified',
         ]);
 

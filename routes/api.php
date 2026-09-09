@@ -12,7 +12,9 @@ use App\Http\Controllers\Api\V1\LeadSyncController;
 use App\Http\Controllers\Api\V1\MetricsController;
 use App\Http\Controllers\Api\V1\OrganizationController;
 use App\Http\Controllers\Api\V1\OutreachController;
+use App\Http\Controllers\Api\V1\OutreachDomainController;
 use App\Http\Controllers\Api\V1\OutreachSenderController;
+use App\Http\Controllers\Api\V1\SendGridWebhookController;
 use App\Http\Controllers\Api\V1\SocialListeningController;
 use Illuminate\Support\Facades\Route;
 
@@ -23,6 +25,10 @@ use Illuminate\Support\Facades\Route;
 */
 
 Route::get('/health', HealthController::class);
+
+// Public: SendGrid posts delivery/open/click/bounce events here. Verified via
+// ECDSA signature inside the controller, not session/token auth.
+Route::post('/webhooks/sendgrid', [SendGridWebhookController::class, 'handle']);
 
 Route::prefix('auth')->group(function () {
     Route::post('/register', [AuthController::class, 'register']);
@@ -70,8 +76,13 @@ Route::middleware(['auth:sanctum', 'org.resolve'])->group(function () {
     Route::get('/dashboard', [MetricsController::class, 'index']);
     Route::get('/outreach/recent', [OutreachController::class, 'recent']);
     Route::post('/outreach/draft', [OutreachController::class, 'draft']);
+    Route::post('/outreach/activities/{id}/send', [OutreachController::class, 'sendActivity']);
     Route::get('/outreach/sender-settings', [OutreachSenderController::class, 'show']);
     Route::put('/outreach/sender-settings', [OutreachSenderController::class, 'update']);
+    Route::get('/outreach/domain', [OutreachDomainController::class, 'show']);
+    Route::post('/outreach/domain', [OutreachDomainController::class, 'authenticate']);
+    Route::post('/outreach/domain/verify', [OutreachDomainController::class, 'verify']);
+    Route::delete('/outreach/domain', [OutreachDomainController::class, 'destroy']);
 
     Route::get('/social-listening/signals', [SocialListeningController::class, 'indexSignals']);
     Route::get('/social-listening/signals/{id}', [SocialListeningController::class, 'showSignal']);
