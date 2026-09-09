@@ -54,7 +54,7 @@ class ExtractionService
             $result = $this->glm->chatJson([
                 [
                     'role' => 'system',
-                    'content' => 'Extract structured company intelligence as JSON with keys: name, sector, location, summary, business_fields (object), commercial_signals (array of strings). The name must be a real company/organization name — never an article title, tip list, award, requirement phrase, blog post, or generic advice headline. If the hit is not a real company, set name to an empty string. Never use the ICP profile name as the company name unless the hit explicitly refers to that exact company. No markdown.',
+                    'content' => 'Extract structured company intelligence as JSON with keys: name, sector, location, summary, contact_email (only if explicitly present in the hit; never invent; reject generic info@/contact@), contact_phone (only if explicitly present; never invent), business_fields (object), commercial_signals (array of strings). The name must be a real company/organization name — never an article title, tip list, award, requirement phrase, blog post, or generic advice headline. If the hit is not a real company, set name to an empty string. Never use the ICP profile name as the company name unless the hit explicitly refers to that exact company. No markdown.',
                 ],
                 [
                     'role' => 'user',
@@ -93,6 +93,18 @@ class ExtractionService
                     'commercial_signals' => $result['commercial_signals'] ?? [],
                     'low_confidence' => true,
                 ];
+            }
+
+            $contactEmail = trim((string) ($result['contact_email'] ?? $result['email'] ?? ''));
+            $contactPhone = trim((string) ($result['contact_phone'] ?? $result['phone'] ?? ''));
+            if ($contactEmail !== '' && filter_var($contactEmail, FILTER_VALIDATE_EMAIL)) {
+                $result['email'] = $contactEmail;
+            }
+            if ($contactPhone !== '') {
+                $digits = preg_replace('/\D+/', '', $contactPhone) ?? '';
+                if (strlen($digits) >= 7 && strlen($digits) <= 15) {
+                    $result['phone'] = $contactPhone;
+                }
             }
 
             return $result;
@@ -234,7 +246,7 @@ class ExtractionService
             $result = $this->glm->chatJson([
                 [
                     'role' => 'system',
-                    'content' => 'Extract person lead data as JSON with keys: person_name, title, company, linkedin_url, location, summary. Never use the ICP profile name as person_name. If the hit is an article/listicle with no identifiable person, set person_name to empty string. No markdown.',
+                    'content' => 'Extract person lead data as JSON with keys: person_name, title, company, linkedin_url, location, summary, email (only if explicitly present in the hit; never invent; reject generic info@/contact@), phone (only if explicitly present; never invent). Never use the ICP profile name as person_name. If the hit is an article/listicle with no identifiable person, set person_name to empty string. No markdown.',
                 ],
                 [
                     'role' => 'user',
@@ -257,16 +269,29 @@ class ExtractionService
             $summary = (string) ($result['summary'] ?? $hit->snippet ?? $hit->name);
             $title = trim((string) ($result['title'] ?? ''));
             $company = trim((string) ($result['company'] ?? ''));
+            $email = trim((string) ($result['email'] ?? ''));
+            $phone = trim((string) ($result['phone'] ?? ''));
+            if ($email !== '' && ! filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                $email = '';
+            }
+            if ($phone !== '') {
+                $digits = preg_replace('/\D+/', '', $phone) ?? '';
+                if (strlen($digits) < 7 || strlen($digits) > 15) {
+                    $phone = '';
+                }
+            }
 
             if ($title !== '' && $company !== '') {
                 $summary = "{$title} at {$company}. {$summary}";
             }
 
-            return [
+            return array_filter([
                 'person_name' => $personName,
                 'name' => $personName,
                 'title' => $title,
                 'company' => $company,
+                'email' => $email !== '' ? $email : null,
+                'phone' => $phone !== '' ? $phone : null,
                 'linkedin_url' => $this->resolvePersonUrl($result['linkedin_url'] ?? null, $hit->url),
                 'location' => $result['location'] ?? $hit->location,
                 'summary' => $summary,
@@ -274,10 +299,12 @@ class ExtractionService
                     'linkedin_url' => $this->resolvePersonUrl($result['linkedin_url'] ?? null, $hit->url),
                     'title' => $title,
                     'company' => $company,
+                    'email' => $email !== '' ? $email : null,
+                    'phone' => $phone !== '' ? $phone : null,
                 ]),
                 'commercial_signals' => [],
                 'low_confidence' => false,
-            ];
+            ], fn ($v) => $v !== null && $v !== '');
         } catch (\Throwable) {
             return $this->fallbackPerson($hit, $brief);
         }

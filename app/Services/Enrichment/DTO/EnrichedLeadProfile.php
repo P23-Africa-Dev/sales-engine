@@ -20,6 +20,8 @@ readonly class EnrichedLeadProfile
         public string $nextAction = '',
         public array $sourceUrls = [],
         public float $confidence = 0.0,
+        public string $contactEnrichmentTier = '',
+        public string $contactEnrichmentProvider = '',
     ) {}
 
     /**
@@ -49,6 +51,14 @@ readonly class EnrichedLeadProfile
 
         if ($this->phone !== '') {
             $extracted['phone'] = $this->phone;
+        }
+
+        if ($this->contactEnrichmentTier !== '') {
+            $extracted['contact_enrichment_tier'] = $this->contactEnrichmentTier;
+        }
+
+        if ($this->contactEnrichmentProvider !== '') {
+            $extracted['contact_enrichment_provider'] = $this->contactEnrichmentProvider;
         }
 
         if ($this->profileUrls !== []) {
@@ -93,6 +103,8 @@ readonly class EnrichedLeadProfile
             'next_action' => $this->nextAction,
             'source_urls' => $this->sourceUrls,
             'enrichment_confidence' => $this->confidence,
+            'contact_enrichment_tier' => $this->contactEnrichmentTier,
+            'contact_enrichment_provider' => $this->contactEnrichmentProvider,
         ];
     }
 
@@ -116,6 +128,8 @@ readonly class EnrichedLeadProfile
             nextAction: trim((string) ($data['next_action'] ?? '')),
             sourceUrls: is_array($sourceUrls) ? array_values(array_filter($sourceUrls, 'is_string')) : [],
             confidence: (float) ($data['enrichment_confidence'] ?? 0),
+            contactEnrichmentTier: trim((string) ($data['contact_enrichment_tier'] ?? '')),
+            contactEnrichmentProvider: trim((string) ($data['contact_enrichment_provider'] ?? '')),
         );
     }
 }

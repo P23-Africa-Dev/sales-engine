@@ -78,6 +78,16 @@ return [
         'api_key' => env('HUNTER_API_KEY'),
     ],
 
+    'bytemine' => [
+        'api_key' => env('BYTEMINE_API_KEY'),
+        'base_url' => env('BYTEMINE_BASE_URL', 'https://api.bytemine.ai/v1'),
+    ],
+
+    'cleanlist' => [
+        'api_key' => env('CLEANLIST_API_KEY'),
+        'base_url' => env('CLEANLIST_BASE_URL', 'https://api.cleanlist.ai/v1'),
+    ],
+
     'youtube' => [
         'api_key' => env('YOUTUBE_API_KEY'),
     ],

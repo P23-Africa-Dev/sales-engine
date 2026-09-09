@@ -21,8 +21,7 @@ class LeadProfileEnrichmentService
     public function __construct(
         private readonly SerperPersonSearchAdapter $serper,
         private readonly GlmClient $glm,
-        private readonly ApolloPersonEnricher $apollo,
-        private readonly HunterEmailEnricher $hunter,
+        private readonly ContactEnrichmentOrchestrator $contactOrchestrator,
         private readonly QueryIntentService $queryIntent,
     ) {}
 
@@ -54,6 +53,8 @@ class LeadProfileEnrichmentService
         $seedTitle = trim((string) ($extracted['title'] ?? ''));
         $seedCompany = trim((string) ($extracted['company'] ?? ''));
         $seedUrl = trim((string) ($extracted['linkedin_url'] ?? ''));
+        $seedEmail = trim((string) ($extracted['email'] ?? ''));
+        $seedPhone = trim((string) ($extracted['phone'] ?? ''));
 
         $searchResults = $this->searchPerson($organization, $personName, $queryContext);
         $profile = $this->parseWithGlm($organization, $personName, $queryContext, $searchResults, $seedTitle, $seedCompany);
@@ -70,7 +71,15 @@ class LeadProfileEnrichmentService
             $profile = $this->withProfileUrl($profile, $seedUrl);
         }
 
-        $profile = $this->applyOptionalProviders($organization, $personName, $profile);
+        if ($seedEmail !== '' && $profile->email === '') {
+            $profile = $this->withContact($profile, email: $seedEmail);
+        }
+
+        if ($seedPhone !== '' && $profile->phone === '') {
+            $profile = $this->withContact($profile, phone: $seedPhone);
+        }
+
+        $profile = $this->applyContactWaterfall($organization, $personName, $profile, $searchResults);
 
         Cache::put($cacheKey, $profile->toArray(), self::CACHE_TTL_SECONDS);
 
@@ -249,7 +258,7 @@ class LeadProfileEnrichmentService
             $result = $this->glm->chatJson([
                 [
                     'role' => 'system',
-                    'content' => 'Extract professional profile data for one person from search snippets. Return JSON: title, company_name, location, website, profile_urls (array of URLs — prefer linkedin.com/in/, wikipedia.org, official bio pages; never listicle/article URLs), summary (1-2 unique sentences about THIS person only), next_action (short sales step like "Review profile and draft outreach"), confidence (0-100). Only use facts present in snippets — never invent. No markdown.',
+                    'content' => 'Extract professional profile data for one person from search snippets. Return JSON: title, company_name, location, website, email (only if explicitly present; never invent; reject generic info@/contact@), phone (only if explicitly present; never invent), profile_urls (array of URLs — prefer linkedin.com/in/, wikipedia.org, official bio pages; never listicle/article URLs), summary (1-2 unique sentences about THIS person only), next_action (short sales step like "Review profile and draft outreach"), confidence (0-100). Only use facts present in snippets — never invent. No markdown.',
                 ],
                 [
                     'role' => 'user',
@@ -276,16 +285,32 @@ class LeadProfileEnrichmentService
                 $nextAction = 'Review profile and draft outreach';
             }
 
+            $email = trim((string) ($result['email'] ?? ''));
+            $phone = trim((string) ($result['phone'] ?? ''));
+            if ($email !== '' && ! filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                $email = '';
+            }
+            if ($phone !== '') {
+                $digits = preg_replace('/\D+/', '', $phone) ?? '';
+                if (strlen($digits) < 7 || strlen($digits) > 15) {
+                    $phone = '';
+                }
+            }
+
             return new EnrichedLeadProfile(
                 title: trim((string) ($result['title'] ?? '')),
                 companyName: trim((string) ($result['company_name'] ?? '')),
                 location: trim((string) ($result['location'] ?? '')),
                 website: trim((string) ($result['website'] ?? '')),
+                email: $email,
+                phone: $phone,
                 profileUrls: $profileUrls,
                 summary: $summary,
                 nextAction: $nextAction,
                 sourceUrls: $sourceUrls,
                 confidence: min(100, max(0, (float) ($result['confidence'] ?? 50))),
+                contactEnrichmentTier: ($email !== '' || $phone !== '') ? 'tier1' : '',
+                contactEnrichmentProvider: ($email !== '' || $phone !== '') ? 'glm_profile' : '',
             );
         } catch (\Throwable $e) {
             Log::warning('GLM person enrichment failed', ['person' => $personName, 'error' => $e->getMessage()]);
@@ -299,40 +324,52 @@ class LeadProfileEnrichmentService
         }
     }
 
-    private function applyOptionalProviders(
+    /**
+     * @param  list<array{title: string, snippet: ?string, url: ?string}>  $searchResults
+     */
+    private function applyContactWaterfall(
         Organization $organization,
         string $personName,
         EnrichedLeadProfile $profile,
+        array $searchResults,
     ): EnrichedLeadProfile {
-        $apollo = $this->apollo->enrich($organization, $personName, $profile->companyName !== '' ? $profile->companyName : null);
+        $contacts = $this->contactOrchestrator->enrichContacts(
+            $organization,
+            $personName,
+            [
+                'email' => $profile->email,
+                'phone' => $profile->phone,
+                'company' => $profile->companyName,
+                'website' => $profile->website,
+                'linkedin_url' => $profile->profileUrls[0] ?? '',
+                'profile_urls' => $profile->profileUrls,
+            ],
+            $searchResults,
+        );
 
-        $title = $profile->title !== '' ? $profile->title : ($apollo['title'] ?? '');
-        $company = $profile->companyName !== '' ? $profile->companyName : ($apollo['company_name'] ?? '');
-        $email = $profile->email !== '' ? $profile->email : ($apollo['email'] ?? '');
-        $phone = $profile->phone !== '' ? $profile->phone : ($apollo['phone'] ?? '');
+        $email = $profile->email !== '' ? $profile->email : ($contacts['email'] ?? '');
+        $phone = $profile->phone !== '' ? $profile->phone : ($contacts['phone'] ?? '');
+        $title = $profile->title !== '' ? $profile->title : ($contacts['title'] ?? '');
+        $company = $profile->companyName !== '' ? $profile->companyName : ($contacts['company_name'] ?? '');
 
         $profileUrls = $profile->profileUrls;
-        if (isset($apollo['linkedin_url']) && $apollo['linkedin_url'] !== '') {
-            $profileUrls = $this->mergeProfileUrls($profileUrls, [$apollo['linkedin_url']]);
-        }
-
-        if ($email === '' && $company !== '') {
-            $domain = $this->hunter->extractDomain($profile->website !== '' ? $profile->website : null);
-            if ($domain === null) {
-                $domain = $this->guessCompanyDomain($company);
-            }
-
-            if ($domain !== null) {
-                $found = $this->hunter->findEmail($personName, $domain);
-                if ($found !== null) {
-                    $email = $found;
-                }
-            }
+        if (($contacts['linkedin_url'] ?? '') !== '') {
+            $profileUrls = $this->mergeProfileUrls($profileUrls, [(string) $contacts['linkedin_url']]);
         }
 
         $confidence = $profile->confidence;
         if ($email !== '' || $phone !== '') {
             $confidence = min(100, $confidence + 15);
+        }
+
+        $tier = $profile->contactEnrichmentTier;
+        $provider = $profile->contactEnrichmentProvider;
+        if (($contacts['tier'] ?? null) !== null && ($contacts['tier'] ?? '') !== 'seed') {
+            $tier = (string) $contacts['tier'];
+            $provider = (string) ($contacts['provider'] ?? $provider);
+        } elseif ($tier === '' && ($email !== '' || $phone !== '')) {
+            $tier = (string) ($contacts['tier'] ?? 'tier1');
+            $provider = (string) ($contacts['provider'] ?? 'snippet_extractor');
         }
 
         return new EnrichedLeadProfile(
@@ -347,6 +384,8 @@ class LeadProfileEnrichmentService
             nextAction: $profile->nextAction,
             sourceUrls: $profile->sourceUrls,
             confidence: $confidence,
+            contactEnrichmentTier: $tier,
+            contactEnrichmentProvider: $provider,
         );
     }
 
@@ -443,6 +482,8 @@ class LeadProfileEnrichmentService
                 nextAction: $profile->nextAction,
                 sourceUrls: $profile->sourceUrls,
                 confidence: max($profile->confidence, 40.0),
+                contactEnrichmentTier: $profile->contactEnrichmentTier,
+                contactEnrichmentProvider: $profile->contactEnrichmentProvider,
             ),
             'companyName' => new EnrichedLeadProfile(
                 title: $profile->title,
@@ -456,9 +497,33 @@ class LeadProfileEnrichmentService
                 nextAction: $profile->nextAction,
                 sourceUrls: $profile->sourceUrls,
                 confidence: max($profile->confidence, 40.0),
+                contactEnrichmentTier: $profile->contactEnrichmentTier,
+                contactEnrichmentProvider: $profile->contactEnrichmentProvider,
             ),
             default => $profile,
         };
+    }
+
+    private function withContact(
+        EnrichedLeadProfile $profile,
+        string $email = '',
+        string $phone = '',
+    ): EnrichedLeadProfile {
+        return new EnrichedLeadProfile(
+            title: $profile->title,
+            companyName: $profile->companyName,
+            location: $profile->location,
+            website: $profile->website,
+            email: $email !== '' ? $email : $profile->email,
+            phone: $phone !== '' ? $phone : $profile->phone,
+            profileUrls: $profile->profileUrls,
+            summary: $profile->summary,
+            nextAction: $profile->nextAction,
+            sourceUrls: $profile->sourceUrls,
+            confidence: $profile->confidence,
+            contactEnrichmentTier: $profile->contactEnrichmentTier,
+            contactEnrichmentProvider: $profile->contactEnrichmentProvider,
+        );
     }
 
     private function withProfileUrl(EnrichedLeadProfile $profile, string $url): EnrichedLeadProfile
@@ -477,6 +542,8 @@ class LeadProfileEnrichmentService
             nextAction: $profile->nextAction,
             sourceUrls: $profile->sourceUrls,
             confidence: $profile->confidence,
+            contactEnrichmentTier: $profile->contactEnrichmentTier,
+            contactEnrichmentProvider: $profile->contactEnrichmentProvider,
         );
     }
 
@@ -489,17 +556,6 @@ class LeadProfileEnrichmentService
         return (bool) preg_match('/\d+[\.\)]\s+[A-Z][a-z]+/u', $text)
             || str_contains(mb_strtolower($text), ' · ')
             || $this->queryIntent->looksLikeArticleTitle($text);
-    }
-
-    private function guessCompanyDomain(string $companyName): ?string
-    {
-        $slug = mb_strtolower(preg_replace('/[^a-z0-9]+/u', '', $companyName) ?? '');
-
-        if ($slug === '') {
-            return null;
-        }
-
-        return $slug . '.com';
     }
 
     private function cacheKey(int $organizationId, string $personName): string

@@ -98,18 +98,33 @@ kubectl rollout restart deployment/backend deployment/queue-worker deployment/sc
 
 Frontend guide: `factory23 fullstack/docs/SALES_ENGINE_FRONTEND.md`.
 
-## 6. Stub providers (optional — disabled until keyed)
+## 6. Contact enrichment (tiered) + stub providers
 
-| Variable                                                          | Adapter    |
-| ----------------------------------------------------------------- | ---------- |
-| `APOLLO_API_KEY`                                                  | Apollo     |
-| `HUNTER_API_KEY`                                                  | Hunter     |
-| `YOUTUBE_API_KEY`                                                 | YouTube    |
-| `X_BEARER_TOKEN`                                                  | X          |
-| `REDDIT_CLIENT_ID` / `REDDIT_CLIENT_SECRET` / `REDDIT_USER_AGENT` | Reddit     |
-| `META_ACCESS_TOKEN` / `META_APP_ID` / `META_APP_SECRET`           | Meta Pages |
+Contact enrichment runs as a cost waterfall during lead profile enrichment:
 
-Stubs implement the interface but return empty hits until full integration.
+1. **Tier 1 (free)** — Serper snippets + GLM extract email/phone when present in public text (no extra keys).
+2. **Tier 2 (free/low-cost)** — Bytemine, then Cleanlist, when Tier 1 is incomplete.
+3. **Tier 3 (paid fallback)** — Apollo, then Hunter, only for remaining gaps.
+
+| Variable                                                          | Adapter / role                        |
+| ----------------------------------------------------------------- | ------------------------------------- |
+| `BYTEMINE_API_KEY` / `BYTEMINE_BASE_URL`                          | Tier 2 contact enricher (recommended) |
+| `CLEANLIST_API_KEY` / `CLEANLIST_BASE_URL`                        | Tier 2 fallback enricher              |
+| `APOLLO_API_KEY`                                                  | Tier 3 Apollo person enricher         |
+| `HUNTER_API_KEY`                                                  | Tier 3 Hunter email finder            |
+| `YOUTUBE_API_KEY`                                                 | YouTube discovery (stub until keyed)  |
+| `X_BEARER_TOKEN`                                                  | X discovery (stub until keyed)        |
+| `REDDIT_CLIENT_ID` / `REDDIT_CLIENT_SECRET` / `REDDIT_USER_AGENT` | Reddit discovery (stub until keyed)   |
+| `META_ACCESS_TOKEN` / `META_APP_ID` / `META_APP_SECRET`           | Meta Pages social listening           |
+
+### Tier 2 signup tips
+
+- **Bytemine**: https://www.bytemine.ai/ — free monthly credits on starter plans; set `BYTEMINE_API_KEY`.
+- **Cleanlist**: https://www.cleanlist.ai/ — free monthly credits; set `CLEANLIST_API_KEY`.
+
+Usage per attempt is written to `enrichment_logs` (tier, provider, found email/phone, credits).
+
+Discovery stubs implement the interface but return empty hits until full integration.
 
 ---
 
@@ -128,7 +143,8 @@ Stubs implement the interface but return empty hits until full integration.
 - `FYLINGS_API_KEY` (optional)
 - `FACTORY23_JWT_SECRET`
 - `FACTORY23_API_TOKEN` (optional)
-- stub keys as needed
+- `BYTEMINE_API_KEY` / `CLEANLIST_API_KEY` (optional Tier 2 enrichment)
+- stub keys as needed (`APOLLO_API_KEY`, `HUNTER_API_KEY`, Meta, etc.)
 
 After updating secrets:
 
