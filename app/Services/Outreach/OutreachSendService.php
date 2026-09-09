@@ -92,6 +92,10 @@ class OutreachSendService
 
         if ($activity) {
             $activity->update([
+                'to_email' => $toEmail,
+                'subject' => $subject,
+                'body' => $body,
+                'preview' => mb_substr($body, 0, 160),
                 'sent_at' => now(),
                 'sendgrid_message_id' => $messageId,
                 'sender_type' => $identity->senderType,

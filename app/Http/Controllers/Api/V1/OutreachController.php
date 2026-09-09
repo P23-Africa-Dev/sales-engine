@@ -117,6 +117,58 @@ class OutreachController extends Controller
         return response()->json(['data' => $draft]);
     }
 
+    public function show(int $id): JsonResponse
+    {
+        $org = OrgContext::require();
+
+        $activity = OutreachActivity::query()
+            ->where('organization_id', $org->id)
+            ->with('lead')
+            ->find($id);
+
+        if (! $activity) {
+            return response()->json(['message' => 'Outreach draft not found.'], 404);
+        }
+
+        return response()->json(['data' => $this->outreach->activityToDraftPayload($activity)]);
+    }
+
+    public function regenerate(Request $request, int $id): JsonResponse
+    {
+        $data = $request->validate([
+            'instructions' => ['nullable', 'string', 'max:1000'],
+            'channel' => ['nullable', 'string', 'in:email,whatsapp'],
+        ]);
+
+        $org = OrgContext::require();
+        $icp = $this->icps->active($org);
+        if (! $icp) {
+            return response()->json(['message' => 'Active ICP required.'], 422);
+        }
+
+        $activity = OutreachActivity::query()
+            ->where('organization_id', $org->id)
+            ->find($id);
+
+        if (! $activity) {
+            return response()->json(['message' => 'Outreach draft not found.'], 404);
+        }
+
+        try {
+            $draft = $this->outreach->regenerate(
+                $activity,
+                $org,
+                $icp,
+                $data['instructions'] ?? null,
+                $data['channel'] ?? null,
+            );
+        } catch (InvalidArgumentException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response()->json(['data' => $draft]);
+    }
+
     /**
      * Send an already-drafted outreach activity (from chat's create_outreach
      * intent or the social-listening outreach draft) to a chosen recipient,

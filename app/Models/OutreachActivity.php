@@ -15,6 +15,10 @@ class OutreachActivity extends Model
         'name',
         'channel',
         'preview',
+        'to_email',
+        'subject',
+        'body',
+        'regeneration_count',
         'accent_bg',
         'accent_icon',
         'occurred_at',
@@ -34,6 +38,7 @@ class OutreachActivity extends Model
             'sent_at' => 'datetime',
             'last_event_at' => 'datetime',
             'meta' => 'array',
+            'regeneration_count' => 'integer',
         ];
     }
 
@@ -45,5 +50,10 @@ class OutreachActivity extends Model
     public function lead(): BelongsTo
     {
         return $this->belongsTo(Lead::class);
+    }
+
+    public function socialSignal(): BelongsTo
+    {
+        return $this->belongsTo(SocialSignal::class);
     }
 }

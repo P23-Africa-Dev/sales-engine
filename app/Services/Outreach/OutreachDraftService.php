@@ -42,10 +42,13 @@ class OutreachDraftService
         $leads = $this->resolveLeads($organization, $icp, $chatSessionId);
 
         $body = $this->compose($organization, $icp, $prompt, $channel, $leads->all(), $clientTimezone, $historySlice);
+        $subject = $channel === 'email' ? 'Introduction — ' . $icp->name : null;
         $alignmentNote = $this->buildIcpAlignmentNote($icp, $leads->all());
+        $targetLeadIds = $leads->pluck('id')->map(fn($id) => (int) $id)->all();
 
         $activityIds = [];
         foreach ($leads as $lead) {
+            $toEmail = $this->resolveLeadEmail($lead);
             $activity = OutreachActivity::query()->create([
                 'organization_id' => $organization->id,
                 'lead_id' => $lead->id,
@@ -53,21 +56,33 @@ class OutreachDraftService
                 'name' => $lead->name,
                 'channel' => $channel . ' draft',
                 'preview' => mb_substr($body, 0, 160),
+                'to_email' => $toEmail,
+                'subject' => $subject,
+                'body' => $body,
+                'regeneration_count' => 0,
                 'accent_bg' => $channel === 'whatsapp' ? '#E8F8EF' : '#EEF2FF',
                 'accent_icon' => $channel === 'whatsapp' ? '#16A34A' : '#4F46E5',
                 'occurred_at' => now(),
-                'meta' => ['sent' => false],
+                'meta' => [
+                    'sent' => false,
+                    'prompt' => $prompt,
+                    'icp_profile_id' => $icp->id,
+                    'target_lead_ids' => $targetLeadIds,
+                    'icp_alignment_note' => $alignmentNote,
+                ],
             ]);
             $activityIds[] = $activity->id;
         }
 
         return [
             'channel' => $channel,
-            'subject' => $channel === 'email' ? 'Introduction — ' . $icp->name : null,
+            'subject' => $subject,
             'body' => $body,
+            'to_email' => $leads->isNotEmpty() ? $this->resolveLeadEmail($leads->first()) : null,
             'sent' => false,
-            'target_lead_ids' => $leads->pluck('id')->map(fn($id) => (int) $id)->all(),
+            'target_lead_ids' => $targetLeadIds,
             'activity_ids' => $activityIds,
+            'activity_id' => $activityIds[0] ?? null,
             'icp_alignment_note' => $alignmentNote,
             'leads' => $leads->map(fn(Lead $l) => [
                 'id' => $l->id,
@@ -101,6 +116,8 @@ class OutreachDraftService
         $prompt = "Respond to this social post with a compliant email outreach draft.\n\nPost: {$signal->post_text}\nPersona: {$signal->persona}\nProblem: {$signal->problem}";
 
         $body = $signal->suggested_message ?: $this->compose($organization, $icp, $prompt, 'email', [], $clientTimezone);
+        $subject = 'Following up on your post';
+        $toEmail = $this->resolveSignalEmail($signal);
 
         $activity = OutreachActivity::query()->create([
             'organization_id' => $organization->id,
@@ -109,22 +126,147 @@ class OutreachDraftService
             'name' => $signal->profile_name ?? $signal->company_name ?? 'Social prospect',
             'channel' => 'email draft',
             'preview' => mb_substr($body, 0, 160),
+            'to_email' => $toEmail,
+            'subject' => $subject,
+            'body' => $body,
+            'regeneration_count' => 0,
             'accent_bg' => '#EEF2FF',
             'accent_icon' => '#4F46E5',
             'occurred_at' => now(),
-            'meta' => ['sent' => false, 'social_signal_id' => $signal->id],
+            'meta' => [
+                'sent' => false,
+                'social_signal_id' => $signal->id,
+                'prompt' => $prompt,
+                'icp_profile_id' => $icp->id,
+            ],
         ]);
 
         $signal->update(['status' => 'outreached']);
 
         return [
             'channel' => 'email',
-            'subject' => 'Following up on your post',
+            'subject' => $subject,
             'body' => $body,
+            'to_email' => $toEmail,
             'sent' => false,
             'social_signal_id' => $signal->id,
             'activity_id' => $activity->id,
         ];
+    }
+
+    /**
+     * Re-run GLM compose for an existing draft activity with optional extra user instructions.
+     * Updates the same activity row in place (stable activity_id for Send).
+     *
+     * @return array{channel: string, subject: ?string, body: string, to_email: ?string, sent: bool, activity_id: int, regeneration_count: int}
+     */
+    public function regenerate(
+        OutreachActivity $activity,
+        Organization $organization,
+        IcpProfile $icp,
+        ?string $instructions = null,
+        ?string $channelOverride = null,
+        ?string $clientTimezone = null,
+    ): array {
+        if (filled($activity->sent_at) || (($activity->meta['sent'] ?? false) === true)) {
+            throw new InvalidArgumentException('Cannot regenerate an outreach that has already been sent.');
+        }
+
+        $meta = is_array($activity->meta) ? $activity->meta : [];
+        $channel = $channelOverride
+            ?? (str_contains(mb_strtolower((string) $activity->channel), 'whatsapp') ? 'whatsapp' : 'email');
+
+        if ($channel === 'whatsapp') {
+            $this->assertWhatsAppNotAutoSent();
+        }
+
+        $leads = $this->resolveLeadsForActivity($activity, $organization, $icp);
+        $prompt = trim((string) ($meta['prompt'] ?? 'Draft a concise outreach message'));
+
+        if ($activity->social_signal_id) {
+            $signal = SocialSignal::query()
+                ->where('organization_id', $organization->id)
+                ->find($activity->social_signal_id);
+
+            if ($signal) {
+                $prompt = "Respond to this social post with a compliant email outreach draft.\n\nPost: {$signal->post_text}\nPersona: {$signal->persona}\nProblem: {$signal->problem}";
+            }
+        }
+
+        $body = $this->compose(
+            $organization,
+            $icp,
+            $prompt,
+            $channel,
+            $leads->all(),
+            $clientTimezone,
+            [],
+            $instructions,
+        );
+
+        $subject = $channel === 'email'
+            ? ($activity->social_signal_id ? 'Following up on your post' : 'Introduction — ' . $icp->name)
+            : null;
+
+        $activity->update([
+            'channel' => $channel . ' draft',
+            'preview' => mb_substr($body, 0, 160),
+            'subject' => $subject,
+            'body' => $body,
+            'regeneration_count' => ((int) $activity->regeneration_count) + 1,
+            'meta' => array_merge($meta, [
+                'prompt' => $prompt,
+                'icp_profile_id' => $icp->id,
+                'last_regenerate_instructions' => $instructions,
+            ]),
+        ]);
+
+        $activity->refresh();
+
+        return $this->activityToDraftPayload($activity);
+    }
+
+    /**
+     * @return array{channel: string, subject: ?string, body: string, to_email: ?string, sent: bool, activity_id: int, regeneration_count: int, leads?: list<array>, icp_alignment_note?: string|null, social_signal_id?: int|null}
+     */
+    public function activityToDraftPayload(OutreachActivity $activity): array
+    {
+        $meta = is_array($activity->meta) ? $activity->meta : [];
+        $channel = str_contains(mb_strtolower((string) $activity->channel), 'whatsapp') ? 'whatsapp' : 'email';
+        $sent = filled($activity->sent_at) || (($meta['sent'] ?? false) === true);
+
+        $payload = [
+            'channel' => $channel,
+            'subject' => $activity->subject,
+            'body' => (string) ($activity->body ?? $activity->preview ?? ''),
+            'to_email' => $activity->to_email,
+            'sent' => $sent,
+            'activity_id' => $activity->id,
+            'regeneration_count' => (int) $activity->regeneration_count,
+            'icp_alignment_note' => isset($meta['icp_alignment_note']) ? (string) $meta['icp_alignment_note'] : null,
+            'social_signal_id' => $activity->social_signal_id ? (int) $activity->social_signal_id : null,
+            'name' => $activity->name,
+        ];
+
+        if ($activity->lead_id) {
+            $lead = $activity->relationLoaded('lead')
+                ? $activity->lead
+                : Lead::query()->find($activity->lead_id);
+
+            if ($lead) {
+                $payload['leads'] = [[
+                    'id' => $lead->id,
+                    'name' => $lead->name,
+                    'email' => is_array($lead->meta) ? (trim((string) ($lead->meta['email'] ?? '')) ?: null) : null,
+                    'summary' => $lead->summary,
+                    'icp_relevance_reason' => is_array($lead->meta)
+                        ? (trim((string) ($lead->meta['icp_relevance_reason'] ?? '')) ?: null)
+                        : null,
+                ]];
+            }
+        }
+
+        return $payload;
     }
 
     /**
@@ -170,6 +312,74 @@ class OutreachDraftService
             ->get();
     }
 
+    /**
+     * @return Collection<int, Lead>
+     */
+    private function resolveLeadsForActivity(
+        OutreachActivity $activity,
+        Organization $organization,
+        IcpProfile $icp,
+    ): Collection {
+        $meta = is_array($activity->meta) ? $activity->meta : [];
+        $targetIds = collect($meta['target_lead_ids'] ?? [])
+            ->filter(fn($id) => is_numeric($id))
+            ->map(fn($id) => (int) $id)
+            ->all();
+
+        if ($targetIds !== []) {
+            $leads = Lead::query()
+                ->where('organization_id', $organization->id)
+                ->whereIn('id', $targetIds)
+                ->orderByDesc('score')
+                ->get();
+
+            if ($leads->isNotEmpty()) {
+                return $leads;
+            }
+        }
+
+        if ($activity->lead_id) {
+            $lead = Lead::query()
+                ->where('organization_id', $organization->id)
+                ->find($activity->lead_id);
+
+            if ($lead) {
+                return collect([$lead]);
+            }
+        }
+
+        return collect();
+    }
+
+    private function resolveLeadEmail(Lead $lead): ?string
+    {
+        if (! is_array($lead->meta)) {
+            return null;
+        }
+
+        $email = trim((string) ($lead->meta['email'] ?? ''));
+
+        return $email !== '' ? $email : null;
+    }
+
+    private function resolveSignalEmail(SocialSignal $signal): ?string
+    {
+        if ($signal->lead_id) {
+            $lead = Lead::query()->find($signal->lead_id);
+            if ($lead) {
+                $email = $this->resolveLeadEmail($lead);
+                if ($email) {
+                    return $email;
+                }
+            }
+        }
+
+        $meta = is_array($signal->meta) ? $signal->meta : [];
+        $email = trim((string) ($meta['email'] ?? $meta['author_email'] ?? ''));
+
+        return $email !== '' ? $email : null;
+    }
+
     public function assertCanSendWhatsApp(?CompanyContact $contact): void
     {
         if (! $contact || ! $contact->whatsapp_opt_in || ! $contact->whatsapp_opt_in_at) {
@@ -194,19 +404,27 @@ class OutreachDraftService
         array $leads,
         ?string $clientTimezone = null,
         array $historySlice = [],
+        ?string $extraInstructions = null,
     ): string {
         if (! $this->glm->isConfigured()) {
             $names = collect($leads)->pluck('name')->implode(', ');
             $greeting = TimeGreeting::phrase($clientTimezone);
+            $extra = $extraInstructions ? ' ' . $extraInstructions : '';
 
-            return "{$greeting} — following up regarding {$icp->name}. " . ($names ? "Relevant accounts: {$names}. " : '') . trim($prompt);
+            return "{$greeting} — following up regarding {$icp->name}. " . ($names ? "Relevant accounts: {$names}. " : '') . trim($prompt) . $extra;
         }
 
         try {
+            $system = "Draft a concise {$channel} outreach message for the user's specific request. Do not claim the message was sent. Professional tone for African B2B. " . TimeGreeting::promptContext($clientTimezone) . ' Use the active ICP industries, territories, and decision makers to tailor the angle. Reference the provided lead context when relevant. When prior chat turns are provided, keep continuity with that conversation. Output ONLY the sendable message body — no ICP analysis preamble.';
+
+            if (filled($extraInstructions)) {
+                $system .= ' Additional guidance from the user: ' . trim($extraInstructions);
+            }
+
             $messages = [
                 [
                     'role' => 'system',
-                    'content' => "Draft a concise {$channel} outreach message for the user's specific request. Do not claim the message was sent. Professional tone for African B2B. " . TimeGreeting::promptContext($clientTimezone) . ' Use the active ICP industries, territories, and decision makers to tailor the angle. Reference the provided lead context when relevant. When prior chat turns are provided, keep continuity with that conversation. Output ONLY the sendable message body — no ICP analysis preamble.',
+                    'content' => $system,
                 ],
             ];
 
@@ -231,12 +449,13 @@ class OutreachDraftService
                             'icp_relevance_reason' => $meta['icp_relevance_reason'] ?? null,
                         ];
                     })->all(),
+                    'additional_instructions' => $extraInstructions,
                 ], JSON_UNESCAPED_UNICODE),
             ];
 
             return $this->glm->chat($messages, 'outreach_draft', $organization);
         } catch (\Throwable) {
-            return "Draft outreach for {$icp->name}: " . $prompt;
+            return 'Draft outreach for ' . $icp->name . ': ' . $prompt;
         }
     }
 

@@ -16,7 +16,7 @@ class OutreachDraftServiceTest extends TestCase
 
         $org = Organization::query()->create([
             'name' => 'Org',
-            'slug' => 'org-outreach-'.uniqid(),
+            'slug' => 'org-outreach-' . uniqid(),
         ]);
 
         $icp = IcpProfile::query()->create([
@@ -56,5 +56,11 @@ class OutreachDraftServiceTest extends TestCase
         // Body remains the sendable draft — no ICP analysis preamble baked into it.
         $this->assertStringNotContainsString('Why these leads', $draft['body']);
         $this->assertStringNotContainsString('**Why these leads**', $draft['body']);
+
+        $activity = \App\Models\OutreachActivity::query()->find($draft['activity_ids'][0] ?? null);
+        $this->assertNotNull($activity);
+        $this->assertSame($draft['body'], $activity->body);
+        $this->assertSame($draft['subject'], $activity->subject);
+        $this->assertSame(0, (int) $activity->regeneration_count);
     }
 }
