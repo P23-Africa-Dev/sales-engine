@@ -14,7 +14,7 @@ class ChatIntentResolverTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->resolver = new ChatIntentResolver;
+        $this->resolver = app(ChatIntentResolver::class);
     }
 
     public function test_upgrades_freeform_create_leads_message(): void
@@ -26,7 +26,8 @@ class ChatIntentResolverTest extends TestCase
         );
 
         $this->assertSame('generate_leads', $result['intent']);
-        $this->assertStringContainsString('top 10 wealthiest men', $result['body']);
+        $this->assertSame('create leads for the top 10 wealthiest men', $result['body']);
+        $this->assertStringContainsString('top 10 wealthiest men', $result['effective_body']);
     }
 
     public function test_keeps_explicit_generate_leads_intent(): void
@@ -39,6 +40,7 @@ class ChatIntentResolverTest extends TestCase
 
         $this->assertSame('generate_leads', $result['intent']);
         $this->assertSame('Top FMCG distributors in Lagos', $result['body']);
+        $this->assertSame('Top FMCG distributors in Lagos', $result['effective_body']);
     }
 
     public function test_keeps_unrelated_freeform_message(): void
@@ -50,9 +52,10 @@ class ChatIntentResolverTest extends TestCase
         );
 
         $this->assertSame('freeform', $result['intent']);
+        $this->assertSame('What is FMCG?', $result['body']);
     }
 
-    public function test_expands_query_with_prior_assistant_context(): void
+    public function test_expands_query_with_prior_assistant_context_without_mutating_body(): void
     {
         [$user, $org] = $this->actingAsOrgMember();
 
@@ -67,15 +70,19 @@ class ChatIntentResolverTest extends TestCase
             'body' => 'Here are the top 10 wealthiest executives in tech.',
         ]);
 
+        config(['services.glm.api_key' => '']);
+
         $result = $this->resolver->resolve(
             $session,
             'Create a lead for all of these top 10',
             'freeform',
+            $org,
         );
 
         $this->assertSame('generate_leads', $result['intent']);
-        $this->assertStringContainsString('Context from prior assistant response', $result['body']);
-        $this->assertStringContainsString('wealthiest executives', $result['body']);
+        $this->assertSame('Create a lead for all of these top 10', $result['body']);
+        $this->assertStringContainsString('Context from prior assistant response', $result['effective_body']);
+        $this->assertStringContainsString('wealthiest executives', $result['effective_body']);
     }
 
     private function makeSession(): ChatSession

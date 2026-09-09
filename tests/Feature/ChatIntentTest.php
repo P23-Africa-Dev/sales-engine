@@ -420,4 +420,80 @@ class ChatIntentTest extends TestCase
         $this->assertStringContainsString('2. **Payments infra**', $body);
         $this->assertStringNotContainsString("1. **Payments infra**", $body);
     }
+
+    public function test_generate_leads_follow_up_uses_prior_chat_context_without_mutating_stored_body(): void
+    {
+        config([
+            'services.serper.api_key' => 'test-serper',
+            'services.glm.api_key' => '',
+            'queue.default' => 'sync',
+        ]);
+
+        [$user, $org] = $this->actingAsOrgMember();
+
+        IcpProfile::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'FinTech ICP',
+            'is_active' => true,
+            'config' => array_merge(IcpProfile::defaultConfig(), [
+                'industries' => ['FinTech'],
+                'territories' => ['Lagos, NG'],
+            ]),
+        ]);
+
+        $session = ChatSession::query()->create([
+            'organization_id' => $org->id,
+            'user_id' => $user->id,
+            'title' => 'Memory',
+        ]);
+
+        ChatMessage::query()->create([
+            'chat_session_id' => $session->id,
+            'role' => 'user',
+            'body' => 'I am researching payments infrastructure founders in Lagos.',
+            'intent' => 'freeform',
+        ]);
+        ChatMessage::query()->create([
+            'chat_session_id' => $session->id,
+            'role' => 'assistant',
+            'body' => 'You are focused on payments infrastructure founders and CTOs in Lagos FinTech.',
+            'intent' => 'freeform',
+        ]);
+
+        Http::fake([
+            'google.serper.dev/*' => Http::response([
+                'organic' => [
+                    [
+                        'title' => 'Ada Okonkwo — CTO, PayStack Lagos',
+                        'link' => 'https://linkedin.com/in/ada-okonkwo',
+                        'snippet' => 'CTO building payments infrastructure in Lagos.',
+                    ],
+                ],
+            ], 200),
+        ]);
+
+        $followUp = 'provide me necessary leads that will further my interest in this';
+
+        $response = $this->withHeaders($this->orgHeaders($org))
+            ->postJson("/api/v1/chat/sessions/{$session->id}/messages", [
+                'body' => $followUp,
+                'intent' => 'generate_leads',
+            ]);
+
+        $response->assertOk();
+
+        $userMessage = ChatMessage::query()
+            ->where('chat_session_id', $session->id)
+            ->where('role', 'user')
+            ->orderByDesc('id')
+            ->first();
+
+        $this->assertNotNull($userMessage);
+        $this->assertSame($followUp, $userMessage->body);
+        $this->assertSame('generate_leads', $userMessage->intent);
+
+        $meta = is_array($userMessage->meta) ? $userMessage->meta : [];
+        $this->assertArrayHasKey('effective_query', $meta);
+        $this->assertStringContainsString('payments infrastructure', mb_strtolower((string) $meta['effective_query']));
+    }
 }

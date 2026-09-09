@@ -29,6 +29,7 @@ class FreeformOpportunityRetriever
     }
 
     /**
+     * @param  list<array{role: string, content: string}>  $historySlice
      * @return array{body: string, sources: list<array{title: string, url: ?string, snippet: ?string, provider: string}>}
      */
     public function answer(
@@ -37,6 +38,7 @@ class FreeformOpportunityRetriever
         string $userQuery,
         User $user,
         ?string $clientTimezone = null,
+        array $historySlice = [],
     ): array {
         $queries = $this->buildSearchQueries($icp, $userQuery);
         $webSources = $this->searchWeb($organization, $queries);
@@ -51,7 +53,8 @@ class FreeformOpportunityRetriever
             . "\n- Number items sequentially as 1. 2. 3. (never repeat 1.)."
             . "\n- For each item include: what it is, why it fits the active ICP, and a markdown link to the source URL when available."
             . "\n- Do not invent URLs. Only use URLs from the provided sources."
-            . "\n- End with \"Based on your active ICP\" recommendations grounded in both ICP and sources.";
+            . "\n- End with \"Based on your active ICP\" recommendations grounded in both ICP and sources."
+            . "\n- When prior chat turns are provided, keep continuity with that conversation.";
 
         $userPayload = json_encode([
             'user_question' => $userQuery,
@@ -67,10 +70,17 @@ class FreeformOpportunityRetriever
         }
 
         try {
-            $raw = $this->glm->chat([
+            $messages = [
                 ['role' => 'system', 'content' => $system],
-                ['role' => 'user', 'content' => $userPayload ?: $userQuery],
-            ], 'chat', $organization);
+            ];
+            foreach (array_slice($historySlice, -4) as $turn) {
+                if (($turn['role'] ?? '') === 'user' || ($turn['role'] ?? '') === 'assistant') {
+                    $messages[] = ['role' => $turn['role'], 'content' => (string) ($turn['content'] ?? '')];
+                }
+            }
+            $messages[] = ['role' => 'user', 'content' => $userPayload ?: $userQuery];
+
+            $raw = $this->glm->chat($messages, 'chat', $organization);
 
             return [
                 'body' => $this->numbering->normalize($raw),

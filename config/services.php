@@ -108,4 +108,9 @@ return [
         'daily_api_cap' => (int) env('SOCIAL_LISTENING_DAILY_API_CAP', 200),
     ],
 
+    'chat' => [
+        'history_window' => (int) env('CHAT_HISTORY_WINDOW', 20),
+        'summary_trigger' => (int) env('CHAT_SUMMARY_TRIGGER', 40),
+    ],
+
 ];

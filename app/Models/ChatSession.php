@@ -13,6 +13,8 @@ class ChatSession extends Model
         'user_id',
         'icp_profile_id',
         'title',
+        'context_summary',
+        'context_summary_through_message_id',
     ];
 
     public function organization(): BelongsTo

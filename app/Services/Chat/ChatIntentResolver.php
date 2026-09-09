@@ -2,29 +2,52 @@
 
 namespace App\Services\Chat;
 
-use App\Models\ChatMessage;
 use App\Models\ChatSession;
+use App\Models\Organization;
 
 class ChatIntentResolver
 {
+    public function __construct(
+        private readonly ConversationMemoryService $memory,
+    ) {}
+
     /**
-     * @return array{intent: string, body: string}
+     * @return array{intent: string, body: string, effective_body: string}
      */
-    public function resolve(ChatSession $session, string $body, string $intent): array
-    {
+    public function resolve(
+        ChatSession $session,
+        string $body,
+        string $intent,
+        ?Organization $organization = null,
+    ): array {
+        $organization ??= Organization::query()->find($session->organization_id);
+        $effectiveBody = $body;
+
+        if ($organization) {
+            $contextualized = $this->memory->contextualize($session, $body, $organization);
+            $effectiveBody = $contextualized['effective_query'];
+        }
+
         if ($intent !== 'freeform') {
-            return ['intent' => $intent, 'body' => $body];
+            return [
+                'intent' => $intent,
+                'body' => $body,
+                'effective_body' => $effectiveBody,
+            ];
         }
 
-        if (! $this->looksLikeLeadGeneration($body)) {
-            return ['intent' => $intent, 'body' => $body];
+        if (! $this->looksLikeLeadGeneration($effectiveBody) && ! $this->looksLikeLeadGeneration($body)) {
+            return [
+                'intent' => $intent,
+                'body' => $body,
+                'effective_body' => $effectiveBody,
+            ];
         }
-
-        $expandedBody = $this->expandQueryWithContext($session, $body);
 
         return [
             'intent' => 'generate_leads',
-            'body' => $expandedBody,
+            'body' => $body,
+            'effective_body' => $effectiveBody,
         ];
     }
 
@@ -43,6 +66,8 @@ class ChatIntentResolver
             '/\b(these|those|them)\s+(top\s+)?\d*\s*(wealthiest|richest|best|important|key)\b/u',
             '/\bwealthiest\s+(men|people|persons|individuals|executives)\b/u',
             '/\bgenerate\s+new\s+leads\b/u',
+            '/\bprovide\s+(me\s+)?(necessary\s+)?leads?\b/u',
+            '/\bleads?\s+that\s+(will|can|could)\b/u',
         ];
 
         foreach ($patterns as $pattern) {
@@ -52,41 +77,5 @@ class ChatIntentResolver
         }
 
         return false;
-    }
-
-    private function expandQueryWithContext(ChatSession $session, string $body): string
-    {
-        if (! $this->referencesPriorResults($body)) {
-            return $body;
-        }
-
-        $contextMessages = ChatMessage::query()
-            ->where('chat_session_id', $session->id)
-            ->where('role', 'assistant')
-            ->orderByDesc('id')
-            ->limit(2)
-            ->get()
-            ->reverse()
-            ->filter(fn (ChatMessage $message) => trim($message->body) !== '' && ! ($message->meta['pending'] ?? false))
-            ->map(fn (ChatMessage $message) => mb_substr(trim($message->body), 0, 600))
-            ->values();
-
-        if ($contextMessages->isEmpty()) {
-            return $body;
-        }
-
-        $context = $contextMessages->implode("\n\n");
-
-        return "Context from prior assistant response:\n{$context}\n\nUser request: {$body}";
-    }
-
-    private function referencesPriorResults(string $body): bool
-    {
-        $normalized = mb_strtolower(trim($body));
-
-        return (bool) preg_match(
-            '/\b(these|those|them|all of them|the list|above|from (that|the) (list|results?|response))\b/u',
-            $normalized
-        );
     }
 }

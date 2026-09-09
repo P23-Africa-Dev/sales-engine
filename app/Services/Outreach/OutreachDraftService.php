@@ -22,6 +22,7 @@ class OutreachDraftService
     ) {}
 
     /**
+     * @param  list<array{role: string, content: string}>  $historySlice
      * @return array{channel: string, subject?: string|null, body: string, sent: bool, leads?: list<array>, target_lead_ids: list<int>, icp_alignment_note: string}
      */
     public function draftFromPrompt(
@@ -30,6 +31,7 @@ class OutreachDraftService
         string $prompt,
         ?string $clientTimezone = null,
         ?int $chatSessionId = null,
+        array $historySlice = [],
     ): array {
         $channel = str_contains(mb_strtolower($prompt), 'whatsapp') ? 'whatsapp' : 'email';
 
@@ -39,7 +41,7 @@ class OutreachDraftService
 
         $leads = $this->resolveLeads($organization, $icp, $chatSessionId);
 
-        $body = $this->compose($organization, $icp, $prompt, $channel, $leads->all(), $clientTimezone);
+        $body = $this->compose($organization, $icp, $prompt, $channel, $leads->all(), $clientTimezone, $historySlice);
         $alignmentNote = $this->buildIcpAlignmentNote($icp, $leads->all());
 
         foreach ($leads as $lead) {
@@ -48,7 +50,7 @@ class OutreachDraftService
                 'lead_id' => $lead->id,
                 'company_id' => $lead->company_id,
                 'name' => $lead->name,
-                'channel' => $channel.' draft',
+                'channel' => $channel . ' draft',
                 'preview' => mb_substr($body, 0, 160),
                 'accent_bg' => $channel === 'whatsapp' ? '#E8F8EF' : '#EEF2FF',
                 'accent_icon' => $channel === 'whatsapp' ? '#16A34A' : '#4F46E5',
@@ -59,12 +61,12 @@ class OutreachDraftService
 
         return [
             'channel' => $channel,
-            'subject' => $channel === 'email' ? 'Introduction — '.$icp->name : null,
+            'subject' => $channel === 'email' ? 'Introduction — ' . $icp->name : null,
             'body' => $body,
             'sent' => false,
-            'target_lead_ids' => $leads->pluck('id')->map(fn ($id) => (int) $id)->all(),
+            'target_lead_ids' => $leads->pluck('id')->map(fn($id) => (int) $id)->all(),
             'icp_alignment_note' => $alignmentNote,
-            'leads' => $leads->map(fn (Lead $l) => [
+            'leads' => $leads->map(fn(Lead $l) => [
                 'id' => $l->id,
                 'name' => $l->name,
                 'source' => $l->source,
@@ -136,8 +138,8 @@ class OutreachDraftService
             if ($message && is_array($message->leads) && count($message->leads) > 0) {
                 $ids = collect($message->leads)
                     ->pluck('id')
-                    ->filter(fn ($id) => is_numeric($id))
-                    ->map(fn ($id) => (int) $id)
+                    ->filter(fn($id) => is_numeric($id))
+                    ->map(fn($id) => (int) $id)
                     ->all();
 
                 if ($ids !== []) {
@@ -177,42 +179,59 @@ class OutreachDraftService
 
     /**
      * @param  list<Lead>  $leads
+     * @param  list<array{role: string, content: string}>  $historySlice
      */
-    private function compose(Organization $organization, IcpProfile $icp, string $prompt, string $channel, array $leads, ?string $clientTimezone = null): string
-    {
+    private function compose(
+        Organization $organization,
+        IcpProfile $icp,
+        string $prompt,
+        string $channel,
+        array $leads,
+        ?string $clientTimezone = null,
+        array $historySlice = [],
+    ): string {
         if (! $this->glm->isConfigured()) {
             $names = collect($leads)->pluck('name')->implode(', ');
             $greeting = TimeGreeting::phrase($clientTimezone);
 
-            return "{$greeting} — following up regarding {$icp->name}. ".($names ? "Relevant accounts: {$names}. " : '').trim($prompt);
+            return "{$greeting} — following up regarding {$icp->name}. " . ($names ? "Relevant accounts: {$names}. " : '') . trim($prompt);
         }
 
         try {
-            return $this->glm->chat([
+            $messages = [
                 [
                     'role' => 'system',
-                    'content' => "Draft a concise {$channel} outreach message for the user's specific request. Do not claim the message was sent. Professional tone for African B2B. ".TimeGreeting::promptContext($clientTimezone).' Use the active ICP industries, territories, and decision makers to tailor the angle. Reference the provided lead context when relevant. Output ONLY the sendable message body — no ICP analysis preamble.',
+                    'content' => "Draft a concise {$channel} outreach message for the user's specific request. Do not claim the message was sent. Professional tone for African B2B. " . TimeGreeting::promptContext($clientTimezone) . ' Use the active ICP industries, territories, and decision makers to tailor the angle. Reference the provided lead context when relevant. When prior chat turns are provided, keep continuity with that conversation. Output ONLY the sendable message body — no ICP analysis preamble.',
                 ],
-                [
-                    'role' => 'user',
-                    'content' => json_encode([
-                        'prompt' => $prompt,
-                        'active_icp' => $this->icpChatContext->toPromptPayload($icp),
-                        'leads' => collect($leads)->map(function (Lead $lead) {
-                            $meta = is_array($lead->meta) ? $lead->meta : [];
+            ];
 
-                            return [
-                                'name' => $lead->name,
-                                'summary' => $lead->summary,
-                                'score' => $lead->score,
-                                'icp_relevance_reason' => $meta['icp_relevance_reason'] ?? null,
-                            ];
-                        })->all(),
-                    ], JSON_UNESCAPED_UNICODE),
-                ],
-            ], 'outreach_draft', $organization);
+            foreach (array_slice($historySlice, -4) as $turn) {
+                if (($turn['role'] ?? '') === 'user' || ($turn['role'] ?? '') === 'assistant') {
+                    $messages[] = ['role' => $turn['role'], 'content' => (string) ($turn['content'] ?? '')];
+                }
+            }
+
+            $messages[] = [
+                'role' => 'user',
+                'content' => json_encode([
+                    'prompt' => $prompt,
+                    'active_icp' => $this->icpChatContext->toPromptPayload($icp),
+                    'leads' => collect($leads)->map(function (Lead $lead) {
+                        $meta = is_array($lead->meta) ? $lead->meta : [];
+
+                        return [
+                            'name' => $lead->name,
+                            'summary' => $lead->summary,
+                            'score' => $lead->score,
+                            'icp_relevance_reason' => $meta['icp_relevance_reason'] ?? null,
+                        ];
+                    })->all(),
+                ], JSON_UNESCAPED_UNICODE),
+            ];
+
+            return $this->glm->chat($messages, 'outreach_draft', $organization);
         } catch (\Throwable) {
-            return "Draft outreach for {$icp->name}: ".$prompt;
+            return "Draft outreach for {$icp->name}: " . $prompt;
         }
     }
 
@@ -233,24 +252,24 @@ class OutreachDraftService
             $meta = is_array($lead->meta) ? $lead->meta : [];
             $reason = trim((string) ($meta['icp_relevance_reason'] ?? ''));
             if ($reason !== '') {
-                $reasons[] = $lead->name.': '.$reason;
+                $reasons[] = $lead->name . ': ' . $reason;
             }
         }
 
         $count = count($leads);
         if ($count === 0) {
-            return "Drafted against your active ICP \"{$icp->name}\" ({$industryLabel}".($territoryLabel ? " in {$territoryLabel}" : '').').';
+            return "Drafted against your active ICP \"{$icp->name}\" ({$industryLabel}" . ($territoryLabel ? " in {$territoryLabel}" : '') . ').';
         }
 
-        $intro = "Targeting these {$count} lead".($count === 1 ? '' : 's')
-            ." because they relate to your {$industryLabel} focus"
-            .($territoryLabel ? " in {$territoryLabel}" : '')
-            .'.';
+        $intro = "Targeting these {$count} lead" . ($count === 1 ? '' : 's')
+            . " because they relate to your {$industryLabel} focus"
+            . ($territoryLabel ? " in {$territoryLabel}" : '')
+            . '.';
 
         if ($reasons === []) {
             return $intro;
         }
 
-        return $intro.' '.implode(' ', array_slice($reasons, 0, 3));
+        return $intro . ' ' . implode(' ', array_slice($reasons, 0, 3));
     }
 }

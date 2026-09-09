@@ -35,6 +35,7 @@ class ChatService
         private readonly ValueSeekingQueryDetector $valueSeeking,
         private readonly FreeformOpportunityRetriever $opportunityRetriever,
         private readonly ChatListNumbering $listNumbering,
+        private readonly ConversationMemoryService $memory,
     ) {}
 
     public function createSession(Organization $organization, User $user, ?string $title = null, ?int $icpProfileId = null): ChatSession
@@ -86,6 +87,10 @@ class ChatService
     public function clearSessionMessages(ChatSession $session): void
     {
         ChatMessage::query()->where('chat_session_id', $session->id)->delete();
+        $session->update([
+            'context_summary' => null,
+            'context_summary_through_message_id' => null,
+        ]);
         $session->touch();
     }
 
@@ -104,7 +109,12 @@ class ChatService
             throw new InvalidArgumentException('Invalid intent.');
         }
 
-        ['intent' => $intent, 'body' => $body] = $this->intentResolver->resolve($session, $body, $intent);
+        ['intent' => $intent, 'body' => $body, 'effective_body' => $effectiveBody] = $this->intentResolver->resolve(
+            $session,
+            $body,
+            $intent,
+            $organization,
+        );
 
         $icp = $session->icp_profile_id
             ? IcpProfile::query()->where('organization_id', $organization->id)->find($session->icp_profile_id)
@@ -114,12 +124,21 @@ class ChatService
             throw new InvalidArgumentException('An active ICP profile is required for this intent.');
         }
 
+        $userMeta = ['intent' => $intent];
+        if (trim($effectiveBody) !== trim($body)) {
+            $userMeta['effective_query'] = $effectiveBody;
+            $userMeta['used_context'] = true;
+        }
+
         $userMessage = ChatMessage::query()->create([
             'chat_session_id' => $session->id,
             'role' => 'user',
             'body' => $body,
             'intent' => $intent,
+            'meta' => $userMeta,
         ]);
+
+        $historySlice = $this->memory->recentTurns($session, 6, $userMessage->id);
 
         if (in_array($intent, self::ASYNC_INTENTS, true) && $icp) {
             $run = DiscoveryRun::query()->create([
@@ -128,7 +147,7 @@ class ChatService
                 'icp_profile_id' => $icp->id,
                 'chat_session_id' => $session->id,
                 'status' => 'queued',
-                'query' => $body,
+                'query' => $effectiveBody,
                 'intent' => $intent,
                 'stages' => ['analyzing_brief'],
             ]);
@@ -137,8 +156,8 @@ class ChatService
                 'chat_session_id' => $session->id,
                 'role' => 'assistant',
                 'body' => $intent === 'generate_leads'
-                    ? "Searching for leads matching your request. Results will appear here shortly."
-                    : "Researching your question. Results will appear here shortly.",
+                    ? 'Searching for leads matching your request. Results will appear here shortly.'
+                    : 'Researching your question. Results will appear here shortly.',
                 'intent' => $intent,
                 'meta' => [
                     'pending' => true,
@@ -164,7 +183,7 @@ class ChatService
                     ->where('id', '>', $userMessage->id)
                     ->orderByDesc('id')
                     ->get()
-                    ->first(fn(ChatMessage $message) => ! ($message->meta['pending'] ?? false))
+                    ->first(fn (ChatMessage $message) => ! ($message->meta['pending'] ?? false))
                     ?? ChatMessage::query()
                     ->where('chat_session_id', $session->id)
                     ->where('role', 'assistant')
@@ -197,20 +216,22 @@ class ChatService
                 $organization,
                 $icp,
                 $user,
-                $body,
+                $effectiveBody,
                 $session->id,
+                null,
+                $historySlice,
             );
             $discoveryRunId = $result['run']->id;
             $meta['discovery_run_id'] = $discoveryRunId;
             $meta['research'] = $result['research'];
             $assistantBody = $result['narrative'];
         } elseif ($intent === 'generate_leads' && $icp) {
-            $brief = IcpBrief::fromIcpProfile($icp, $body);
+            $brief = IcpBrief::fromIcpProfile($icp, $effectiveBody);
             $result = $this->discovery->run(
                 $organization,
                 $icp,
                 $user,
-                $body,
+                $effectiveBody,
                 $intent,
                 $session->id,
                 $brief->requestedLimit,
@@ -218,9 +239,24 @@ class ChatService
             $leads = $result['leads'];
             $discoveryRunId = $result['run']->id;
             $meta['discovery_run_id'] = $discoveryRunId;
-            $assistantBody = $this->narrateDiscovery($organization, $icp, $body, $leads, $intent, $clientTimezone);
+            $assistantBody = $this->narrateDiscovery(
+                $organization,
+                $icp,
+                $effectiveBody,
+                $leads,
+                $intent,
+                $clientTimezone,
+                $historySlice,
+            );
         } elseif ($intent === 'create_outreach' && $icp) {
-            $draft = $this->outreach->draftFromPrompt($organization, $icp, $body, $clientTimezone, $session->id);
+            $draft = $this->outreach->draftFromPrompt(
+                $organization,
+                $icp,
+                $effectiveBody,
+                $clientTimezone,
+                $session->id,
+                $historySlice,
+            );
             $alignmentNote = trim((string) ($draft['icp_alignment_note'] ?? ''));
             $draftBody = (string) ($draft['body'] ?? '');
             $assistantBody = $alignmentNote !== ''
@@ -229,21 +265,29 @@ class ChatService
             $meta['outreach'] = $draft;
             $leads = $draft['leads'] ?? [];
         } else {
-            // Freeform always follows the org's currently active ICP (may differ from session-bound profile).
             $activeIcp = $this->icps->active($organization) ?? $icp;
-            if ($this->valueSeeking->matches($body) && $this->opportunityRetriever->isEnabled()) {
+            if ($this->valueSeeking->matches($effectiveBody) && $this->opportunityRetriever->isEnabled()) {
                 $retrieved = $this->opportunityRetriever->answer(
                     $organization,
                     $activeIcp,
-                    $body,
+                    $effectiveBody,
                     $user,
                     $clientTimezone,
+                    $historySlice,
                 );
                 $assistantBody = $retrieved['body'];
                 $meta['retrieval'] = 'live_opportunity';
                 $meta['sources'] = $retrieved['sources'];
             } else {
-                $assistantBody = $this->freeformReply($organization, $activeIcp, $session, $body, $user, $clientTimezone);
+                $assistantBody = $this->freeformReply(
+                    $organization,
+                    $activeIcp,
+                    $session,
+                    $effectiveBody,
+                    $user,
+                    $clientTimezone,
+                    $userMessage->id,
+                );
             }
         }
 
@@ -300,10 +344,14 @@ class ChatService
             return;
         }
 
-        $body = $userMessage->body;
+        $userMeta = is_array($userMessage->meta) ? $userMessage->meta : [];
+        $effectiveBody = trim((string) ($userMeta['effective_query'] ?? '')) !== ''
+            ? (string) $userMeta['effective_query']
+            : (string) $userMessage->body;
         $intent = (string) $run->intent;
         $leads = [];
         $meta = ['intent' => $intent, 'discovery_run_id' => $run->id];
+        $historySlice = $this->memory->recentTurns($session, 6, $userMessage->id);
 
         try {
             if ($intent === 'quick_research') {
@@ -311,26 +359,35 @@ class ChatService
                     $organization,
                     $icp,
                     $user,
-                    $body,
+                    $effectiveBody,
                     $session->id,
                     $run,
+                    $historySlice,
                 );
                 $meta['research'] = $result['research'];
                 $assistantBody = $result['narrative'];
             } elseif ($intent === 'generate_leads') {
-                $brief = IcpBrief::fromIcpProfile($icp, $body);
+                $brief = IcpBrief::fromIcpProfile($icp, $effectiveBody);
                 $result = $this->discovery->run(
                     $organization,
                     $icp,
                     $user,
-                    $body,
+                    $effectiveBody,
                     $intent,
                     $session->id,
                     $brief->requestedLimit,
                     $run,
                 );
                 $leads = $result['leads'];
-                $assistantBody = $this->narrateDiscovery($organization, $icp, $body, $leads, $intent, $clientTimezone);
+                $assistantBody = $this->narrateDiscovery(
+                    $organization,
+                    $icp,
+                    $effectiveBody,
+                    $leads,
+                    $intent,
+                    $clientTimezone,
+                    $historySlice,
+                );
             } else {
                 $run->update(['status' => 'failed', 'error' => 'Unsupported async intent.', 'finished_at' => now()]);
 
@@ -343,7 +400,7 @@ class ChatService
                 ->where('id', '>', $userMessage->id)
                 ->orderBy('id')
                 ->get()
-                ->first(fn(ChatMessage $message) => (bool) ($message->meta['pending'] ?? false));
+                ->first(fn (ChatMessage $message) => (bool) ($message->meta['pending'] ?? false));
 
             if ($placeholder) {
                 $placeholder->update([
@@ -371,11 +428,11 @@ class ChatService
                 ->where('id', '>', $userMessage->id)
                 ->orderBy('id')
                 ->get()
-                ->first(fn(ChatMessage $message) => (bool) ($message->meta['pending'] ?? false));
+                ->first(fn (ChatMessage $message) => (bool) ($message->meta['pending'] ?? false));
 
             if ($placeholder) {
                 $placeholder->update([
-                    'body' => 'Sorry, that request failed: ' . $e->getMessage(),
+                    'body' => 'Sorry, that request failed: '.$e->getMessage(),
                     'intent' => $intent,
                     'meta' => array_merge($meta, ['error' => $e->getMessage(), 'pending' => false]),
                 ]);
@@ -383,7 +440,7 @@ class ChatService
                 ChatMessage::query()->create([
                     'chat_session_id' => $session->id,
                     'role' => 'assistant',
-                    'body' => 'Sorry, that request failed: ' . $e->getMessage(),
+                    'body' => 'Sorry, that request failed: '.$e->getMessage(),
                     'intent' => $intent,
                     'meta' => array_merge($meta, ['error' => $e->getMessage()]),
                 ]);
@@ -392,8 +449,18 @@ class ChatService
         }
     }
 
-    private function narrateDiscovery(Organization $organization, IcpProfile $icp, string $query, array $leads, string $intent, ?string $clientTimezone = null): string
-    {
+    /**
+     * @param  list<array{role: string, content: string}>  $historySlice
+     */
+    private function narrateDiscovery(
+        Organization $organization,
+        IcpProfile $icp,
+        string $query,
+        array $leads,
+        string $intent,
+        ?string $clientTimezone = null,
+        array $historySlice = [],
+    ): string {
         $count = count($leads);
         $hasUserQuery = trim($query) !== '';
 
@@ -405,7 +472,7 @@ class ChatService
             return "No leads met the match threshold for ICP \"{$icp->name}\". Try refining territories or industries.";
         }
 
-        $icpRecommendedCount = count(array_filter($leads, fn(array $lead) => (bool) ($lead['icp_recommended'] ?? false)));
+        $icpRecommendedCount = count(array_filter($leads, fn (array $lead) => (bool) ($lead['icp_recommended'] ?? false)));
         $advisoryNote = $this->buildIcpAdvisoryNote($icp, $count, $icpRecommendedCount, $hasUserQuery);
 
         if (! $this->glm->isConfigured()) {
@@ -424,16 +491,25 @@ class ChatService
                 'query_relevance_score' => $lead['query_relevance_score'] ?? null,
             ], fn ($v) => $v !== null && $v !== ''), $leads);
 
-            $narrative = $this->glm->chat([
-                ['role' => 'system', 'content' => 'You are Sales Engine. Summarize ranked lead prospects for a sales team. Use sequential numbering (1, 2, 3...) — never repeat "1." for every item. Use each lead\'s actual name field — never substitute the ICP profile name as a lead name. Write in plain prose: name, role/company if known, and why they matter for the active ICP. Do NOT include internal fields like Match Quality, Query Match, ICP Fit Score, or Recommended Next Action. Do NOT label leads as "ICP match" or "Outside ICP" — refer to overall score and fit in plain language only. Tell the user they can review cards below (Overall / Search / ICP / Intent scores) and save selected leads to CRM. '.TimeGreeting::promptContext($clientTimezone)],
-                ['role' => 'user', 'content' => json_encode([
-                    'intent' => $intent,
-                    'active_icp' => $this->icpChatContext->toPromptPayload($icp),
-                    'query' => $query,
-                    'leads' => $publicLeads,
-                    'icp_recommended_count' => $icpRecommendedCount,
-                ], JSON_UNESCAPED_UNICODE)],
-            ], 'chat', $organization);
+            $messages = [
+                ['role' => 'system', 'content' => 'You are Sales Engine. Summarize ranked lead prospects for a sales team. Use sequential numbering (1, 2, 3...) — never repeat "1." for every item. Use each lead\'s actual name field — never substitute the ICP profile name as a lead name. Write in plain prose: name, role/company if known, and why they matter for the active ICP. Do NOT include internal fields like Match Quality, Query Match, ICP Fit Score, or Recommended Next Action. Do NOT label leads as "ICP match" or "Outside ICP" — refer to overall score and fit in plain language only. Tell the user they can review cards below (Overall / Search / ICP / Intent scores) and save selected leads to CRM. When prior chat turns are provided, briefly acknowledge continuity with that conversation. '.TimeGreeting::promptContext($clientTimezone)],
+            ];
+
+            foreach (array_slice($historySlice, -4) as $turn) {
+                if (($turn['role'] ?? '') === 'user' || ($turn['role'] ?? '') === 'assistant') {
+                    $messages[] = ['role' => $turn['role'], 'content' => (string) ($turn['content'] ?? '')];
+                }
+            }
+
+            $messages[] = ['role' => 'user', 'content' => json_encode([
+                'intent' => $intent,
+                'active_icp' => $this->icpChatContext->toPromptPayload($icp),
+                'query' => $query,
+                'leads' => $publicLeads,
+                'icp_recommended_count' => $icpRecommendedCount,
+            ], JSON_UNESCAPED_UNICODE)];
+
+            $narrative = $this->glm->chat($messages, 'chat', $organization);
 
             return rtrim($this->listNumbering->normalize($narrative)).$advisoryNote;
         } catch (\Throwable) {
@@ -452,37 +528,49 @@ class ChatService
         }
 
         if ($icpRecommendedCount === 0) {
-            return " These answer your search; compare the Search / ICP / Intent % on each card to decide what to save.";
+            return ' These answer your search; compare the Search / ICP / Intent % on each card to decide what to save.';
         }
 
-        return " Compare Overall, Search, ICP, and Intent % on each card — stronger ICP fit is ranked higher when scores are close.";
+        return ' Compare Overall, Search, ICP, and Intent % on each card — stronger ICP fit is ranked higher when scores are close.';
     }
 
-    private function freeformReply(Organization $organization, ?IcpProfile $icp, ChatSession $session, string $body, User $user, ?string $clientTimezone = null): string
-    {
+    private function freeformReply(
+        Organization $organization,
+        ?IcpProfile $icp,
+        ChatSession $session,
+        string $body,
+        User $user,
+        ?string $clientTimezone = null,
+        ?int $excludeMessageId = null,
+    ): string {
         if (! $this->glm->isConfigured()) {
             return 'Sales Engine is ready. Configure GLM_API_KEY for full chat, or use generate_leads / quick_research intents once Serper (and optional registries) are keyed.';
         }
 
-        $history = ChatMessage::query()
-            ->where('chat_session_id', $session->id)
-            ->orderBy('id')
-            ->limit(12)
-            ->get()
-            ->map(fn (ChatMessage $m) => ['role' => $m->role, 'content' => $m->body])
-            ->all();
-
-        $history[] = ['role' => 'user', 'content' => $body];
+        $window = max(1, (int) config('services.chat.history_window', 20));
+        $history = $this->memory->recentTurns($session, $window, $excludeMessageId);
+        $summary = $this->memory->getOrRefreshSummary($session, $organization);
 
         $firstName = trim(explode(' ', trim($user->name ?? ''), 2)[0] ?? '');
+        $system = $this->icpChatContext->buildFreeformSystemPrompt($icp, $firstName, $clientTimezone);
+        if ($summary) {
+            $system .= "\n\nConversation memory (older turns summarized):\n".$summary;
+        }
 
-        array_unshift($history, [
-            'role' => 'system',
-            'content' => $this->icpChatContext->buildFreeformSystemPrompt($icp, $firstName, $clientTimezone),
-        ]);
+        $messages = [['role' => 'system', 'content' => $system]];
+        foreach ($history as $turn) {
+            $messages[] = $turn;
+        }
+
+        // Ensure the latest effective query is the final user turn (history may already
+        // include an earlier raw message; avoid duplicate by only appending when needed).
+        $last = $messages[count($messages) - 1] ?? null;
+        if (! $last || ($last['role'] ?? '') !== 'user' || trim((string) ($last['content'] ?? '')) !== trim($body)) {
+            $messages[] = ['role' => 'user', 'content' => $body];
+        }
 
         try {
-            return $this->listNumbering->normalize($this->glm->chat($history, 'chat', $organization));
+            return $this->listNumbering->normalize($this->glm->chat($messages, 'chat', $organization));
         } catch (\Throwable $e) {
             return 'Chat temporarily unavailable: '.$e->getMessage();
         }

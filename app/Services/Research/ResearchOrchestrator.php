@@ -23,6 +23,7 @@ class ResearchOrchestrator
     ) {}
 
     /**
+     * @param  list<array{role: string, content: string}>  $historySlice
      * @return array{run: DiscoveryRun, narrative: string, research: array{sub_queries: list<string>, sources: list<array{title: string, url: ?string, snippet: ?string, provider: ?string}>}}
      */
     public function run(
@@ -32,6 +33,7 @@ class ResearchOrchestrator
         string $query,
         ?int $chatSessionId = null,
         ?DiscoveryRun $existingRun = null,
+        array $historySlice = [],
     ): array {
         $run = $existingRun ?? DiscoveryRun::query()->create([
             'organization_id' => $organization->id,
@@ -92,7 +94,7 @@ class ResearchOrchestrator
             $this->appendStage($run, 'synthesizing');
             $this->updateProgress($run, 3, $sourcesChecked, count($sources));
             $sources = $this->tagSourcesWithIcpRelevance($organization, $icp, $query, $sources);
-            $narrative = $this->synthesize($organization, $icp, $query, $subQueries, $sources);
+            $narrative = $this->synthesize($organization, $icp, $query, $subQueries, $sources, $historySlice);
 
             $this->appendStage($run, 'compiling_results');
             $this->updateProgress($run, 4, $sourcesChecked, count($sources));
@@ -165,6 +167,7 @@ class ResearchOrchestrator
     /**
      * @param  list<string>  $subQueries
      * @param  list<array{title: string, url: ?string, snippet: ?string, provider: ?string, icp_relevance_reason?: string}>  $sources
+     * @param  list<array{role: string, content: string}>  $historySlice
      */
     private function synthesize(
         Organization $organization,
@@ -172,6 +175,7 @@ class ResearchOrchestrator
         string $query,
         array $subQueries,
         array $sources,
+        array $historySlice = [],
     ): string {
         if (! $this->glm->isConfigured()) {
             $count = count($sources);
@@ -180,21 +184,30 @@ class ResearchOrchestrator
         }
 
         try {
-            return $this->glm->chat([
+            $messages = [
                 [
                     'role' => 'system',
-                    'content' => 'You are Sales Engine. Write a concise research brief for a B2B sales team. Structure: Executive Summary, Key Findings, Risks/Opportunities, Recommended Next Steps. Ground findings in the active ICP (industries, territories, buyers). For each Key Finding bullet, end with an explicit inline ICP-relevance clause citing industries, territories, or decision makers (e.g. "— relevant because it aligns with your FinTech focus in Lagos"). End Recommended Next Steps with ICP-aligned actions and one-line reasons. Use markdown. Do not invent sources — only reference provided source snippets.',
+                    'content' => 'You are Sales Engine. Write a concise research brief for a B2B sales team. Structure: Executive Summary, Key Findings, Risks/Opportunities, Recommended Next Steps. Ground findings in the active ICP (industries, territories, buyers). For each Key Finding bullet, end with an explicit inline ICP-relevance clause citing industries, territories, or decision makers (e.g. "— relevant because it aligns with your FinTech focus in Lagos"). End Recommended Next Steps with ICP-aligned actions and one-line reasons. Use markdown. Do not invent sources — only reference provided source snippets. When prior chat turns are provided, keep continuity with that conversation.',
                 ],
-                [
-                    'role' => 'user',
-                    'content' => json_encode([
-                        'active_icp' => $this->icpChatContext->toPromptPayload($icp),
-                        'query' => $query,
-                        'sub_queries' => $subQueries,
-                        'sources' => array_slice($sources, 0, 15),
-                    ], JSON_UNESCAPED_UNICODE),
-                ],
-            ], 'chat', $organization);
+            ];
+
+            foreach (array_slice($historySlice, -4) as $turn) {
+                if (($turn['role'] ?? '') === 'user' || ($turn['role'] ?? '') === 'assistant') {
+                    $messages[] = ['role' => $turn['role'], 'content' => (string) ($turn['content'] ?? '')];
+                }
+            }
+
+            $messages[] = [
+                'role' => 'user',
+                'content' => json_encode([
+                    'active_icp' => $this->icpChatContext->toPromptPayload($icp),
+                    'query' => $query,
+                    'sub_queries' => $subQueries,
+                    'sources' => array_slice($sources, 0, 15),
+                ], JSON_UNESCAPED_UNICODE),
+            ];
+
+            return $this->glm->chat($messages, 'chat', $organization);
         } catch (\Throwable) {
             return "Research completed for \"{$query}\" with " . count($sources) . ' sources. Review the source list below for details.';
         }
@@ -228,7 +241,7 @@ class ResearchOrchestrator
                         'active_icp' => $this->icpChatContext->toPromptPayload($icp),
                         'query' => $query,
                         'sources' => array_map(
-                            fn (array $source, int $index) => [
+                            fn(array $source, int $index) => [
                                 'index' => $index,
                                 'title' => $source['title'],
                                 'snippet' => $source['snippet'],
