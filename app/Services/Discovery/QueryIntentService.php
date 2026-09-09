@@ -8,6 +8,12 @@ class QueryIntentService
 
     public const TARGET_COMPANIES = 'companies';
 
+    public const DEFAULT_LEAD_LIMIT = 20;
+
+    public const MAX_LEAD_LIMIT = 150;
+
+    public const DEFAULT_RESEARCH_LIMIT = 10;
+
     /**
      * @return array{target: string, limit: int}
      */
@@ -15,7 +21,7 @@ class QueryIntentService
     {
         $normalized = mb_strtolower(trim($query));
         $target = $this->detectTarget($normalized, $intent);
-        $limit = $this->parseLimit($normalized);
+        $limit = $this->parseLimit($normalized, $intent);
 
         return [
             'target' => $target,
@@ -81,21 +87,25 @@ class QueryIntentService
         return self::TARGET_COMPANIES;
     }
 
-    private function parseLimit(string $normalized): int
+    private function parseLimit(string $normalized, string $intent = 'generate_leads'): int
     {
-        if (preg_match('/\b(?:give me|find|get|show|list|need|want)\s+(\d{1,2})\b/u', $normalized, $matches)) {
-            return min(12, max(1, (int) $matches[1]));
+        $clamp = fn(int $value): int => min(self::MAX_LEAD_LIMIT, max(1, $value));
+
+        if (preg_match('/\b(?:give me|find|get|show|list|need|want)\s+(\d{1,3})\b/u', $normalized, $matches)) {
+            return $clamp((int) $matches[1]);
         }
 
-        if (preg_match('/\b(\d{1,2})\s+(?:people|persons|leads|prospects|contacts|names|executives|companies|accounts|men|women)\b/u', $normalized, $matches)) {
-            return min(12, max(1, (int) $matches[1]));
+        if (preg_match('/\b(\d{1,3})\s+(?:people|persons|leads|prospects|contacts|names|executives|companies|accounts|men|women)\b/u', $normalized, $matches)) {
+            return $clamp((int) $matches[1]);
         }
 
-        if (preg_match('/\btop\s+(\d{1,2})\b/u', $normalized, $matches)) {
-            return min(12, max(1, (int) $matches[1]));
+        if (preg_match('/\btop\s+(\d{1,3})\b/u', $normalized, $matches)) {
+            return $clamp((int) $matches[1]);
         }
 
-        return 8;
+        return $intent === 'generate_leads'
+            ? self::DEFAULT_LEAD_LIMIT
+            : self::DEFAULT_RESEARCH_LIMIT;
     }
 
     public function isListicleUrl(?string $url): bool
@@ -123,6 +133,17 @@ class QueryIntentService
             '/\s*\(\s*find\s+\d+\s+prospects?\s+unless\s+a\s+different\s+number\s+is\s+specified\.?\s*\)\s*/iu',
             ' ',
             $query
+        );
+        $stripped = preg_replace(
+            '/\s*\(\s*find\s+\d+\s+(?:prospects?|leads?)\.??\s*\)\s*/iu',
+            ' ',
+            $stripped ?? $query
+        );
+        // Frontend may prefix "Find N leads." so the backend can parse the count.
+        $stripped = preg_replace(
+            '/^\s*find\s+\d{1,3}\s+(?:prospects?|leads?)\.?\s*/iu',
+            '',
+            $stripped ?? $query
         );
 
         return trim(preg_replace('/\s+/u', ' ', $stripped ?? $query) ?? $query);

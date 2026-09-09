@@ -22,7 +22,7 @@ class DiscoveryController extends Controller
         $data = $request->validate([
             'query' => ['nullable', 'string', 'max:1000'],
             'intent' => ['nullable', 'string', 'in:quick_research,generate_leads'],
-            'limit' => ['nullable', 'integer', 'min:1', 'max:25'],
+            'limit' => ['nullable', 'integer', 'min:1', 'max:150'],
         ]);
 
         $org = OrgContext::require();
@@ -38,7 +38,7 @@ class DiscoveryController extends Controller
             $data['query'] ?? '',
             $data['intent'] ?? 'generate_leads',
             null,
-            $data['limit'] ?? 8,
+            $data['limit'] ?? 20,
         );
 
         return response()->json([

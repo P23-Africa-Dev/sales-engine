@@ -24,6 +24,16 @@ use Illuminate\Support\Collection;
 
 class DiscoveryOrchestrator
 {
+    public const MAX_LEAD_LIMIT = 150;
+
+    public const QUALITY_STRICT = 'strict';
+
+    public const QUALITY_BALANCED = 'balanced';
+
+    public const QUALITY_VOLUME = 'volume';
+
+    private string $qualityThreshold = self::QUALITY_STRICT;
+
     /** @param  list<DiscoverySourceInterface>  $sources */
     public function __construct(
         private readonly array $sources,
@@ -35,7 +45,17 @@ class DiscoveryOrchestrator
         private readonly CompanyNameValidator $companyNameValidator,
         private readonly FactualListSynthesizer $factualListSynthesizer,
         private readonly LeadProfileEnrichmentService $enrichment,
+        private readonly QueryVariationGenerator $queryVariationGenerator,
     ) {}
+
+    public function setQualityThreshold(string $threshold): self
+    {
+        if (in_array($threshold, [self::QUALITY_STRICT, self::QUALITY_BALANCED, self::QUALITY_VOLUME], true)) {
+            $this->qualityThreshold = $threshold;
+        }
+
+        return $this;
+    }
 
     /**
      * @return array{run: DiscoveryRun, leads: list<array<string, mixed>>, companies: Collection}
@@ -47,7 +67,7 @@ class DiscoveryOrchestrator
         string $query = '',
         string $intent = 'generate_leads',
         ?int $chatSessionId = null,
-        int $limit = 8,
+        int $limit = 20,
         ?DiscoveryRun $existingRun = null,
     ): array {
         $run = $existingRun ?? DiscoveryRun::query()->create([
@@ -75,22 +95,15 @@ class DiscoveryOrchestrator
         try {
             $brief = IcpBrief::fromIcpProfile($icp, $query);
             $hasUserQuery = $brief->hasUserQuery();
-            $effectiveLimit = min(12, max(1, $limit > 0 ? $limit : $brief->requestedLimit));
+            $effectiveLimit = min(self::MAX_LEAD_LIMIT, max(1, $limit > 0 ? $limit : $brief->requestedLimit));
+            $this->qualityThreshold = $this->resolveQualityThreshold($effectiveLimit);
             $ctx = new SearchContext($organization->id, $user?->id, $effectiveLimit, $intent);
 
             $this->updateProgress($run, 1, 0, 0);
 
             $this->appendStage($run, 'searching_sources');
 
-            $sourcesChecked = 0;
-            $hits = collect();
-            foreach ($this->sources as $source) {
-                if (! $source->isEnabled()) {
-                    continue;
-                }
-                $sourcesChecked++;
-                $hits = $hits->merge($source->search($brief, $ctx));
-            }
+            [$hits, $sourcesChecked, $fanOutMeta] = $this->collectHits($brief, $ctx, $effectiveLimit);
 
             $this->updateProgress($run, 2, $sourcesChecked, 0);
 
@@ -140,10 +153,19 @@ class DiscoveryOrchestrator
 
             $run->update([
                 'status' => 'completed',
-                'result_summary' => [
-                    'lead_count' => count($leadsPayload),
-                    'sources_enabled' => collect($this->sources)->filter->isEnabled()->map->key()->values()->all(),
-                ],
+                'result_summary' => array_merge(
+                    is_array($run->result_summary) ? $run->result_summary : [],
+                    [
+                        'lead_count' => count($leadsPayload),
+                        'sources_enabled' => collect($this->sources)->filter->isEnabled()->map->key()->values()->all(),
+                        'queries_executed' => $fanOutMeta['queries_executed'],
+                        'sources_hit_count' => $fanOutMeta['sources_hit_count'],
+                        'candidates_extracted' => $fanOutMeta['candidates_extracted'] ?? $hits->count(),
+                        'candidates_passed_gates' => $candidatesFound,
+                        'fan_out_strategy_used' => $fanOutMeta['fan_out_strategy_used'],
+                        'quality_threshold' => $this->qualityThreshold,
+                    ]
+                ),
                 'finished_at' => now(),
             ]);
 
@@ -156,6 +178,100 @@ class DiscoveryOrchestrator
             ]);
             throw $e;
         }
+    }
+
+    private function shouldUseFanOut(int $limit): bool
+    {
+        return $limit >= QueryVariationGenerator::FAN_OUT_THRESHOLD;
+    }
+
+    private function resolveQualityThreshold(int $effectiveLimit): string
+    {
+        if ($effectiveLimit >= 50) {
+            return self::QUALITY_VOLUME;
+        }
+
+        if ($effectiveLimit >= 20) {
+            return self::QUALITY_BALANCED;
+        }
+
+        return self::QUALITY_STRICT;
+    }
+
+    /**
+     * @return array{0: Collection<int, RawDiscoveryHit>, 1: int, 2: array{queries_executed: list<string>, sources_hit_count: array<string, int>, fan_out_strategy_used: bool, candidates_extracted?: int}}
+     */
+    private function collectHits(IcpBrief $brief, SearchContext $ctx, int $effectiveLimit): array
+    {
+        $hits = collect();
+        $sourcesChecked = 0;
+        $sourcesHitCount = [];
+        $queriesExecuted = [];
+        $fanOut = $this->shouldUseFanOut($effectiveLimit);
+        $enabledSources = array_values(array_filter(
+            $this->sources,
+            fn (DiscoverySourceInterface $source): bool => $source->isEnabled()
+        ));
+        $sourcesChecked = count($enabledSources);
+
+        if ($fanOut) {
+            $variations = $this->queryVariationGenerator->generate($brief, $effectiveLimit);
+            foreach ($variations as $variationQuery) {
+                $queriesExecuted[] = $variationQuery;
+                $variantBrief = $brief->withSearchQueryOverride($variationQuery);
+
+                foreach ($enabledSources as $source) {
+                    $batch = $source->search($variantBrief, $ctx);
+                    $key = $source->key();
+                    $sourcesHitCount[$key] = ($sourcesHitCount[$key] ?? 0) + $batch->count();
+                    $hits = $hits->merge($batch);
+                }
+            }
+        } else {
+            $queriesExecuted[] = $brief->searchQuery();
+            foreach ($enabledSources as $source) {
+                $batch = $source->search($brief, $ctx);
+                $key = $source->key();
+                $sourcesHitCount[$key] = ($sourcesHitCount[$key] ?? 0) + $batch->count();
+                $hits = $hits->merge($batch);
+            }
+        }
+
+        $hits = $this->dedupeHits($hits);
+
+        return [
+            $hits,
+            max(1, $sourcesChecked),
+            [
+                'queries_executed' => $queriesExecuted,
+                'sources_hit_count' => $sourcesHitCount,
+                'fan_out_strategy_used' => $fanOut,
+                'candidates_extracted' => $hits->count(),
+            ],
+        ];
+    }
+
+    /**
+     * @param  Collection<int, RawDiscoveryHit>  $hits
+     * @return Collection<int, RawDiscoveryHit>
+     */
+    private function dedupeHits(Collection $hits): Collection
+    {
+        $seen = [];
+
+        return $hits->filter(function (RawDiscoveryHit $hit) use (&$seen): bool {
+            $nameKey = mb_strtolower(trim($hit->name));
+            $urlKey = mb_strtolower(trim((string) ($hit->url ?? '')));
+            $dedupeKey = $urlKey !== '' ? $nameKey.'|'.$urlKey : $nameKey;
+
+            if ($dedupeKey === '' || isset($seen[$dedupeKey])) {
+                return false;
+            }
+
+            $seen[$dedupeKey] = true;
+
+            return true;
+        })->values();
     }
 
     public function enabledSources(): array
@@ -353,7 +469,8 @@ class DiscoveryOrchestrator
                 $scores,
             );
 
-            if ($intent === 'generate_leads' && ! $hasUserQuery && $scores['priority_score'] < $brief->minMatchScore) {
+            $minPriority = $this->effectiveMinMatchScore($brief);
+            if ($intent === 'generate_leads' && ! $hasUserQuery && $scores['priority_score'] < $minPriority) {
                 continue;
             }
 
@@ -697,21 +814,41 @@ class DiscoveryOrchestrator
         array $extracted,
         bool $fromListicle = false,
     ): array {
+        $contentPenalty = match ($this->qualityThreshold) {
+            self::QUALITY_VOLUME => 20,
+            self::QUALITY_BALANCED => 28,
+            default => 35,
+        };
+        $lowConfidencePenalty = match ($this->qualityThreshold) {
+            self::QUALITY_VOLUME => 8,
+            self::QUALITY_BALANCED => 12,
+            default => 15,
+        };
+
         if (mb_strtolower($displayName) === mb_strtolower($brief->name)) {
             $scores['priority_score'] = max(0, $scores['priority_score'] - 40);
             $scores['rationale'] .= ' Penalized: name matched ICP profile.';
         }
 
         if (! $fromListicle && ! $brief->isListiclePeopleQuery() && $this->queryIntent->looksLikeContentOrGenericPhrase($displayName)) {
-            $scores['priority_score'] = max(0, $scores['priority_score'] - 35);
+            $scores['priority_score'] = max(0, $scores['priority_score'] - $contentPenalty);
             $scores['rationale'] .= ' Penalized: looks like article content.';
         }
 
         if ((bool) ($extracted['low_confidence'] ?? false)) {
-            $scores['priority_score'] = max(0, $scores['priority_score'] - 15);
+            $scores['priority_score'] = max(0, $scores['priority_score'] - $lowConfidencePenalty);
             $scores['rationale'] .= ' Lower confidence extraction.';
         }
 
         return $scores;
+    }
+
+    private function effectiveMinMatchScore(IcpBrief $brief): int
+    {
+        return match ($this->qualityThreshold) {
+            self::QUALITY_VOLUME => min($brief->minMatchScore, 50),
+            self::QUALITY_BALANCED => min($brief->minMatchScore, 55),
+            default => $brief->minMatchScore,
+        };
     }
 }

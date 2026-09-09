@@ -24,15 +24,18 @@ readonly class IcpBrief
         public bool $autoSyncCrm,
         public string $query,
         public string $target = 'companies',
-        public int $requestedLimit = 8,
+        public int $requestedLimit = 20,
+        public ?string $searchQueryOverride = null,
     ) {}
 
     public static function fromIcpProfile(\App\Models\IcpProfile $profile, string $query = ''): self
     {
         $config = $profile->config ?? [];
         $queryIntent = app(QueryIntentService::class);
+        // Parse limit from the raw query first so "Find 50 leads" wrappers survive stripping.
+        $intent = $queryIntent->analyze($query, 'generate_leads');
         $cleanedQuery = $queryIntent->stripProspectCountInstruction($query);
-        $intent = $queryIntent->analyze($cleanedQuery, 'generate_leads');
+        $target = $queryIntent->analyze($cleanedQuery, 'generate_leads')['target'];
 
         return new self(
             name: $profile->name,
@@ -45,8 +48,30 @@ readonly class IcpBrief
             minMatchScore: (int) ($config['minMatchScore'] ?? 60),
             autoSyncCrm: (bool) ($config['autoSyncCrm'] ?? false),
             query: $cleanedQuery,
-            target: $intent['target'],
+            target: $target,
             requestedLimit: $intent['limit'],
+        );
+    }
+
+    /**
+     * Clone with a raw search-query override (used by multi-query fan-out).
+     */
+    public function withSearchQueryOverride(string $searchQuery): self
+    {
+        return new self(
+            name: $this->name,
+            description: $this->description,
+            industries: $this->industries,
+            territories: $this->territories,
+            companySizes: $this->companySizes,
+            decisionMakers: $this->decisionMakers,
+            customPrompt: $this->customPrompt,
+            minMatchScore: $this->minMatchScore,
+            autoSyncCrm: $this->autoSyncCrm,
+            query: $this->query,
+            target: $this->target,
+            requestedLimit: $this->requestedLimit,
+            searchQueryOverride: $searchQuery,
         );
     }
 
@@ -75,6 +100,10 @@ readonly class IcpBrief
 
     public function searchQuery(): string
     {
+        if (filled($this->searchQueryOverride)) {
+            return trim((string) $this->searchQueryOverride);
+        }
+
         $queryIntent = app(QueryIntentService::class);
         $cleaned = $queryIntent->stripProspectCountInstruction($this->query);
 
