@@ -29,7 +29,7 @@ class OutreachController extends Controller
             ->orderByDesc('id')
             ->limit(20)
             ->get()
-            ->map(fn (OutreachActivity $a) => [
+            ->map(fn(OutreachActivity $a) => [
                 'id' => $a->id,
                 'name' => $a->name,
                 'channel' => $a->channel,
@@ -75,7 +75,7 @@ class OutreachController extends Controller
 
         $prompt = $data['prompt'];
         if (($data['channel'] ?? null) === 'whatsapp' && ! str_contains(mb_strtolower($prompt), 'whatsapp')) {
-            $prompt = 'whatsapp: '.$prompt;
+            $prompt = 'whatsapp: ' . $prompt;
         }
 
         $draft = $this->outreach->draftFromPrompt($org, $icp, $prompt);
@@ -210,5 +210,22 @@ class OutreachController extends Controller
         }
 
         return response()->json(['data' => array_merge($result, ['activity_id' => $activity->id])]);
+    }
+
+    public function destroy(int $id): JsonResponse
+    {
+        $org = OrgContext::require();
+
+        $activity = OutreachActivity::query()
+            ->where('organization_id', $org->id)
+            ->find($id);
+
+        if (! $activity) {
+            return response()->json(['message' => 'Outreach activity not found.'], 404);
+        }
+
+        $activity->delete();
+
+        return response()->json(['data' => ['deleted' => true, 'id' => $id]]);
     }
 }

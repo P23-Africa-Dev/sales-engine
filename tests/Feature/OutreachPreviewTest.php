@@ -65,7 +65,7 @@ class OutreachPreviewTest extends TestCase
         $signal = SocialSignal::query()->create([
             'organization_id' => $org->id,
             'icp_profile_id' => $icp->id,
-            'content_hash' => 'hash-'.uniqid(),
+            'content_hash' => 'hash-' . uniqid(),
             'platform' => 'linkedin',
             'source_label' => 'LinkedIn Post',
             'post_text' => 'Looking for a logistics partner in Lagos',
@@ -201,5 +201,30 @@ class OutreachPreviewTest extends TestCase
                 'instructions' => 'Rewrite',
             ])
             ->assertStatus(422);
+    }
+
+    public function test_destroy_deletes_org_activity(): void
+    {
+        [, $org] = $this->actingAsOrgMember();
+
+        $activity = OutreachActivity::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'Prospect',
+            'channel' => 'email draft',
+            'preview' => 'Hello there',
+            'body' => 'Full body',
+            'subject' => 'Hi',
+            'to_email' => 'buyer@example.com',
+            'regeneration_count' => 0,
+            'occurred_at' => now(),
+        ]);
+
+        $this->withHeaders($this->orgHeaders($org))
+            ->deleteJson("/api/v1/outreach/activities/{$activity->id}")
+            ->assertOk()
+            ->assertJsonPath('data.deleted', true)
+            ->assertJsonPath('data.id', $activity->id);
+
+        $this->assertDatabaseMissing('outreach_activities', ['id' => $activity->id]);
     }
 }

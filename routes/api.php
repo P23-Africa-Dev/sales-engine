@@ -79,6 +79,7 @@ Route::middleware(['auth:sanctum', 'org.resolve'])->group(function () {
     Route::get('/outreach/activities/{id}', [OutreachController::class, 'show']);
     Route::post('/outreach/activities/{id}/regenerate', [OutreachController::class, 'regenerate']);
     Route::post('/outreach/activities/{id}/send', [OutreachController::class, 'sendActivity']);
+    Route::delete('/outreach/activities/{id}', [OutreachController::class, 'destroy']);
     Route::get('/outreach/sender-settings', [OutreachSenderController::class, 'show']);
     Route::put('/outreach/sender-settings', [OutreachSenderController::class, 'update']);
     Route::get('/outreach/domain', [OutreachDomainController::class, 'show']);
