@@ -98,4 +98,33 @@ class CrmSyncPayloadTest extends TestCase
                 && ($body['next_action'] ?? null) === 'Review and qualify this lead';
         });
     }
+
+    public function test_build_lead_payload_truncates_long_position_for_crm(): void
+    {
+        [, $org] = $this->actingAsOrgMember();
+        $org->update(['f23_company_id' => 42]);
+
+        $longTitle = 'CEO/MD MTN Nigeria and Vice President, Francophone Africa at MTN Nigeria with additional regional expansion responsibilities across West and Central Africa';
+        $this->assertGreaterThan(120, mb_strlen($longTitle));
+        $lead = Lead::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'Dr. Karl Olutokun',
+            'stage' => 'new',
+            'score' => 88,
+            'meta' => [
+                'title' => $longTitle,
+                'company' => 'MTN Nigeria',
+            ],
+        ]);
+
+        $service = app(CrmSyncService::class);
+        $method = new ReflectionMethod(CrmSyncService::class, 'buildLeadPayload');
+        $method->setAccessible(true);
+        /** @var array<string, mixed> $payload */
+        $payload = $method->invoke($service, $org, $lead);
+
+        $this->assertArrayHasKey('position', $payload);
+        $this->assertLessThanOrEqual(120, mb_strlen((string) $payload['position']));
+        $this->assertNotSame($longTitle, $payload['position']);
+    }
 }

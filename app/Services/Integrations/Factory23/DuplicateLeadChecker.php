@@ -34,7 +34,7 @@ class DuplicateLeadChecker
         try {
             $response = Http::timeout(15)
                 ->withToken($token)
-                ->get($base.'/api/v1/crm/leads/check-duplicate', array_filter([
+                ->get($base . '/api/v1/crm/leads/check-duplicate', array_filter([
                     'company_id' => $organization->f23_company_id,
                     'email' => $email,
                     'name' => $name !== '' ? $name : null,
@@ -86,7 +86,9 @@ class DuplicateLeadChecker
             'location' => trim((string) ($meta['location'] ?? '')) ?: null,
             'company_name' => trim((string) ($meta['company'] ?? '')) ?: null,
             'website' => $this->fieldValidator->validateUrl(isset($meta['website']) ? (string) $meta['website'] : null),
-            'position' => trim((string) ($meta['title'] ?? '')) ?: null,
+            'position' => ($title = trim((string) ($meta['title'] ?? ''))) !== ''
+                ? (mb_strlen($title) > 120 ? rtrim(mb_substr($title, 0, 117)) . '…' : $title)
+                : null,
             'profile_urls' => $this->normalizeUrls($meta['profile_urls'] ?? null, $meta['linkedin_url'] ?? null),
             'next_action' => trim((string) ($meta['next_action'] ?? '')) ?: null,
         ];

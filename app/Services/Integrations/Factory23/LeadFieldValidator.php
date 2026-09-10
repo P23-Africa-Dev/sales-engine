@@ -57,6 +57,17 @@ class LeadFieldValidator
             $payload['profile_urls'] = $valid !== [] ? array_values(array_unique($valid)) : null;
         }
 
+        // Factory23 CRM enforces max 120 chars on position (job title).
+        if (array_key_exists('position', $payload) && is_string($payload['position'])) {
+            $position = trim($payload['position']);
+            if (mb_strlen($position) > 120) {
+                $payload['position'] = rtrim(mb_substr($position, 0, 117)).'…';
+                $dropped[] = 'position_truncated';
+            } else {
+                $payload['position'] = $position !== '' ? $position : null;
+            }
+        }
+
         $payload = array_filter($payload, fn ($value) => $value !== null && $value !== '');
 
         if ($dropped !== []) {

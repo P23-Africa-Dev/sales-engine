@@ -51,4 +51,21 @@ class LeadFieldValidatorTest extends TestCase
         $this->assertSame(['https://linkedin.com/in/jane'], $result['payload']['profile_urls']);
         $this->assertContains('website', $result['dropped']);
     }
+
+    public function test_sanitize_payload_truncates_position_to_120_chars(): void
+    {
+        $v = new LeadFieldValidator;
+        $long = 'CEO/MD MTN Nigeria and Vice President, Francophone Africa at MTN Nigeria and also Regional Lead for West Africa Expansion';
+        $this->assertGreaterThan(120, mb_strlen($long));
+
+        $result = $v->sanitizePayload([
+            'name' => 'Dr. Karl Olutokun',
+            'position' => $long,
+            'company_name' => 'MTN Nigeria',
+        ]);
+
+        $this->assertLessThanOrEqual(120, mb_strlen((string) $result['payload']['position']));
+        $this->assertStringStartsWith('CEO/MD MTN Nigeria', (string) $result['payload']['position']);
+        $this->assertContains('position_truncated', $result['dropped']);
+    }
 }
