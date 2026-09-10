@@ -23,7 +23,7 @@ class IcpBriefSearchQueryTest extends TestCase
         $this->assertStringNotContainsString('linkedin.com', $query);
     }
 
-    public function test_standard_people_query_keeps_linkedin_bias(): void
+    public function test_standard_people_query_uses_open_web_roles_not_linkedin_only(): void
     {
         $profile = new IcpProfile([
             'name' => 'Test ICP',
@@ -33,7 +33,17 @@ class IcpBriefSearchQueryTest extends TestCase
         $brief = IcpBrief::fromIcpProfile($profile, 'partnership contacts at fintech startups in Lagos');
         $query = $brief->searchQuery();
 
-        $this->assertStringContainsString('linkedin.com', $query);
+        // Primary query stays open-web friendly; LinkedIn site: bias is applied in fan-out variants.
+        $this->assertStringContainsString('CEO', $query);
+        $this->assertStringContainsString('founder', $query);
+        $this->assertStringNotContainsString('linkedin.com', $query);
+
+        $variations = app(\App\Services\Discovery\QueryVariationGenerator::class)->generate($brief, 20);
+        $linkedinVariants = array_filter(
+            $variations,
+            fn(string $q) => str_contains(mb_strtolower($q), 'linkedin.com')
+        );
+        $this->assertNotEmpty($linkedinVariants, 'Fan-out should still include LinkedIn profile variants');
     }
 
     public function test_generic_icp_request_falls_back_to_icp_industries_and_territories(): void
