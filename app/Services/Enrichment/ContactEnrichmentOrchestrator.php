@@ -75,6 +75,11 @@ class ContactEnrichmentOrchestrator
             }
         }
 
+        // Profile URL is enough for discovery cards — skip slow paid providers.
+        if ($this->hasUsableProfile($contacts)) {
+            return $contacts;
+        }
+
         $context = array_filter([
             'company' => $company,
             'website' => isset($seed['website']) ? (string) $seed['website'] : null,
@@ -96,7 +101,7 @@ class ContactEnrichmentOrchestrator
                 $personName,
                 $leadId,
             );
-            if ($this->hasCompleteContacts($contacts)) {
+            if ($this->hasCompleteContacts($contacts) || $this->hasUsableProfile($contacts)) {
                 return $contacts;
             }
             if (($result['linkedin_url'] ?? '') !== '') {
@@ -124,13 +129,13 @@ class ContactEnrichmentOrchestrator
                 $personName,
                 $leadId,
             );
-            if ($this->hasCompleteContacts($contacts)) {
+            if ($this->hasCompleteContacts($contacts) || $this->hasUsableProfile($contacts)) {
                 return $contacts;
             }
         }
 
-        // Tier 3a — Apollo (paid)
-        if (! $this->hasCompleteContacts($contacts) && $this->apollo->isEnabled()) {
+        // Tier 3a — Apollo (paid) — only when still missing email/phone and no profile URL.
+        if (! $this->hasCompleteContacts($contacts) && ! $this->hasUsableProfile($contacts) && $this->apollo->isEnabled()) {
             $result = $this->apollo->enrich($organization, $personName, $company);
             $contacts = $this->mergeContacts($contacts, $result, 'tier3', 'apollo');
             $this->usageTracker->logEnrichment(
@@ -156,7 +161,7 @@ class ContactEnrichmentOrchestrator
         }
 
         // Tier 3b — Hunter email finder (paid)
-        if ($contacts['email'] === '' && $this->hunter->isEnabled() && $domain !== null) {
+        if ($contacts['email'] === '' && ! $this->hasUsableProfile($contacts) && $this->hunter->isEnabled() && $domain !== null) {
             $found = $this->hunter->findEmail($personName, $domain);
             if ($found !== null) {
                 $contacts = $this->mergeContacts($contacts, ['email' => $found], 'tier3', 'hunter');
@@ -194,6 +199,21 @@ class ContactEnrichmentOrchestrator
     {
         return trim((string) ($contacts['email'] ?? '')) !== ''
             && trim((string) ($contacts['phone'] ?? '')) !== '';
+    }
+
+    /**
+     * Discovery UX can ship with a profile link; do not burn minutes on Apollo/Hunter.
+     *
+     * @param  array{email?: string, phone?: string, linkedin_url?: string}  $contacts
+     */
+    public function hasUsableProfile(array $contacts): bool
+    {
+        if (trim((string) ($contacts['linkedin_url'] ?? '')) !== '') {
+            return true;
+        }
+
+        return trim((string) ($contacts['email'] ?? '')) !== ''
+            || trim((string) ($contacts['phone'] ?? '')) !== '';
     }
 
     /**

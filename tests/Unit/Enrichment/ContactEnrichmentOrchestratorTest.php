@@ -128,4 +128,33 @@ class ContactEnrichmentOrchestratorTest extends TestCase
         $this->assertSame('tier3', $result['tier']);
         $this->assertSame('apollo', $result['provider']);
     }
+
+    public function test_skips_paid_providers_when_linkedin_profile_already_present(): void
+    {
+        config([
+            'services.bytemine.api_key' => 'byte-key',
+            'services.bytemine.base_url' => 'https://bytemine.example.com/v1',
+            'services.cleanlist.api_key' => 'clean-key',
+            'services.cleanlist.base_url' => 'https://cleanlist.example.com/v1',
+            'services.apollo.api_key' => 'apollo-key',
+            'services.hunter.api_key' => 'hunter-key',
+        ]);
+
+        [, $org] = $this->actingAsOrgMember();
+
+        Http::fake();
+
+        $result = app(ContactEnrichmentOrchestrator::class)->enrichContacts(
+            $org,
+            'Jane Doe',
+            [
+                'company' => 'Acme',
+                'linkedin_url' => 'https://www.linkedin.com/in/janedoe',
+            ],
+            [],
+        );
+
+        $this->assertSame('https://www.linkedin.com/in/janedoe', $result['linkedin_url']);
+        Http::assertNothingSent();
+    }
 }
