@@ -819,17 +819,24 @@ class DiscoveryOrchestrator
             'priority_score' => $scores['priority_score'],
         ]);
 
-        LeadSignal::query()->create([
-            'organization_id' => $organization->id,
-            'company_id' => $company->id,
-            'signal_type' => 'discovery',
-            'confidence' => $scores['icp_fit_score'] / 100,
-            'score' => $scores['priority_score'],
-            'source' => $hit->provider,
-            'url' => $hit->url,
-            'snippet' => $hit->snippet,
-            'detected_at' => now(),
-        ]);
+        $signalUrl = is_string($hit->url) ? mb_substr($hit->url, 0, 2048) : null;
+        $signalSnippet = is_string($hit->snippet) ? mb_substr($hit->snippet, 0, 5000) : null;
+
+        try {
+            LeadSignal::query()->create([
+                'organization_id' => $organization->id,
+                'company_id' => $company->id,
+                'signal_type' => 'discovery',
+                'confidence' => $scores['icp_fit_score'] / 100,
+                'score' => $scores['priority_score'],
+                'source' => $hit->provider,
+                'url' => $signalUrl,
+                'snippet' => $signalSnippet,
+                'detected_at' => now(),
+            ]);
+        } catch (\Throwable) {
+            // Signal persistence must never abort lead creation.
+        }
 
         $profileUrls = is_array($extracted['profile_urls'] ?? null)
             ? array_values(array_filter($extracted['profile_urls'], fn($u) => is_string($u) && trim($u) !== ''))

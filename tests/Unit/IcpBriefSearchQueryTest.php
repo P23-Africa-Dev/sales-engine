@@ -33,10 +33,11 @@ class IcpBriefSearchQueryTest extends TestCase
         $brief = IcpBrief::fromIcpProfile($profile, 'partnership contacts at fintech startups in Lagos');
         $query = $brief->searchQuery();
 
-        // Primary query stays open-web friendly; LinkedIn site: bias is applied in fan-out variants.
+        // Primary query stays open-web / free-tier friendly; LinkedIn site: bias is applied in fan-out variants.
         $this->assertStringContainsString('CEO', $query);
         $this->assertStringContainsString('founder', $query);
         $this->assertStringNotContainsString('linkedin.com', $query);
+        $this->assertStringNotContainsString('("CEO"', $query);
 
         $variations = app(\App\Services\Discovery\QueryVariationGenerator::class)->generate($brief, 20);
         $linkedinVariants = array_filter(

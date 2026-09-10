@@ -135,8 +135,8 @@ readonly class IcpBrief
             }
 
             if ($this->isPeopleSearch()) {
-                // Keep the primary query open-web friendly; fan-out adds LinkedIn site: variants.
-                return trim($cleaned).' ("CEO" OR founder OR "managing director" OR "head of")';
+                // Keep primary query free-tier friendly (no nested OR / heavy quotes).
+                return trim($cleaned).' CEO founder managing director';
             }
 
             return $cleaned;

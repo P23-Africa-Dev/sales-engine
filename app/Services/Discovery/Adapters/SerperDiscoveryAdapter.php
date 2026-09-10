@@ -7,7 +7,9 @@ use App\Services\Discovery\Contracts\DiscoverySourceInterface;
 use App\Services\Discovery\DTO\IcpBrief;
 use App\Services\Discovery\DTO\RawDiscoveryHit;
 use App\Services\Discovery\DTO\SearchContext;
+use App\Services\Discovery\PersonNameValidator;
 use App\Services\Discovery\QueryIntentService;
+use Illuminate\Http\Client\Response;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -16,7 +18,7 @@ class SerperDiscoveryAdapter implements DiscoverySourceInterface
 {
     public function __construct(
         private readonly QueryIntentService $queryIntent,
-        private readonly \App\Services\Discovery\PersonNameValidator $personNameValidator,
+        private readonly PersonNameValidator $personNameValidator,
     ) {}
 
     public function key(): string
@@ -35,33 +37,45 @@ class SerperDiscoveryAdapter implements DiscoverySourceInterface
             return collect();
         }
 
-        $query = $brief->searchQuery();
+        $query = $this->sanitizeQuery($brief->searchQuery());
         $baseUrl = rtrim((string) config('services.serper.base_url'), '/');
-        $resultLimit = match (true) {
-            $brief->isAuthoritativePeopleQuery() => min(20, max($ctx->limit, 10)),
-            $ctx->limit >= 20 => 20,
-            default => min(10, max(5, $ctx->limit)),
-        };
+        $resultLimit = $this->resolveResultLimit($brief, $ctx);
 
         try {
-            $response = Http::timeout(30)
-                ->withHeaders([
-                    'X-API-KEY' => (string) config('services.serper.api_key'),
-                    'Content-Type' => 'application/json',
-                ])
-                ->post($baseUrl.'/search', [
-                    'q' => $query,
-                    'num' => $resultLimit,
-                ]);
+            $response = $this->postSearch($baseUrl, $query, $resultLimit);
 
-            ApiUsage::query()->create([
-                'organization_id' => $ctx->organizationId,
-                'provider' => 'serper',
-                'endpoint' => 'search',
-                'units' => 1,
-                'estimated_cost' => 0.005,
-                'meta' => ['status' => $response->status(), 'query' => $query],
-            ]);
+            // Free Serper plans reject complex patterns when num is high — retry once with safer settings.
+            if ($this->isFreeTierPatternBlock($response) && ($resultLimit > 10 || $this->looksComplex($query))) {
+                $safeQuery = $this->simplifyQuery($query);
+                $safeLimit = min(10, $resultLimit);
+                Log::info('Serper free-tier pattern block; retrying with safer query/num', [
+                    'original_query' => $query,
+                    'safe_query' => $safeQuery,
+                    'original_num' => $resultLimit,
+                    'safe_num' => $safeLimit,
+                ]);
+                $response = $this->postSearch($baseUrl, $safeQuery, $safeLimit);
+                $query = $safeQuery;
+                $resultLimit = $safeLimit;
+            }
+
+            try {
+                ApiUsage::query()->create([
+                    'organization_id' => $ctx->organizationId,
+                    'provider' => 'serper',
+                    'endpoint' => 'search',
+                    'units' => 1,
+                    'estimated_cost' => 0.005,
+                    'meta' => [
+                        'status' => $response->status(),
+                        'query' => $query,
+                        'num' => $resultLimit,
+                        'error' => $response->successful() ? null : mb_substr($response->body(), 0, 240),
+                    ],
+                ]);
+            } catch (\Throwable $e) {
+                Log::debug('Serper ApiUsage write skipped', ['error' => $e->getMessage()]);
+            }
 
             if (! $response->successful()) {
                 Log::warning('Serper search failed', ['status' => $response->status(), 'body' => $response->body()]);
@@ -117,6 +131,78 @@ class SerperDiscoveryAdapter implements DiscoverySourceInterface
 
             return collect();
         }
+    }
+
+    private function resolveResultLimit(IcpBrief $brief, SearchContext $ctx): int
+    {
+        $configuredMax = max(5, min(100, (int) config('services.serper.max_results', 10)));
+
+        $desired = match (true) {
+            $brief->isAuthoritativePeopleQuery() => max(10, min(20, $ctx->limit)),
+            $ctx->limit >= 20 => 20,
+            default => min(10, max(5, $ctx->limit)),
+        };
+
+        return min($configuredMax, $desired);
+    }
+
+    private function postSearch(string $baseUrl, string $query, int $num): Response
+    {
+        return Http::timeout(30)
+            ->withHeaders([
+                'X-API-KEY' => (string) config('services.serper.api_key'),
+                'Content-Type' => 'application/json',
+            ])
+            ->post($baseUrl.'/search', [
+                'q' => $query,
+                'num' => $num,
+            ]);
+    }
+
+    private function isFreeTierPatternBlock(Response $response): bool
+    {
+        if ($response->status() !== 400) {
+            return false;
+        }
+
+        $message = mb_strtolower((string) ($response->json('message') ?? $response->body()));
+
+        return str_contains($message, 'query pattern not allowed')
+            || str_contains($message, 'free accounts');
+    }
+
+    private function looksComplex(string $query): bool
+    {
+        return str_contains($query, '"')
+            || str_contains($query, '(')
+            || str_contains(mb_strtolower($query), ' site:')
+            || str_contains($query, ' OR ');
+    }
+
+    /**
+     * Soften queries that Serper free accounts reject when paired with higher num.
+     */
+    private function sanitizeQuery(string $query): string
+    {
+        $query = trim($query);
+        // Decision-maker titles like "Managing Director / CEO" → Managing Director CEO
+        $query = preg_replace('/\s*\/\s*/u', ' ', $query) ?? $query;
+        $query = preg_replace('/\s+/u', ' ', $query) ?? $query;
+
+        return trim($query);
+    }
+
+    private function simplifyQuery(string $query): string
+    {
+        $q = $this->sanitizeQuery($query);
+        // Drop site: operators and quoted phrases / OR groups that free accounts reject at higher num.
+        $q = preg_replace('/\bsite:[^\s]+/iu', ' ', $q) ?? $q;
+        $q = str_replace(['(', ')'], ' ', $q);
+        $q = preg_replace('/"/u', ' ', $q) ?? $q;
+        $q = preg_replace('/\bOR\b/u', ' ', $q) ?? $q;
+        $q = preg_replace('/\s+/u', ' ', $q) ?? $q;
+
+        return trim($q);
     }
 
     private function resolveHitName(string $title, ?string $url, IcpBrief $brief): string

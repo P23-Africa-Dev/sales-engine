@@ -254,9 +254,16 @@ class QueryVariationGenerator
         ?string $territory,
         bool $preferLinkedIn = true,
     ): string {
+        $safeTitle = null;
+        if ($title !== null && $title !== '') {
+            // Serper free accounts reject complex quoted titles (esp. with "/") when num is high.
+            $safeTitle = trim(preg_replace('/\s*\/\s*/u', ' ', $title) ?? $title);
+            $safeTitle = trim(preg_replace('/\s+/u', ' ', $safeTitle) ?? $safeTitle);
+        }
+
         $parts = array_filter([
             trim($seed),
-            $title !== null && $title !== '' ? '"'.$title.'"' : null,
+            $safeTitle !== null && $safeTitle !== '' ? $safeTitle : null,
             $territory !== null && $territory !== '' ? $territory : null,
         ]);
 
