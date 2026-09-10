@@ -41,8 +41,11 @@ class OutreachDraftService
 
         $leads = $this->resolveLeads($organization, $icp, $chatSessionId);
 
-        $body = $this->compose($organization, $icp, $prompt, $channel, $leads->all(), $clientTimezone, $historySlice);
-        $subject = $channel === 'email' ? 'Introduction — ' . $icp->name : null;
+        $composed = $this->compose($organization, $icp, $prompt, $channel, $leads->all(), $clientTimezone, $historySlice);
+        $fallbackSubject = $channel === 'email' ? 'Introduction — ' . $icp->name : null;
+        $normalized = $this->normalizeEmailParts($channel, $composed, $fallbackSubject);
+        $body = $normalized['body'];
+        $subject = $normalized['subject'];
         $alignmentNote = $this->buildIcpAlignmentNote($icp, $leads->all());
         $targetLeadIds = $leads->pluck('id')->map(fn($id) => (int) $id)->all();
 
@@ -115,8 +118,10 @@ class OutreachDraftService
     ): array {
         $prompt = "Respond to this social post with a compliant email outreach draft.\n\nPost: {$signal->post_text}\nPersona: {$signal->persona}\nProblem: {$signal->problem}";
 
-        $body = $signal->suggested_message ?: $this->compose($organization, $icp, $prompt, 'email', [], $clientTimezone);
-        $subject = 'Following up on your post';
+        $composed = $signal->suggested_message ?: $this->compose($organization, $icp, $prompt, 'email', [], $clientTimezone);
+        $normalized = $this->normalizeEmailParts('email', $composed, 'Following up on your post');
+        $body = $normalized['body'];
+        $subject = $normalized['subject'];
         $toEmail = $this->resolveSignalEmail($signal);
 
         $activity = OutreachActivity::query()->create([
@@ -193,7 +198,7 @@ class OutreachDraftService
             }
         }
 
-        $body = $this->compose(
+        $composed = $this->compose(
             $organization,
             $icp,
             $prompt,
@@ -204,9 +209,12 @@ class OutreachDraftService
             $instructions,
         );
 
-        $subject = $channel === 'email'
+        $fallbackSubject = $channel === 'email'
             ? ($activity->social_signal_id ? 'Following up on your post' : 'Introduction — ' . $icp->name)
             : null;
+        $normalized = $this->normalizeEmailParts($channel, $composed, $fallbackSubject);
+        $body = $normalized['body'];
+        $subject = $normalized['subject'];
 
         $activity->update([
             'channel' => $channel . ' draft',
@@ -235,10 +243,28 @@ class OutreachDraftService
         $channel = str_contains(mb_strtolower((string) $activity->channel), 'whatsapp') ? 'whatsapp' : 'email';
         $sent = filled($activity->sent_at) || (($meta['sent'] ?? false) === true);
 
+        $rawBody = (string) ($activity->body ?? $activity->preview ?? '');
+        $normalized = $this->normalizeEmailParts($channel, $rawBody, $activity->subject);
+        $subject = $normalized['subject'];
+        $body = $normalized['body'];
+
+        // Heal legacy drafts that still embed "Subject:" inside the message body.
+        if (
+            $channel === 'email'
+            && preg_match('/^\s*subject\s*:/i', $rawBody) === 1
+            && ($body !== $rawBody || (string) $subject !== (string) $activity->subject)
+        ) {
+            $activity->forceFill([
+                'subject' => $subject,
+                'body' => $body,
+                'preview' => mb_substr($body, 0, 160),
+            ])->save();
+        }
+
         $payload = [
             'channel' => $channel,
-            'subject' => $activity->subject,
-            'body' => (string) ($activity->body ?? $activity->preview ?? ''),
+            'subject' => $subject,
+            'body' => $body,
             'to_email' => $activity->to_email,
             'sent' => $sent,
             'activity_id' => $activity->id,
@@ -415,7 +441,7 @@ class OutreachDraftService
         }
 
         try {
-            $system = "Draft a concise {$channel} outreach message for the user's specific request. Do not claim the message was sent. Professional tone for African B2B. " . TimeGreeting::promptContext($clientTimezone) . ' Use the active ICP industries, territories, and decision makers to tailor the angle. Reference the provided lead context when relevant. When prior chat turns are provided, keep continuity with that conversation. Output ONLY the sendable message body — no ICP analysis preamble.';
+            $system = "Draft a concise {$channel} outreach message for the user's specific request. Do not claim the message was sent. Professional tone for African B2B. " . TimeGreeting::promptContext($clientTimezone) . ' Use the active ICP industries, territories, and decision makers to tailor the angle. Reference the provided lead context when relevant. When prior chat turns are provided, keep continuity with that conversation. Output ONLY the sendable message body — no subject line, no "Subject:" header, no To/From headers, and no ICP analysis preamble.';
 
             if (filled($extraInstructions)) {
                 $system .= ' Additional guidance from the user: ' . trim($extraInstructions);
@@ -495,5 +521,53 @@ class OutreachDraftService
         }
 
         return $intro . ' ' . implode(' ', array_slice($reasons, 0, 3));
+    }
+
+    /**
+     * Ensure email subject lives in the subject field and message body stays body-only.
+     * Peels a leading "Subject: …" line when the model embeds it in the body.
+     *
+     * @return array{subject: ?string, body: string}
+     */
+    private function normalizeEmailParts(string $channel, string $body, ?string $fallbackSubject): array
+    {
+        $peeled = $this->peelSubjectFromBody($body);
+        $cleanBody = $peeled['body'];
+
+        if ($channel !== 'email') {
+            return [
+                'subject' => null,
+                'body' => $cleanBody,
+            ];
+        }
+
+        $subject = $peeled['subject'];
+        if ($subject === null || $subject === '') {
+            $subject = filled($fallbackSubject) ? trim((string) $fallbackSubject) : null;
+        }
+
+        return [
+            'subject' => $subject !== '' ? $subject : null,
+            'body' => $cleanBody,
+        ];
+    }
+
+    /**
+     * @return array{subject: ?string, body: string}
+     */
+    private function peelSubjectFromBody(string $body): array
+    {
+        $trimmed = trim($body);
+        if (preg_match('/^\s*subject\s*:\s*(.+?)\s*(?:\r?\n)+([\s\S]*)$/i', $trimmed, $matches) === 1) {
+            return [
+                'subject' => trim((string) $matches[1]),
+                'body' => trim((string) $matches[2]),
+            ];
+        }
+
+        return [
+            'subject' => null,
+            'body' => $trimmed,
+        ];
     }
 }

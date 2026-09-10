@@ -227,4 +227,33 @@ class OutreachPreviewTest extends TestCase
 
         $this->assertDatabaseMissing('outreach_activities', ['id' => $activity->id]);
     }
+
+    public function test_show_peels_subject_embedded_in_body(): void
+    {
+        [, $org] = $this->actingAsOrgMember();
+
+        $activity = OutreachActivity::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'NYSE Equities',
+            'channel' => 'email draft',
+            'preview' => 'Subject: Exploring Strategic Collaboration',
+            'to_email' => 'buyer@example.com',
+            'subject' => null,
+            'body' => "Subject: Exploring Strategic Collaboration Opportunities in Fintech\n\nGood evening,\n\nI hope this message finds you well.",
+            'regeneration_count' => 0,
+            'occurred_at' => now(),
+            'meta' => ['sent' => false],
+        ]);
+
+        $this->withHeaders($this->orgHeaders($org))
+            ->getJson("/api/v1/outreach/activities/{$activity->id}")
+            ->assertOk()
+            ->assertJsonPath('data.subject', 'Exploring Strategic Collaboration Opportunities in Fintech')
+            ->assertJsonPath('data.body', "Good evening,\n\nI hope this message finds you well.");
+
+        $activity->refresh();
+        $this->assertSame('Exploring Strategic Collaboration Opportunities in Fintech', $activity->subject);
+        $this->assertSame("Good evening,\n\nI hope this message finds you well.", $activity->body);
+        $this->assertStringStartsNotWith('Subject:', (string) $activity->preview);
+    }
 }
