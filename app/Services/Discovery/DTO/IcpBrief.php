@@ -54,6 +54,28 @@ readonly class IcpBrief
     }
 
     /**
+     * Clone with a different discovery target (people ↔ companies rescue pass).
+     */
+    public function withTarget(string $target): self
+    {
+        return new self(
+            name: $this->name,
+            description: $this->description,
+            industries: $this->industries,
+            territories: $this->territories,
+            companySizes: $this->companySizes,
+            decisionMakers: $this->decisionMakers,
+            customPrompt: $this->customPrompt,
+            minMatchScore: $this->minMatchScore,
+            autoSyncCrm: $this->autoSyncCrm,
+            query: $this->query,
+            target: $target,
+            requestedLimit: $this->requestedLimit,
+            searchQueryOverride: $this->searchQueryOverride,
+        );
+    }
+
+    /**
      * Clone with a raw search-query override (used by multi-query fan-out).
      */
     public function withSearchQueryOverride(string $searchQuery): self
@@ -113,7 +135,8 @@ readonly class IcpBrief
             }
 
             if ($this->isPeopleSearch()) {
-                return trim($cleaned) . ' site:linkedin.com/in OR "CEO" OR "founder" OR "partnership"';
+                // Keep the primary query open-web friendly; fan-out adds LinkedIn site: variants.
+                return trim($cleaned).' ("CEO" OR founder OR "managing director" OR "head of")';
             }
 
             return $cleaned;

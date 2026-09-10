@@ -220,6 +220,61 @@ class DiscoveryOrchestrator
                 }
             }
 
+            // People searches that still yield nothing → company rescue pass (accounts still usable).
+            if ($leadsPayload === [] && $brief->isPeopleSearch() && $intent === 'generate_leads') {
+                $this->appendStage($run, 'company_rescue_pass');
+                $this->qualityThreshold = self::QUALITY_VOLUME;
+                $companyBrief = $brief->withTarget(QueryIntentService::TARGET_COMPANIES);
+                $rescueQueries = $this->queryVariationGenerator->generateBackfill(
+                    $companyBrief,
+                    $effectiveLimit,
+                    $allQueriesExecuted,
+                );
+                if ($rescueQueries === []) {
+                    $rescueQueries = $this->queryVariationGenerator->generate($companyBrief, $effectiveLimit);
+                }
+
+                if ($rescueQueries !== []) {
+                    [$hits, $sourcesChecked, $fanOutMeta] = $this->collectHits(
+                        $companyBrief,
+                        $ctx,
+                        $effectiveLimit,
+                        $rescueQueries,
+                    );
+                    $allQueriesExecuted = array_values(array_unique(array_merge(
+                        $allQueriesExecuted,
+                        $fanOutMeta['queries_executed'] ?? [],
+                    )));
+                    foreach ($fanOutMeta['sources_hit_count'] ?? [] as $key => $count) {
+                        $allSourcesHitCount[$key] = ($allSourcesHitCount[$key] ?? 0) + (int) $count;
+                    }
+                    $fanOutUsed = true;
+
+                    [$passLeads, $passCompanies, $passFound] = $this->processStandardQuery(
+                        $organization,
+                        $icp,
+                        $companyBrief,
+                        $hits,
+                        $intent,
+                        $hasUserQuery,
+                        $effectiveLimit,
+                        $sourcesChecked,
+                        $run,
+                        $seenLeadNames,
+                    );
+
+                    foreach ($passLeads as $lead) {
+                        $nameKey = mb_strtolower(trim((string) ($lead['name'] ?? '')));
+                        if ($nameKey !== '') {
+                            $seenLeadNames[$nameKey] = true;
+                        }
+                        $leadsPayload[] = $lead;
+                    }
+                    $companies = $companies->merge($passCompanies);
+                    $candidatesFound += $passFound;
+                }
+            }
+
             $leadsPayload = array_slice($this->sortLeadsPayload($leadsPayload), 0, $effectiveLimit);
 
             $this->appendStage($run, 'compiling_results');
@@ -530,6 +585,13 @@ class DiscoveryOrchestrator
             $hit = $candidate['hit'];
             $extracted = $candidate['extracted'];
             $displayName = trim((string) ($extracted['person_name'] ?? $extracted['name'] ?? $hit->name));
+            if ($brief->isPeopleSearch() || filled($extracted['person_name'] ?? null)) {
+                $normalized = $this->personNameValidator->normalizePersonName($displayName);
+                if ($normalized !== '') {
+                    $displayName = $normalized;
+                    $extracted['person_name'] = $normalized;
+                }
+            }
             $fromListicle = (bool) ($extracted['from_listicle'] ?? false);
 
             $scores = $this->scoring->score(array_merge($extracted, [

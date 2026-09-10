@@ -14,7 +14,10 @@ use Illuminate\Support\Facades\Log;
 
 class SerperDiscoveryAdapter implements DiscoverySourceInterface
 {
-    public function __construct(private readonly QueryIntentService $queryIntent) {}
+    public function __construct(
+        private readonly QueryIntentService $queryIntent,
+        private readonly \App\Services\Discovery\PersonNameValidator $personNameValidator,
+    ) {}
 
     public function key(): string
     {
@@ -122,14 +125,22 @@ class SerperDiscoveryAdapter implements DiscoverySourceInterface
             $path = parse_url($url, PHP_URL_PATH) ?? '';
             if (preg_match('#/in/([^/?]+)#', $path, $matches)) {
                 $slug = str_replace(['-', '_'], ' ', $matches[1]);
+                $fromSlug = $this->personNameValidator->normalizePersonName(ucwords($slug));
 
-                return ucwords($slug);
+                return $fromSlug !== '' ? $fromSlug : ucwords($slug);
             }
         }
 
         $name = preg_replace('/\s*[|\-–].*$/u', '', $title) ?: $title;
+        $trimmed = trim((string) $name);
 
-        return trim((string) $name);
+        if ($brief->isPeopleSearch()) {
+            $normalized = $this->personNameValidator->normalizePersonName($trimmed);
+
+            return $normalized !== '' ? $normalized : $trimmed;
+        }
+
+        return $trimmed;
     }
 
     /**

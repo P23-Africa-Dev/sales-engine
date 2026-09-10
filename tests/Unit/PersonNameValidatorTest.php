@@ -43,6 +43,14 @@ class PersonNameValidatorTest extends TestCase
         ]));
     }
 
+    public function test_accepts_linkedin_slug_names_with_title_tokens_stripped(): void
+    {
+        $this->assertTrue($this->validator->isValidPersonName('Jane Doe Ceo Fintech Africa'));
+        $this->assertSame('Jane Doe Fintech', $this->validator->normalizePersonName('Jane Doe Ceo Fintech Africa'));
+        $this->assertTrue($this->validator->isValidPersonName('Chidera Okolie Cto Lagos'));
+        $this->assertSame('Chidera Okolie Lagos', $this->validator->normalizePersonName('Chidera Okolie Cto Lagos'));
+    }
+
     public function test_rejects_screenshot_non_person_headlines(): void
     {
         $this->assertFalse($this->validator->isValidPersonName('Scaling CEO Peer Groups with Targeted Outreach'));

@@ -36,6 +36,7 @@ class ChatService
         private readonly FreeformOpportunityRetriever $opportunityRetriever,
         private readonly ChatListNumbering $listNumbering,
         private readonly ConversationMemoryService $memory,
+        private readonly \App\Services\Discovery\LeadQueryNormalizer $leadQueryNormalizer,
     ) {}
 
     public function createSession(Organization $organization, User $user, ?string $title = null, ?int $icpProfileId = null): ChatSession
@@ -124,10 +125,25 @@ class ChatService
             throw new InvalidArgumentException('An active ICP profile is required for this intent.');
         }
 
+        $queryNormalized = false;
+        $originalQuery = $effectiveBody;
+        if ($intent === 'generate_leads' && $icp) {
+            $normalized = $this->leadQueryNormalizer->normalize($effectiveBody, $icp);
+            if (trim($normalized) !== '' && trim($normalized) !== trim($effectiveBody)) {
+                $originalQuery = $effectiveBody;
+                $effectiveBody = $normalized;
+                $queryNormalized = true;
+            }
+        }
+
         $userMeta = ['intent' => $intent];
-        if (trim($effectiveBody) !== trim($body)) {
+        if (trim($effectiveBody) !== trim($body) || $queryNormalized) {
             $userMeta['effective_query'] = $effectiveBody;
             $userMeta['used_context'] = true;
+        }
+        if ($queryNormalized) {
+            $userMeta['original_query'] = $originalQuery;
+            $userMeta['query_normalized'] = true;
         }
 
         $userMessage = ChatMessage::query()->create([
@@ -367,6 +383,18 @@ class ChatService
                 $meta['research'] = $result['research'];
                 $assistantBody = $result['narrative'];
             } elseif ($intent === 'generate_leads') {
+                $normalized = $this->leadQueryNormalizer->normalize($effectiveBody, $icp);
+                if (trim($normalized) !== '' && trim($normalized) !== trim($effectiveBody)) {
+                    $meta['original_query'] = $effectiveBody;
+                    $meta['query_normalized'] = true;
+                    $effectiveBody = $normalized;
+                    $run->update(['query' => $effectiveBody]);
+                    $userMeta['effective_query'] = $effectiveBody;
+                    $userMeta['original_query'] = $meta['original_query'];
+                    $userMeta['query_normalized'] = true;
+                    $userMessage->update(['meta' => $userMeta]);
+                }
+
                 $brief = IcpBrief::fromIcpProfile($icp, $effectiveBody);
                 $result = $this->discovery->run(
                     $organization,
@@ -471,7 +499,7 @@ class ChatService
 
         if ($count === 0) {
             if ($hasUserQuery) {
-                return 'No leads could be extracted for your search. Try rephrasing your request or asking for specific names, companies, or territories.';
+                return 'No leads could be extracted for your search. Try a broader industry or role (for example FinTech CEOs in Africa), or generate from your active ICP without extra wording.';
             }
 
             return "No leads met the match threshold for ICP \"{$icp->name}\". Try refining territories or industries.";

@@ -1,0 +1,65 @@
+<?php
+
+namespace Tests\Unit\Discovery;
+
+use App\Models\IcpProfile;
+use App\Services\Discovery\LeadQueryNormalizer;
+use Tests\TestCase;
+
+class LeadQueryNormalizerTest extends TestCase
+{
+    public function test_meta_prompt_request_becomes_actionable_icp_query(): void
+    {
+        $normalizer = app(LeadQueryNormalizer::class);
+        $icp = new IcpProfile([
+            'name' => 'My Tech ICP',
+            'config' => [
+                'industries' => ['Fintech & Payments', 'SaaS'],
+                'territories' => ['Nigeria', 'Africa'],
+                'decisionMakers' => ['CEO', 'Founder', 'Head of Partnerships'],
+            ],
+        ]);
+
+        $out = $normalizer->normalize(
+            'Okay. Give me a prompt i can use to generate leads of potential people or industries that can scale my Ajo FinTech Application.',
+            $icp,
+        );
+
+        $this->assertFalse($normalizer->isMetaPromptRequest($out));
+        $this->assertStringNotContainsString('prompt', mb_strtolower($out));
+        $this->assertMatchesRegularExpression('/ajo|fintech|ceo|founder|nigeria|africa/i', $out);
+    }
+
+    public function test_specific_ceo_query_is_preserved(): void
+    {
+        $normalizer = app(LeadQueryNormalizer::class);
+        $icp = new IcpProfile([
+            'name' => 'My Tech ICP',
+            'config' => IcpProfile::defaultConfig(),
+        ]);
+
+        $query = 'CEOs of FinTech startups in Africa specializing in mobile payments.';
+        $out = $normalizer->normalize($query, $icp);
+
+        $this->assertSame($query, $out);
+    }
+
+    public function test_generic_request_falls_back_to_icp_seed(): void
+    {
+        $normalizer = app(LeadQueryNormalizer::class);
+        $icp = new IcpProfile([
+            'name' => 'My Tech ICP',
+            'config' => [
+                'industries' => ['FinTech'],
+                'territories' => ['Lagos'],
+                'decisionMakers' => ['CEO', 'CTO'],
+            ],
+        ]);
+
+        $out = $normalizer->normalize('generate leads', $icp);
+
+        $this->assertStringContainsString('FinTech', $out);
+        $this->assertStringContainsString('Lagos', $out);
+        $this->assertStringContainsString('CEO', $out);
+    }
+}

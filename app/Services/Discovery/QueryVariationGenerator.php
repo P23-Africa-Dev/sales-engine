@@ -75,25 +75,38 @@ class QueryVariationGenerator
         }
 
         if ($hasUserQuery && $base !== '') {
-            foreach (array_slice($territories, 0, 3) as $territory) {
-                $variations[] = $this->composePeopleOrCompany($brief, $base, null, $territory);
+            foreach (array_slice($territories, 0, 3) as $i => $territory) {
+                $variations[] = $this->composePeopleOrCompany($brief, $base, null, $territory, $i % 2 === 0);
             }
 
-            foreach (array_slice($titles, 0, 5) as $title) {
-                $variations[] = $this->composePeopleOrCompany($brief, $base, $title, $territories[0] ?? null);
+            foreach (array_slice($titles, 0, 5) as $i => $title) {
+                $variations[] = $this->composePeopleOrCompany(
+                    $brief,
+                    $base,
+                    $title,
+                    $territories[0] ?? null,
+                    $i % 2 === 1,
+                );
             }
 
-            foreach (array_slice($industries, 0, 4) as $industry) {
+            foreach (array_slice($industries, 0, 4) as $i => $industry) {
                 $variations[] = $this->composePeopleOrCompany(
                     $brief,
                     $base.' '.$industry,
                     $titles[0] ?? null,
                     $territories[0] ?? null,
+                    $i % 2 === 0,
                 );
             }
 
-            foreach (array_slice(self::SIGNAL_MODIFIERS, 0, 3) as $signal) {
-                $variations[] = $this->composePeopleOrCompany($brief, $base.' '.$signal, $titles[0] ?? null, null);
+            foreach (array_slice(self::SIGNAL_MODIFIERS, 0, 3) as $i => $signal) {
+                $variations[] = $this->composePeopleOrCompany(
+                    $brief,
+                    $base.' '.$signal,
+                    $titles[0] ?? null,
+                    null,
+                    $i % 2 === 1,
+                );
             }
 
             if ($brief->isPeopleSearch() || $brief->isAuthoritativePeopleQuery()) {
@@ -106,11 +119,19 @@ class QueryVariationGenerator
             $industrySlice = array_slice($industries !== [] ? $industries : ['B2B'], 0, 5);
             $territorySlice = array_slice($territories !== [] ? $territories : [''], 0, 3);
             $titleSlice = array_slice($titles, 0, 5);
+            $variantIndex = 0;
 
             foreach ($industrySlice as $industry) {
                 foreach ($territorySlice as $territory) {
                     foreach ($titleSlice as $title) {
-                        $variations[] = $this->composePeopleOrCompany($brief, $industry, $title, $territory !== '' ? $territory : null);
+                        $variations[] = $this->composePeopleOrCompany(
+                            $brief,
+                            $industry,
+                            $title,
+                            $territory !== '' ? $territory : null,
+                            $variantIndex % 2 === 0,
+                        );
+                        $variantIndex++;
                         if (count($variations) >= $needed * 2) {
                             break 3;
                         }
@@ -118,13 +139,14 @@ class QueryVariationGenerator
                 }
             }
 
-            foreach (array_slice(self::SIGNAL_MODIFIERS, 0, 3) as $signal) {
+            foreach (array_slice(self::SIGNAL_MODIFIERS, 0, 3) as $i => $signal) {
                 $seed = ($industrySlice[0] ?? 'companies').' '.$signal;
                 $variations[] = $this->composePeopleOrCompany(
                     $brief,
                     $seed,
                     $titleSlice[0] ?? null,
                     $territorySlice[0] !== '' ? $territorySlice[0] : null,
+                    $i % 2 === 0,
                 );
             }
         }
@@ -163,17 +185,29 @@ class QueryVariationGenerator
         $seed = $base !== '' ? $base : ($industries[0] ?? 'B2B');
 
         // Broader people/company searches without territory lock-in.
-        foreach (array_slice($titles, 0, 8) as $title) {
-            $variations[] = $this->composePeopleOrCompany($brief, $seed, $title, null);
+        foreach (array_slice($titles, 0, 8) as $i => $title) {
+            $variations[] = $this->composePeopleOrCompany($brief, $seed, $title, null, $i % 2 === 0);
         }
 
         foreach (array_slice($industries !== [] ? $industries : ['B2B'], 0, 5) as $industry) {
-            foreach (array_slice($titles, 0, 4) as $title) {
-                $variations[] = $this->composePeopleOrCompany($brief, $industry, $title, null);
+            foreach (array_slice($titles, 0, 4) as $i => $title) {
+                $variations[] = $this->composePeopleOrCompany($brief, $industry, $title, null, $i % 2 === 1);
             }
-            foreach (array_slice(self::SIGNAL_MODIFIERS, 0, 4) as $signal) {
-                $variations[] = $this->composePeopleOrCompany($brief, $industry.' '.$signal, $titles[0] ?? null, null);
+            foreach (array_slice(self::SIGNAL_MODIFIERS, 0, 4) as $i => $signal) {
+                $variations[] = $this->composePeopleOrCompany(
+                    $brief,
+                    $industry.' '.$signal,
+                    $titles[0] ?? null,
+                    null,
+                    $i % 2 === 0,
+                );
             }
+        }
+
+        // Open-web company / directory rescue queries (not LinkedIn-only).
+        foreach (array_slice($industries !== [] ? $industries : ['FinTech'], 0, 3) as $industry) {
+            $variations[] = trim($industry.' companies startups "CEO" OR founder');
+            $variations[] = trim($seed.' '.$industry.' decision makers partnerships');
         }
 
         foreach (array_slice(self::AUTHORITATIVE_LIST_HINTS, 0, 3) as $hint) {
@@ -218,6 +252,7 @@ class QueryVariationGenerator
         string $seed,
         ?string $title,
         ?string $territory,
+        bool $preferLinkedIn = true,
     ): string {
         $parts = array_filter([
             trim($seed),
@@ -227,7 +262,7 @@ class QueryVariationGenerator
 
         $query = trim(implode(' ', $parts));
 
-        if ($brief->isPeopleSearch()) {
+        if ($brief->isPeopleSearch() && $preferLinkedIn) {
             return trim($query.' site:linkedin.com/in');
         }
 

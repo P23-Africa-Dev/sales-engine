@@ -1,0 +1,118 @@
+<?php
+
+namespace App\Services\Discovery;
+
+use App\Models\IcpProfile;
+
+/**
+ * Turns meta / vague generate-leads prompts into actionable Serper search queries.
+ * Users often ask "give me a prompt to find leads for X" while Generate Prospects is selected —
+ * that must become a real discovery query, not a search for the word "prompt".
+ */
+class LeadQueryNormalizer
+{
+    public function __construct(private readonly QueryIntentService $queryIntent) {}
+
+    public function normalize(string $query, IcpProfile $icp): string
+    {
+        $cleaned = $this->queryIntent->stripProspectCountInstruction($query);
+        $trimmed = trim($cleaned);
+
+        if ($trimmed === '') {
+            return $this->icpSeededQuery($icp);
+        }
+
+        if ($this->isMetaPromptRequest($trimmed) || $this->queryIntent->isGenericLeadRequest($trimmed)) {
+            $theme = $this->extractTheme($trimmed);
+
+            return $this->composeActionableQuery($icp, $theme);
+        }
+
+        // Soften "give me leads of people that can scale my X" into role+industry search.
+        if ($this->isGoalFramedLeadRequest($trimmed)) {
+            $theme = $this->extractTheme($trimmed);
+
+            return $this->composeActionableQuery($icp, $theme !== '' ? $theme : $trimmed);
+        }
+
+        return $trimmed;
+    }
+
+    public function isMetaPromptRequest(string $query): bool
+    {
+        $normalized = mb_strtolower(trim($query));
+
+        return (bool) preg_match(
+            '/\b(give me|suggest|write|craft|create|share|what)\b.{0,40}\bprompts?\b/u',
+            $normalized
+        ) || (bool) preg_match(
+            '/\bprompts?\s+(i\s+can|to|for|that)\b.{0,40}\b(generate|find|get)\b.{0,20}\bleads?\b/u',
+            $normalized
+        );
+    }
+
+    public function isGoalFramedLeadRequest(string $query): bool
+    {
+        $normalized = mb_strtolower(trim($query));
+
+        return (bool) preg_match(
+            '/\b(scale|grow|expand|promote|partner|distribution)\b.{0,60}\b(app|application|product|platform|startup|business)\b/u',
+            $normalized
+        ) && (bool) preg_match('/\b(leads?|prospects?|people|industries|partners?)\b/u', $normalized);
+    }
+
+    private function extractTheme(string $query): string
+    {
+        $normalized = mb_strtolower($query);
+
+        // Drop meta wrapper language; keep product / industry / geography nouns.
+        $residual = preg_replace(
+            '/\b(okay|ok|please|give me|suggest|write|craft|create|share|what|a|an|the|prompt|prompts|i can use|to|for|that|can|will|generate|find|get|show|list|leads?|prospects?|contacts?|potential|people|or|industries|of|my|our|using|based on|active|icp|profile|request|help|looking)\b/u',
+            ' ',
+            $normalized
+        ) ?? $normalized;
+
+        $residual = trim(preg_replace('/[^\p{L}\p{N}\s\-&]+/u', ' ', $residual) ?? '');
+        $residual = trim(preg_replace('/\s+/u', ' ', $residual) ?? '');
+
+        // Prefer recognizable product/brand tokens (e.g. "ajo fintech application").
+        if (preg_match('/\b([a-z0-9][a-z0-9\-]{1,30})\s+(fintech|payments?|saas|app|application|platform)\b/u', $normalized, $m)) {
+            return trim($m[0].($residual !== '' && ! str_contains($residual, $m[1]) ? ' '.$residual : ''));
+        }
+
+        return $residual;
+    }
+
+    private function composeActionableQuery(IcpProfile $icp, string $theme): string
+    {
+        $config = is_array($icp->config) ? $icp->config : [];
+        $industries = array_values(array_filter(array_map('trim', $config['industries'] ?? [])));
+        $territories = array_values(array_filter(array_map('trim', $config['territories'] ?? [])));
+        $decisionMakers = array_values(array_filter(array_map('trim', $config['decisionMakers'] ?? [])));
+
+        $parts = array_filter([
+            $theme,
+            implode(' ', array_slice($industries, 0, 2)),
+            implode(' ', array_slice($territories, 0, 2)),
+            implode(' ', array_slice($decisionMakers !== [] ? $decisionMakers : ['CEO', 'founder'], 0, 3)),
+            'partnerships distributors',
+        ]);
+
+        $query = trim(preg_replace('/\s+/u', ' ', implode(' ', $parts)) ?? '');
+
+        return $query !== '' ? $query : $this->icpSeededQuery($icp);
+    }
+
+    private function icpSeededQuery(IcpProfile $icp): string
+    {
+        $config = is_array($icp->config) ? $icp->config : [];
+        $parts = array_filter([
+            implode(' ', array_slice(array_values($config['industries'] ?? []), 0, 2)),
+            implode(' ', array_slice(array_values($config['territories'] ?? []), 0, 2)),
+            implode(' ', array_slice(array_values($config['decisionMakers'] ?? ['CEO', 'founder']), 0, 3)),
+            'companies startups',
+        ]);
+
+        return trim(implode(' ', $parts)) ?: 'B2B decision makers founders CEO';
+    }
+}
