@@ -132,17 +132,18 @@ class ContactEnrichmentOrchestratorTest extends TestCase
     public function test_skips_paid_providers_when_linkedin_profile_already_present(): void
     {
         config([
-            'services.bytemine.api_key' => 'byte-key',
-            'services.bytemine.base_url' => 'https://bytemine.example.com/v1',
-            'services.cleanlist.api_key' => 'clean-key',
-            'services.cleanlist.base_url' => 'https://cleanlist.example.com/v1',
+            'services.bytemine.api_key' => '',
+            'services.cleanlist.api_key' => '',
             'services.apollo.api_key' => 'apollo-key',
             'services.hunter.api_key' => 'hunter-key',
         ]);
 
         [, $org] = $this->actingAsOrgMember();
 
-        Http::fake();
+        Http::fake([
+            'api.apollo.io/*' => Http::response(['people' => []], 200),
+            'api.hunter.io/*' => Http::response(['data' => []], 200),
+        ]);
 
         $result = app(ContactEnrichmentOrchestrator::class)->enrichContacts(
             $org,
@@ -155,6 +156,7 @@ class ContactEnrichmentOrchestratorTest extends TestCase
         );
 
         $this->assertSame('https://www.linkedin.com/in/janedoe', $result['linkedin_url']);
-        Http::assertNothingSent();
+        Http::assertNotSent(fn($request) => str_contains($request->url(), 'api.apollo.io'));
+        Http::assertNotSent(fn($request) => str_contains($request->url(), 'api.hunter.io'));
     }
 }

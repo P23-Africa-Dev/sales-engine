@@ -75,11 +75,6 @@ class ContactEnrichmentOrchestrator
             }
         }
 
-        // Profile URL is enough for discovery cards — skip slow paid providers.
-        if ($this->hasUsableProfile($contacts)) {
-            return $contacts;
-        }
-
         $context = array_filter([
             'company' => $company,
             'website' => isset($seed['website']) ? (string) $seed['website'] : null,
@@ -87,7 +82,7 @@ class ContactEnrichmentOrchestrator
             'domain' => $domain,
         ], fn($v) => is_string($v) && $v !== '');
 
-        // Tier 2a — Bytemine (free/low-cost)
+        // Tier 2a — Bytemine (free/low-cost) — still run even when LinkedIn is known.
         if (! $this->hasCompleteContacts($contacts) && $this->bytemine->isEnabled()) {
             $result = $this->bytemine->enrichPerson($organization, $personName, $context);
             $contacts = $this->mergeContacts($contacts, $result, 'tier2', 'bytemine');
@@ -101,7 +96,7 @@ class ContactEnrichmentOrchestrator
                 $personName,
                 $leadId,
             );
-            if ($this->hasCompleteContacts($contacts) || $this->hasUsableProfile($contacts)) {
+            if ($this->hasCompleteContacts($contacts)) {
                 return $contacts;
             }
             if (($result['linkedin_url'] ?? '') !== '') {
@@ -129,12 +124,12 @@ class ContactEnrichmentOrchestrator
                 $personName,
                 $leadId,
             );
-            if ($this->hasCompleteContacts($contacts) || $this->hasUsableProfile($contacts)) {
+            if ($this->hasCompleteContacts($contacts)) {
                 return $contacts;
             }
         }
 
-        // Tier 3a — Apollo (paid) — only when still missing email/phone and no profile URL.
+        // Tier 3a — Apollo (paid) — skip when a profile/email/phone is already usable.
         if (! $this->hasCompleteContacts($contacts) && ! $this->hasUsableProfile($contacts) && $this->apollo->isEnabled()) {
             $result = $this->apollo->enrich($organization, $personName, $company);
             $contacts = $this->mergeContacts($contacts, $result, 'tier3', 'apollo');
