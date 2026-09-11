@@ -18,6 +18,8 @@ class LeadProfileEnrichmentService
 
     private int $serperCallsThisRun = 0;
 
+    private bool $deferContactWaterfall = false;
+
     public function __construct(
         private readonly SerperPersonSearchAdapter $serper,
         private readonly GlmClient $glm,
@@ -29,6 +31,11 @@ class LeadProfileEnrichmentService
     public function resetBudget(): void
     {
         $this->serperCallsThisRun = 0;
+    }
+
+    public function setDeferContactWaterfall(bool $defer): void
+    {
+        $this->deferContactWaterfall = $defer;
     }
 
     /**
@@ -80,7 +87,9 @@ class LeadProfileEnrichmentService
             $profile = $this->withContact($profile, phone: $seedPhone);
         }
 
-        $profile = $this->applyContactWaterfall($organization, $personName, $profile, $searchResults);
+        if (! $this->deferContactWaterfall) {
+            $profile = $this->applyContactWaterfall($organization, $personName, $profile, $searchResults);
+        }
 
         Cache::put($cacheKey, $profile->toArray(), self::CACHE_TTL_SECONDS);
 

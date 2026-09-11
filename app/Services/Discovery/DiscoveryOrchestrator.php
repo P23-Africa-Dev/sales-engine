@@ -35,7 +35,19 @@ class DiscoveryOrchestrator
 
     public const MAX_BACKFILL_PASSES = 2;
 
+    /** Soft target for returning a first batch (seconds). */
+    public const FIRST_BATCH_SOFT_SECONDS = 50;
+
+    /** Stop discovering and complete with whatever we have (seconds). */
+    public const HARD_DEADLINE_SECONDS = 150;
+
     private string $qualityThreshold = self::QUALITY_STRICT;
+
+    private float $deadlineAt = 0.0;
+
+    private float $startedAt = 0.0;
+
+    private bool $deferContactEnrichment = true;
 
     /** @param  list<DiscoverySourceInterface>  $sources */
     public function __construct(
@@ -62,6 +74,7 @@ class DiscoveryOrchestrator
     }
 
     /**
+     * @param  list<string>  $excludeLeadNames  Names already shown (generate-more).
      * @return array{run: DiscoveryRun, leads: list<array<string, mixed>>, companies: Collection}
      */
     public function run(
@@ -73,6 +86,8 @@ class DiscoveryOrchestrator
         ?int $chatSessionId = null,
         int $limit = 20,
         ?DiscoveryRun $existingRun = null,
+        array $excludeLeadNames = [],
+        bool $deferContactEnrichment = true,
     ): array {
         $run = $existingRun ?? DiscoveryRun::query()->create([
             'organization_id' => $organization->id,
@@ -97,6 +112,11 @@ class DiscoveryOrchestrator
         }
 
         try {
+            $this->startedAt = microtime(true);
+            $this->deadlineAt = $this->startedAt + self::HARD_DEADLINE_SECONDS;
+            $this->deferContactEnrichment = $deferContactEnrichment;
+            $this->enrichment->setDeferContactWaterfall($deferContactEnrichment);
+
             $brief = IcpBrief::fromIcpProfile($icp, $query);
             $hasUserQuery = $brief->hasUserQuery();
             $effectiveLimit = min(self::MAX_LEAD_LIMIT, max(1, $limit > 0 ? $limit : $brief->requestedLimit));
@@ -119,10 +139,23 @@ class DiscoveryOrchestrator
             $sourcesChecked = 0;
             $backfillPasses = 0;
             $seenLeadNames = [];
+            foreach ($excludeLeadNames as $excluded) {
+                $key = mb_strtolower(trim((string) $excluded));
+                if ($key !== '') {
+                    $seenLeadNames[$key] = true;
+                }
+            }
 
-            $minAcceptableYield = max(8, (int) ceil($effectiveLimit / 2));
+            $minAcceptableYield = max(3, (int) ceil($effectiveLimit / 2));
+            $minUsableBatch = max(1, (int) ceil($effectiveLimit / 4));
+            $softCompletedEarly = false;
 
             for ($pass = 0; $pass <= self::MAX_BACKFILL_PASSES; $pass++) {
+                if ($this->pastDeadline()) {
+                    $softCompletedEarly = true;
+                    break;
+                }
+
                 $remaining = $effectiveLimit - count($leadsPayload);
                 if ($remaining <= 0) {
                     break;
@@ -130,7 +163,10 @@ class DiscoveryOrchestrator
 
                 $isBackfill = $pass > 0;
                 if ($isBackfill) {
-                    if (count($leadsPayload) >= $minAcceptableYield) {
+                    // Skip deeper search once we have a usable first batch or soft time elapsed.
+                    if (count($leadsPayload) >= $minAcceptableYield
+                        || (count($leadsPayload) >= $minUsableBatch && $this->pastSoftDeadline())
+                        || count($leadsPayload) >= 1 && $this->pastSoftDeadline()) {
                         break;
                     }
 
@@ -170,6 +206,11 @@ class DiscoveryOrchestrator
                 $this->updateProgress($run, 2, $sourcesChecked, $candidatesFound);
                 if (! $isBackfill) {
                     $this->appendStage($run, 'extracting');
+                }
+
+                if ($this->pastDeadline()) {
+                    $softCompletedEarly = true;
+                    break;
                 }
 
                 if ($isAuthoritativeQuery && ! $isBackfill) {
@@ -214,14 +255,24 @@ class DiscoveryOrchestrator
                     break;
                 }
 
-                // Only continue into backfill when first/prior pass under-yielded.
+                // First pass: stop when we have enough for a first batch.
                 if (! $isBackfill && count($leadsPayload) >= $minAcceptableYield) {
+                    break;
+                }
+
+                if (count($leadsPayload) >= $minUsableBatch && $this->pastSoftDeadline()) {
+                    $softCompletedEarly = true;
                     break;
                 }
             }
 
-            // People searches that still yield nothing → company rescue pass (accounts still usable).
-            if ($leadsPayload === [] && $brief->isPeopleSearch() && $intent === 'generate_leads') {
+            // People searches that still yield nothing → company rescue (skip if out of time).
+            if (
+                $leadsPayload === []
+                && $brief->isPeopleSearch()
+                && in_array($intent, ['generate_leads', 'generate_more_leads'], true)
+                && ! $this->pastSoftDeadline()
+            ) {
                 $this->appendStage($run, 'company_rescue_pass');
                 $this->qualityThreshold = self::QUALITY_VOLUME;
                 $companyBrief = $brief->withTarget(QueryIntentService::TARGET_COMPANIES);
@@ -300,6 +351,9 @@ class DiscoveryOrchestrator
                         'fan_out_strategy_used' => $fanOutUsed,
                         'quality_threshold' => $this->qualityThreshold,
                         'backfill_passes' => $backfillPasses,
+                        'soft_completed_early' => $softCompletedEarly,
+                        'elapsed_seconds' => round(microtime(true) - $this->startedAt, 1),
+                        'contact_enrichment_deferred' => $this->deferContactEnrichment,
                     ]
                 ),
                 'finished_at' => now(),
@@ -313,7 +367,19 @@ class DiscoveryOrchestrator
                 'finished_at' => now(),
             ]);
             throw $e;
+        } finally {
+            $this->enrichment->setDeferContactWaterfall(false);
         }
+    }
+
+    private function pastDeadline(): bool
+    {
+        return $this->deadlineAt > 0 && microtime(true) >= $this->deadlineAt;
+    }
+
+    private function pastSoftDeadline(): bool
+    {
+        return $this->startedAt > 0 && (microtime(true) - $this->startedAt) >= self::FIRST_BATCH_SOFT_SECONDS;
     }
 
     private function shouldUseFanOut(int $limit): bool
@@ -356,34 +422,37 @@ class DiscoveryOrchestrator
 
         if ($overrideQueries !== null) {
             $variations = $overrideQueries;
-            foreach ($variations as $variationQuery) {
-                $queriesExecuted[] = $variationQuery;
-                $variantBrief = $brief->withSearchQueryOverride($variationQuery);
-
-                foreach ($enabledSources as $source) {
-                    $batch = $source->search($variantBrief, $ctx);
-                    $key = $source->key();
-                    $sourcesHitCount[$key] = ($sourcesHitCount[$key] ?? 0) + $batch->count();
-                    $hits = $hits->merge($batch);
-                }
-            }
         } elseif ($fanOut) {
             $variations = $this->queryVariationGenerator->generate($brief, $effectiveLimit);
-            foreach ($variations as $variationQuery) {
-                $queriesExecuted[] = $variationQuery;
-                $variantBrief = $brief->withSearchQueryOverride($variationQuery);
-
-                foreach ($enabledSources as $source) {
-                    $batch = $source->search($variantBrief, $ctx);
-                    $key = $source->key();
-                    $sourcesHitCount[$key] = ($sourcesHitCount[$key] ?? 0) + $batch->count();
-                    $hits = $hits->merge($batch);
-                }
-            }
         } else {
-            $queriesExecuted[] = $brief->searchQuery();
-            foreach ($enabledSources as $source) {
-                $batch = $source->search($brief, $ctx);
+            $variations = [$brief->searchQuery()];
+        }
+
+        $queriesExecuted = array_values(array_filter(array_map('strval', $variations)));
+
+        $serper = null;
+        $otherSources = [];
+        foreach ($enabledSources as $source) {
+            if ($source instanceof \App\Services\Discovery\Adapters\SerperDiscoveryAdapter) {
+                $serper = $source;
+            } else {
+                $otherSources[] = $source;
+            }
+        }
+
+        if ($serper !== null && $queriesExecuted !== []) {
+            $batch = $serper->searchMany($queriesExecuted, $brief, $ctx);
+            $sourcesHitCount['serper'] = ($sourcesHitCount['serper'] ?? 0) + $batch->count();
+            $hits = $hits->merge($batch);
+        }
+
+        foreach ($queriesExecuted as $variationQuery) {
+            if ($this->pastDeadline()) {
+                break;
+            }
+            $variantBrief = $brief->withSearchQueryOverride($variationQuery);
+            foreach ($otherSources as $source) {
+                $batch = $source->search($variantBrief, $ctx);
                 $key = $source->key();
                 $sourcesHitCount[$key] = ($sourcesHitCount[$key] ?? 0) + $batch->count();
                 $hits = $hits->merge($batch);
@@ -518,12 +587,37 @@ class DiscoveryOrchestrator
     ): array {
         $candidates = [];
         $seenNames = $seenLeadNames;
-        $gatherCap = $effectiveLimit * 3;
+        $gatherCap = max($effectiveLimit, (int) ceil($effectiveLimit * 1.5));
 
         /** @var RawDiscoveryHit $hit */
         foreach ($hits->unique(fn(RawDiscoveryHit $h) => mb_strtolower($h->name)) as $hit) {
-            if (count($candidates) >= $gatherCap) {
+            if (count($candidates) >= $gatherCap || $this->pastDeadline()) {
                 break;
+            }
+
+            // Gate junk titles before expensive GLM extract/score.
+            if ($this->queryIntent->looksLikeContentOrGenericPhrase($hit->name)) {
+                continue;
+            }
+
+            if ($brief->isPeopleSearch()) {
+                $normalizedHit = $this->personNameValidator->normalizePersonName($hit->name);
+                $probeName = $normalizedHit !== '' ? $normalizedHit : $hit->name;
+                if (! $this->personNameValidator->isValidPersonName($probeName, [
+                    'linkedin_url' => $hit->url,
+                    'title' => $hit->snippet,
+                    'company' => $hit->website,
+                ]) && ! str_contains(mb_strtolower((string) $hit->url), 'linkedin.com/in/')) {
+                    // Still allow company-shaped hits through extraction for company target flips.
+                    if (! $this->companyNameValidator->isValidCompanyName($hit->name, [])) {
+                        continue;
+                    }
+                }
+            } elseif (! $this->companyNameValidator->isValidCompanyName($hit->name, [
+                'website' => $hit->website,
+                'url' => $hit->url,
+            ])) {
+                continue;
             }
 
             $extractions = $this->extraction->extractMany($hit, $brief, $organization);
@@ -537,6 +631,15 @@ class DiscoveryOrchestrator
                 }
 
                 if (isset($seenNames[$nameKey])) {
+                    continue;
+                }
+
+                if (! $this->passesCreatabilityGate(
+                    $brief,
+                    $displayName,
+                    $extracted,
+                    (bool) ($extracted['from_listicle'] ?? false),
+                )) {
                     continue;
                 }
 
@@ -582,6 +685,10 @@ class DiscoveryOrchestrator
         $scoredCandidates = [];
 
         foreach ($candidates as $candidate) {
+            if ($this->pastDeadline()) {
+                break;
+            }
+
             $hit = $candidate['hit'];
             $extracted = $candidate['extracted'];
             $displayName = trim((string) ($extracted['person_name'] ?? $extracted['name'] ?? $hit->name));
@@ -611,7 +718,7 @@ class DiscoveryOrchestrator
         });
 
         foreach ($scoredCandidates as $candidate) {
-            if (count($leadsPayload) + count($secondaryPayload) >= $effectiveLimit) {
+            if (count($leadsPayload) + count($secondaryPayload) >= $effectiveLimit || $this->pastDeadline()) {
                 break;
             }
 

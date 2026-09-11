@@ -8,7 +8,8 @@ class QueryIntentService
 
     public const TARGET_COMPANIES = 'companies';
 
-    public const DEFAULT_LEAD_LIMIT = 40;
+    /** First-batch size for count-free generate_leads (keeps fan-out off: FAN_OUT_THRESHOLD = 20). */
+    public const DEFAULT_LEAD_LIMIT = 12;
 
     public const MAX_LEAD_LIMIT = 150;
 
@@ -76,7 +77,7 @@ class QueryIntentService
             return self::TARGET_COMPANIES;
         }
 
-        if (preg_match('/\b(people|person|persons|executives?|founders?|ceos?|cto|cfo|vp|directors?|contacts?|individuals?|partnership contacts?|decision makers?|professionals?|influencers?|leaders?|men|women|billionaires?|millionaires?|wealthiest|richest|magnates?|names)\b/u', $normalized)) {
+        if (preg_match('/\b(people|person|persons|executives?|founders?|ceos?|cto|cfo|vp|directors?|contacts?|individuals?|partnership contacts?|decision makers?|professionals?|influencers?|leaders?|men|women|billionaires?|millionaires?|wealthiest|richest|magnates?|names|prospects?)\b/u', $normalized)) {
             return self::TARGET_PEOPLE;
         }
 
@@ -161,7 +162,7 @@ class QueryIntentService
         }
 
         $residual = preg_replace(
-            '/\b(generate|create|find|get|show|give|need|want|please|me|my|the|a|an|some|any|new|more|leads?|prospects?|contacts?|relevant|to|for|based|on|using|according|active|icp|profile|build|search|anything|prospect|request|help|looking|looking for|of)\b/u',
+            '/\b(generate|create|find|get|show|give|need|want|please|me|my|the|a|an|some|any|new|more|kind|kinds|ideal|best|perfect|right|suitable|matching|relevant|to|for|based|on|using|according|active|icp|profile|build|search|anything|prospect|request|help|looking|looking for|of|with|our|your|brand|brands|business|company|companies|product|products|app|application|platform|startup|leads?|prospects?|contacts?|same|additional|extra|again|another)\b/u',
             ' ',
             $normalized
         );

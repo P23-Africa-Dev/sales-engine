@@ -55,10 +55,21 @@ class LeadQueryNormalizer
     {
         $normalized = mb_strtolower(trim($query));
 
-        return (bool) preg_match(
+        if ((bool) preg_match(
             '/\b(scale|grow|expand|promote|partner|distribution)\b.{0,60}\b(app|application|product|platform|startup|business)\b/u',
             $normalized
-        ) && (bool) preg_match('/\b(leads?|prospects?|people|industries|partners?)\b/u', $normalized);
+        ) && (bool) preg_match('/\b(leads?|prospects?|people|industries|partners?)\b/u', $normalized)) {
+            return true;
+        }
+
+        // "ideal / perfect prospects for my brand|business|company"
+        return (bool) preg_match(
+            '/\b(ideal|perfect|best|right|suitable|matching)\b.{0,40}\b(leads?|prospects?|customers?|clients?)\b.{0,40}\b(for|to)\b.{0,20}\b(my|our|the)\b.{0,20}\b(brand|business|company|product|app|application|platform)\b/u',
+            $normalized
+        ) || (bool) preg_match(
+            '/\b(leads?|prospects?)\b.{0,40}\b(for|to)\b.{0,20}\b(my|our|the)\b.{0,20}\b(brand|business|company|product)\b/u',
+            $normalized
+        );
     }
 
     private function extractTheme(string $query): string
@@ -67,7 +78,7 @@ class LeadQueryNormalizer
 
         // Drop meta wrapper language; keep product / industry / geography nouns.
         $residual = preg_replace(
-            '/\b(okay|ok|please|give me|suggest|write|craft|create|share|what|a|an|the|prompt|prompts|i can use|to|for|that|can|will|generate|find|get|show|list|leads?|prospects?|contacts?|potential|people|or|industries|of|my|our|using|based on|active|icp|profile|request|help|looking)\b/u',
+            '/\b(okay|ok|please|give me|suggest|write|craft|create|share|what|a|an|the|prompt|prompts|i can use|to|for|that|can|will|generate|find|get|show|list|kind|kinds|ideal|perfect|best|suitable|matching|leads?|prospects?|contacts?|potential|people|or|industries|of|my|our|using|based on|active|icp|profile|request|help|looking|brand|brands|business|company|companies)\b/u',
             ' ',
             $normalized
         ) ?? $normalized;
@@ -77,7 +88,7 @@ class LeadQueryNormalizer
 
         // Prefer recognizable product/brand tokens (e.g. "ajo fintech application").
         if (preg_match('/\b([a-z0-9][a-z0-9\-]{1,30})\s+(fintech|payments?|saas|app|application|platform)\b/u', $normalized, $m)) {
-            return trim($m[0].($residual !== '' && ! str_contains($residual, $m[1]) ? ' '.$residual : ''));
+            return trim($m[0] . ($residual !== '' && ! str_contains($residual, $m[1]) ? ' ' . $residual : ''));
         }
 
         return $residual;

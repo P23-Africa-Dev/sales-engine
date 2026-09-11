@@ -11,6 +11,7 @@ resources:
   - backend-service.yaml
   - backend-deployment.yaml
   - queue-worker-deployment.yaml
+  - discovery-queue-worker-deployment.yaml
   - scheduler-deployment.yaml
   - migrate-job.yaml
   - certificate.yaml

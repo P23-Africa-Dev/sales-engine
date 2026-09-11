@@ -20,9 +20,9 @@ use InvalidArgumentException;
 
 class ChatService
 {
-    public const INTENTS = ['freeform', 'quick_research', 'generate_leads', 'create_outreach'];
+    public const INTENTS = ['freeform', 'quick_research', 'generate_leads', 'generate_more_leads', 'create_outreach'];
 
-    public const ASYNC_INTENTS = ['quick_research', 'generate_leads'];
+    public const ASYNC_INTENTS = ['quick_research', 'generate_leads', 'generate_more_leads'];
 
     public function __construct(
         private readonly GlmClient $glm,
@@ -121,18 +121,35 @@ class ChatService
             ? IcpProfile::query()->where('organization_id', $organization->id)->find($session->icp_profile_id)
             : $this->icps->active($organization);
 
-        if (! $icp && in_array($intent, ['quick_research', 'generate_leads', 'create_outreach'], true)) {
+        if (! $icp && in_array($intent, ['quick_research', 'generate_leads', 'generate_more_leads', 'create_outreach'], true)) {
             throw new InvalidArgumentException('An active ICP profile is required for this intent.');
         }
 
         $queryNormalized = false;
         $originalQuery = $effectiveBody;
-        if ($intent === 'generate_leads' && $icp) {
+        if (in_array($intent, ['generate_leads', 'generate_more_leads'], true) && $icp) {
             $normalized = $this->leadQueryNormalizer->normalize($effectiveBody, $icp);
             if (trim($normalized) !== '' && trim($normalized) !== trim($effectiveBody)) {
                 $originalQuery = $effectiveBody;
                 $effectiveBody = $normalized;
                 $queryNormalized = true;
+            }
+        }
+
+        $excludeLeadNames = [];
+        if ($intent === 'generate_more_leads') {
+            $excludeLeadNames = $this->recentLeadNamesFromSession($session);
+            if ($excludeLeadNames === [] || ! $queryNormalized) {
+                // Prefer last successful generate query when user just clicks "Generate more".
+                $seedQuery = $this->recentGenerateQueryFromSession($session);
+                if ($seedQuery !== null && trim($seedQuery) !== '') {
+                    $effectiveBody = $this->leadQueryNormalizer->normalize($seedQuery, $icp);
+                    $queryNormalized = true;
+                    $originalQuery = $body;
+                } elseif ($icp) {
+                    $effectiveBody = $this->leadQueryNormalizer->normalize('generate leads', $icp);
+                    $queryNormalized = true;
+                }
             }
         }
 
@@ -144,6 +161,9 @@ class ChatService
         if ($queryNormalized) {
             $userMeta['original_query'] = $originalQuery;
             $userMeta['query_normalized'] = true;
+        }
+        if ($excludeLeadNames !== []) {
+            $userMeta['exclude_lead_names'] = array_values(array_slice($excludeLeadNames, 0, 200));
         }
 
         $userMessage = ChatMessage::query()->create([
@@ -168,12 +188,16 @@ class ChatService
                 'stages' => ['analyzing_brief'],
             ]);
 
+            $pendingBody = match ($intent) {
+                'generate_more_leads' => 'Finding more prospects for your ICP. Results will appear here shortly.',
+                'generate_leads' => 'Searching for leads matching your request. Results will appear here shortly.',
+                default => 'Researching your question. Results will appear here shortly.',
+            };
+
             ChatMessage::query()->create([
                 'chat_session_id' => $session->id,
                 'role' => 'assistant',
-                'body' => $intent === 'generate_leads'
-                    ? 'Searching for leads matching your request. Results will appear here shortly.'
-                    : 'Researching your question. Results will appear here shortly.',
+                'body' => $pendingBody,
                 'intent' => $intent,
                 'meta' => [
                     'pending' => true,
@@ -185,7 +209,7 @@ class ChatService
                 $run->id,
                 $userMessage->id,
                 $clientTimezone,
-            );
+            )->onQueue('discovery');
 
             if (! $session->title) {
                 $session->update(['title' => mb_substr($body, 0, 80)]);
@@ -241,20 +265,26 @@ class ChatService
             $meta['discovery_run_id'] = $discoveryRunId;
             $meta['research'] = $result['research'];
             $assistantBody = $result['narrative'];
-        } elseif ($intent === 'generate_leads' && $icp) {
+        } elseif (in_array($intent, ['generate_leads', 'generate_more_leads'], true) && $icp) {
             $brief = IcpBrief::fromIcpProfile($icp, $effectiveBody);
             $result = $this->discovery->run(
                 $organization,
                 $icp,
                 $user,
                 $effectiveBody,
-                $intent,
+                $intent === 'generate_more_leads' ? 'generate_more_leads' : 'generate_leads',
                 $session->id,
                 $brief->requestedLimit,
+                null,
+                $excludeLeadNames,
+                $intent !== 'generate_more_leads',
             );
             $leads = $result['leads'];
             $discoveryRunId = $result['run']->id;
             $meta['discovery_run_id'] = $discoveryRunId;
+            if ($intent === 'generate_more_leads') {
+                $meta['generate_more'] = true;
+            }
             $assistantBody = $this->narrateDiscovery(
                 $organization,
                 $icp,
@@ -382,7 +412,7 @@ class ChatService
                 );
                 $meta['research'] = $result['research'];
                 $assistantBody = $result['narrative'];
-            } elseif ($intent === 'generate_leads') {
+            } elseif (in_array($intent, ['generate_leads', 'generate_more_leads'], true)) {
                 $normalized = $this->leadQueryNormalizer->normalize($effectiveBody, $icp);
                 if (trim($normalized) !== '' && trim($normalized) !== trim($effectiveBody)) {
                     $meta['original_query'] = $effectiveBody;
@@ -395,6 +425,14 @@ class ChatService
                     $userMessage->update(['meta' => $userMeta]);
                 }
 
+                $excludeLeadNames = array_values(array_filter(array_map(
+                    'strval',
+                    is_array($userMeta['exclude_lead_names'] ?? null) ? $userMeta['exclude_lead_names'] : [],
+                )));
+                if ($intent === 'generate_more_leads' && $excludeLeadNames === []) {
+                    $excludeLeadNames = $this->recentLeadNamesFromSession($session);
+                }
+
                 $brief = IcpBrief::fromIcpProfile($icp, $effectiveBody);
                 $result = $this->discovery->run(
                     $organization,
@@ -405,8 +443,13 @@ class ChatService
                     $session->id,
                     $brief->requestedLimit,
                     $run,
+                    $excludeLeadNames,
+                    $intent !== 'generate_more_leads',
                 );
                 $leads = $result['leads'];
+                if ($intent === 'generate_more_leads') {
+                    $meta['generate_more'] = true;
+                }
                 $assistantBody = $this->narrateDiscovery(
                     $organization,
                     $icp,
@@ -475,6 +518,60 @@ class ChatService
             }
             $session->touch();
         }
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function recentLeadNamesFromSession(ChatSession $session): array
+    {
+        $names = [];
+        $messages = ChatMessage::query()
+            ->where('chat_session_id', $session->id)
+            ->where('role', 'assistant')
+            ->whereIn('intent', ['generate_leads', 'generate_more_leads'])
+            ->orderByDesc('id')
+            ->limit(8)
+            ->get(['leads']);
+
+        foreach ($messages as $message) {
+            $leads = is_array($message->leads) ? $message->leads : [];
+            foreach ($leads as $lead) {
+                if (! is_array($lead)) {
+                    continue;
+                }
+                $name = trim((string) ($lead['name'] ?? $lead['contact_person'] ?? ''));
+                if ($name !== '') {
+                    $names[mb_strtolower($name)] = $name;
+                }
+            }
+        }
+
+        return array_values($names);
+    }
+
+    private function recentGenerateQueryFromSession(ChatSession $session): ?string
+    {
+        $message = ChatMessage::query()
+            ->where('chat_session_id', $session->id)
+            ->where('role', 'user')
+            ->whereIn('intent', ['generate_leads', 'generate_more_leads'])
+            ->orderByDesc('id')
+            ->first(['body', 'meta']);
+
+        if (! $message) {
+            return null;
+        }
+
+        $meta = is_array($message->meta) ? $message->meta : [];
+        $effective = trim((string) ($meta['effective_query'] ?? ''));
+        if ($effective !== '') {
+            return $effective;
+        }
+
+        $body = trim((string) $message->body);
+
+        return $body !== '' ? $body : null;
     }
 
     /**

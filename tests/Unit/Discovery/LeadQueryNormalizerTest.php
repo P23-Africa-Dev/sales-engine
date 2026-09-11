@@ -62,4 +62,22 @@ class LeadQueryNormalizerTest extends TestCase
         $this->assertStringContainsString('Lagos', $out);
         $this->assertStringContainsString('CEO', $out);
     }
+
+    public function test_ideal_prospect_for_brand_seeds_from_icp(): void
+    {
+        $normalizer = app(LeadQueryNormalizer::class);
+        $icp = new IcpProfile([
+            'name' => 'Tommy Test',
+            'config' => [
+                'industries' => ['FMCG & Retail', 'textile'],
+                'territories' => ['Lagos, NG', 'Nigeria'],
+                'decisionMakers' => ['Head of Sales', 'Managing Director / CEO'],
+            ],
+        ]);
+
+        $out = $normalizer->normalize('kind generate ideal prospect for my brand', $icp);
+
+        $this->assertStringNotContainsString('kind generate ideal', mb_strtolower($out));
+        $this->assertMatchesRegularExpression('/fmcg|textile|lagos|nigeria|sales|ceo/i', $out);
+    }
 }

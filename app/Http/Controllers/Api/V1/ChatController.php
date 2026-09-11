@@ -99,7 +99,7 @@ class ChatController extends Controller
         $session = $this->ownedSession($id);
         $data = $request->validate([
             'body' => ['required', 'string', 'max:10000'],
-            'intent' => ['nullable', 'string', 'in:freeform,quick_research,generate_leads,create_outreach'],
+            'intent' => ['nullable', 'string', 'in:freeform,quick_research,generate_leads,generate_more_leads,create_outreach'],
             'timezone' => ['nullable', 'string', 'max:64'],
         ]);
 

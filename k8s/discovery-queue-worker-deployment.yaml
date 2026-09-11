@@ -1,25 +1,25 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: queue-worker
+  name: discovery-queue-worker
   namespace: sales-engine
   labels:
-    app.kubernetes.io/name: queue-worker
+    app.kubernetes.io/name: discovery-queue-worker
     app.kubernetes.io/component: worker
     app.kubernetes.io/part-of: sales-engine
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: queue-worker
+      app: discovery-queue-worker
   template:
     metadata:
       labels:
-        app: queue-worker
-        app.kubernetes.io/name: queue-worker
+        app: discovery-queue-worker
+        app.kubernetes.io/name: discovery-queue-worker
         app.kubernetes.io/component: worker
     spec:
-      terminationGracePeriodSeconds: 660
+      terminationGracePeriodSeconds: 360
       imagePullSecrets:
         - name: do-registry
       containers:
@@ -38,10 +38,10 @@ spec:
               php artisan config:clear
               php artisan config:cache
               exec php artisan queue:work redis \
-                --queue=default \
-                --sleep=3 \
-                --tries=3 \
-                --timeout=600 \
+                --queue=discovery \
+                --sleep=2 \
+                --tries=1 \
+                --timeout=320 \
                 --max-time=3600
           envFrom:
             - configMapRef:

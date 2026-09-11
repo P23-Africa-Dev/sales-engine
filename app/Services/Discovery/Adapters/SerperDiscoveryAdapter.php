@@ -37,100 +37,145 @@ class SerperDiscoveryAdapter implements DiscoverySourceInterface
             return collect();
         }
 
-        $query = $this->sanitizeQuery($brief->searchQuery());
-        $baseUrl = rtrim((string) config('services.serper.base_url'), '/');
-        $resultLimit = $this->resolveResultLimit($brief, $ctx);
+        return $this->searchMany([$brief->searchQuery()], $brief, $ctx);
+    }
 
-        try {
-            $response = $this->postSearch($baseUrl, $query, $resultLimit);
-
-            // Free Serper plans reject complex patterns when num is high — retry once with safer settings.
-            if ($this->isFreeTierPatternBlock($response) && ($resultLimit > 10 || $this->looksComplex($query))) {
-                $safeQuery = $this->simplifyQuery($query);
-                $safeLimit = min(10, $resultLimit);
-                Log::info('Serper free-tier pattern block; retrying with safer query/num', [
-                    'original_query' => $query,
-                    'safe_query' => $safeQuery,
-                    'original_num' => $resultLimit,
-                    'safe_num' => $safeLimit,
-                ]);
-                $response = $this->postSearch($baseUrl, $safeQuery, $safeLimit);
-                $query = $safeQuery;
-                $resultLimit = $safeLimit;
-            }
-
-            try {
-                ApiUsage::query()->create([
-                    'organization_id' => $ctx->organizationId,
-                    'provider' => 'serper',
-                    'endpoint' => 'search',
-                    'units' => 1,
-                    'estimated_cost' => 0.005,
-                    'meta' => [
-                        'status' => $response->status(),
-                        'query' => $query,
-                        'num' => $resultLimit,
-                        'error' => $response->successful() ? null : mb_substr($response->body(), 0, 240),
-                    ],
-                ]);
-            } catch (\Throwable $e) {
-                Log::debug('Serper ApiUsage write skipped', ['error' => $e->getMessage()]);
-            }
-
-            if (! $response->successful()) {
-                Log::warning('Serper search failed', ['status' => $response->status(), 'body' => $response->body()]);
-
-                return collect();
-            }
-
-            $organic = $response->json('organic') ?? [];
-
-            $hits = collect($organic)
-                ->map(function (array $item) use ($brief) {
-                    $title = (string) ($item['title'] ?? 'Unknown');
-                    $url = $item['link'] ?? null;
-                    $name = $this->resolveHitName($title, $url, $brief);
-
-                    return new RawDiscoveryHit(
-                        name: trim($name),
-                        source: 'web',
-                        provider: 'serper',
-                        website: isset($item['link']) ? parse_url((string) $item['link'], PHP_URL_HOST) : null,
-                        location: $brief->territories[0] ?? null,
-                        sector: $brief->industries[0] ?? null,
-                        snippet: $item['snippet'] ?? null,
-                        url: $url,
-                        meta: ['title' => $title, 'target' => $brief->target],
-                    );
-                })
-                ->filter(function (RawDiscoveryHit $h) use ($brief) {
-                    if ($h->name === '') {
-                        return false;
-                    }
-
-                    $allowListicle = $brief->isPeopleSearch() || $brief->isListiclePeopleQuery() || $brief->isAuthoritativePeopleQuery();
-
-                    if (! $allowListicle && $this->queryIntent->isListicleUrl($h->url)) {
-                        return false;
-                    }
-
-                    if (! $allowListicle && $this->queryIntent->looksLikeContentOrGenericPhrase($h->name)) {
-                        return false;
-                    }
-
-                    return true;
-                });
-
-            if ($brief->isAuthoritativePeopleQuery()) {
-                $hits = $this->rankAuthoritativeHits($hits);
-            }
-
-            return $hits->values();
-        } catch (\Throwable $e) {
-            Log::warning('Serper search exception', ['error' => $e->getMessage()]);
-
+    /**
+     * Parallel Serper fan-out (chunks of 4) for faster first-batch discovery.
+     *
+     * @param  list<string>  $queries
+     * @return Collection<int, RawDiscoveryHit>
+     */
+    public function searchMany(array $queries, IcpBrief $brief, SearchContext $ctx): Collection
+    {
+        if (! $this->isEnabled() || $queries === []) {
             return collect();
         }
+
+        $baseUrl = rtrim((string) config('services.serper.base_url'), '/');
+        $resultLimit = $this->resolveResultLimit($brief, $ctx);
+        $hits = collect();
+        $uniqueQueries = array_values(array_unique(array_filter(array_map(
+            fn(string $q): string => $this->sanitizeQuery($q),
+            $queries,
+        ))));
+
+        foreach (array_chunk($uniqueQueries, 4) as $chunk) {
+            $responses = Http::pool(function ($pool) use ($chunk, $baseUrl, $resultLimit) {
+                foreach ($chunk as $index => $query) {
+                    $pool->as((string) $index)
+                        ->timeout(30)
+                        ->withHeaders([
+                            'X-API-KEY' => (string) config('services.serper.api_key'),
+                            'Content-Type' => 'application/json',
+                        ])
+                        ->post($baseUrl.'/search', [
+                            'q' => $query,
+                            'num' => $resultLimit,
+                        ]);
+                }
+            });
+
+            foreach ($chunk as $index => $query) {
+                $response = $responses[(string) $index] ?? null;
+                if (! $response instanceof Response) {
+                    continue;
+                }
+
+                $activeQuery = $query;
+                $activeLimit = $resultLimit;
+
+                if ($this->isFreeTierPatternBlock($response) && ($resultLimit > 10 || $this->looksComplex($query))) {
+                    $safeQuery = $this->simplifyQuery($query);
+                    $safeLimit = min(10, $resultLimit);
+                    Log::info('Serper free-tier pattern block; retrying with safer query/num', [
+                        'original_query' => $query,
+                        'safe_query' => $safeQuery,
+                        'original_num' => $resultLimit,
+                        'safe_num' => $safeLimit,
+                    ]);
+                    $response = $this->postSearch($baseUrl, $safeQuery, $safeLimit);
+                    $activeQuery = $safeQuery;
+                    $activeLimit = $safeLimit;
+                }
+
+                try {
+                    ApiUsage::query()->create([
+                        'organization_id' => $ctx->organizationId,
+                        'provider' => 'serper',
+                        'endpoint' => 'search',
+                        'units' => 1,
+                        'estimated_cost' => 0.005,
+                        'meta' => [
+                            'status' => $response->status(),
+                            'query' => $activeQuery,
+                            'num' => $activeLimit,
+                            'error' => $response->successful() ? null : mb_substr($response->body(), 0, 240),
+                        ],
+                    ]);
+                } catch (\Throwable $e) {
+                    Log::debug('Serper ApiUsage write skipped', ['error' => $e->getMessage()]);
+                }
+
+                if (! $response->successful()) {
+                    Log::warning('Serper search failed', ['status' => $response->status(), 'body' => $response->body()]);
+
+                    continue;
+                }
+
+                $variantBrief = $brief->withSearchQueryOverride($activeQuery);
+                $hits = $hits->merge($this->mapOrganicHits($response->json('organic') ?? [], $variantBrief));
+            }
+        }
+
+        if ($brief->isAuthoritativePeopleQuery()) {
+            $hits = $this->rankAuthoritativeHits($hits);
+        }
+
+        return $hits->values();
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $organic
+     * @return Collection<int, RawDiscoveryHit>
+     */
+    private function mapOrganicHits(array $organic, IcpBrief $brief): Collection
+    {
+        return collect($organic)
+            ->map(function (array $item) use ($brief) {
+                $title = (string) ($item['title'] ?? 'Unknown');
+                $url = $item['link'] ?? null;
+                $name = $this->resolveHitName($title, $url, $brief);
+
+                return new RawDiscoveryHit(
+                    name: trim($name),
+                    source: 'web',
+                    provider: 'serper',
+                    website: isset($item['link']) ? parse_url((string) $item['link'], PHP_URL_HOST) : null,
+                    location: $brief->territories[0] ?? null,
+                    sector: $brief->industries[0] ?? null,
+                    snippet: $item['snippet'] ?? null,
+                    url: $url,
+                    meta: ['title' => $title, 'target' => $brief->target],
+                );
+            })
+            ->filter(function (RawDiscoveryHit $h) use ($brief) {
+                if ($h->name === '') {
+                    return false;
+                }
+
+                $allowListicle = $brief->isPeopleSearch() || $brief->isListiclePeopleQuery() || $brief->isAuthoritativePeopleQuery();
+
+                if (! $allowListicle && $this->queryIntent->isListicleUrl($h->url)) {
+                    return false;
+                }
+
+                if (! $allowListicle && $this->queryIntent->looksLikeContentOrGenericPhrase($h->name)) {
+                    return false;
+                }
+
+                return true;
+            });
     }
 
     private function resolveResultLimit(IcpBrief $brief, SearchContext $ctx): int
