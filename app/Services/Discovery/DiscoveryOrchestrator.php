@@ -195,21 +195,21 @@ class DiscoveryOrchestrator
                     );
                 } else {
                     $firstPassQueries = null;
+                    // LinkedIn-first shortcut only for small people batches (chat default),
+                    // not company searches or high-capacity fan-out / backfill paths.
                     if (
                         in_array($intent, ['generate_leads', 'generate_more_leads'], true)
-                        && $effectiveLimit <= QueryVariationGenerator::FAN_OUT_THRESHOLD
+                        && $brief->isPeopleSearch()
+                        && $effectiveLimit <= QueryIntentService::DEFAULT_LEAD_LIMIT
                     ) {
                         $firstPassQueries = $this->leadQueryNormalizer->firstBatchPeopleQueries($icp);
-                        if ($firstPassQueries !== [] && ! $brief->isPeopleSearch()) {
-                            $brief = $brief->withTarget(QueryIntentService::TARGET_PEOPLE);
-                        }
                     }
 
                     [$hits, $sourcesChecked, $fanOutMeta] = $this->collectHits(
                         $brief,
                         $ctx,
                         $effectiveLimit,
-                        $firstPassQueries,
+                        $firstPassQueries !== [] ? $firstPassQueries : null,
                     );
                 }
 
