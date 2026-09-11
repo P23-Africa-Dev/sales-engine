@@ -57,11 +57,18 @@ class ChatIntentTest extends TestCase
                         ]],
                     ], 200);
                 }
-                if (str_contains($body, 'For each research source')) {
+
+                // Merged synthesize + relevance tagging in one JSON response.
+                if (str_contains($body, '"narrative"') || str_contains($body, 'Return JSON only')) {
                     return Http::response([
                         'choices' => [[
                             'message' => [
-                                'content' => '{"reasons":[{"index":0,"icp_relevance_reason":"Aligns with FMCG focus in West Africa."}]}',
+                                'content' => json_encode([
+                                    'narrative' => "## Executive Summary\nKey FMCG trends in West Africa [1].",
+                                    'reasons' => [
+                                        ['index' => 1, 'icp_relevance_reason' => 'Aligns with FMCG focus in West Africa.'],
+                                    ],
+                                ]),
                             ],
                         ]],
                     ], 200);
@@ -70,7 +77,12 @@ class ChatIntentTest extends TestCase
                 return Http::response([
                     'choices' => [[
                         'message' => [
-                            'content' => "## Executive Summary\nKey FMCG trends in West Africa.",
+                            'content' => json_encode([
+                                'narrative' => "## Executive Summary\nKey FMCG trends in West Africa [1].",
+                                'reasons' => [
+                                    ['index' => 1, 'icp_relevance_reason' => 'Aligns with FMCG focus in West Africa.'],
+                                ],
+                            ]),
                         ],
                     ]],
                 ], 200);

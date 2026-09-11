@@ -16,6 +16,7 @@ use App\Services\Outreach\OutreachDraftService;
 use App\Services\Research\ResearchOrchestrator;
 use App\Support\TimeGreeting;
 use App\Jobs\ProcessChatIntentJob;
+use App\Jobs\ProcessQuickResearchJob;
 use InvalidArgumentException;
 
 class ChatService
@@ -205,11 +206,19 @@ class ChatService
                 ],
             ]);
 
-            ProcessChatIntentJob::dispatch(
-                $run->id,
-                $userMessage->id,
-                $clientTimezone,
-            )->onQueue('discovery');
+            if ($intent === 'quick_research') {
+                ProcessQuickResearchJob::dispatch(
+                    $run->id,
+                    $userMessage->id,
+                    $clientTimezone,
+                )->onQueue('research');
+            } else {
+                ProcessChatIntentJob::dispatch(
+                    $run->id,
+                    $userMessage->id,
+                    $clientTimezone,
+                )->onQueue('discovery');
+            }
 
             if (! $session->title) {
                 $session->update(['title' => mb_substr($body, 0, 80)]);

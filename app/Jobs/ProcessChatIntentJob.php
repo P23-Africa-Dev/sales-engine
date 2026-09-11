@@ -6,6 +6,7 @@ use App\Models\ChatMessage;
 use App\Models\DiscoveryRun;
 use App\Models\Lead;
 use App\Services\Chat\ChatService;
+use App\Services\Research\ResearchOrchestrator;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\TimeoutExceededException;
@@ -71,6 +72,44 @@ class ProcessChatIntentJob implements ShouldQueue
                 || str_contains(mb_strtolower($error), 'attempted too many times');
 
             if ($shouldRecover && in_array($run->status, ['queued', 'running', 'failed'], true)) {
+                if ((string) $run->intent === 'quick_research') {
+                    $sources = $this->recoverResearchSourcesFromRun($run);
+                    if ($sources !== []) {
+                        $query = (string) ($run->query ?? 'your question');
+                        $narrative = ResearchOrchestrator::formatRecoveredResearchBrief($query, $sources);
+                        $run->update([
+                            'status' => 'completed',
+                            'error' => null,
+                            'result_summary' => array_merge(
+                                is_array($run->result_summary) ? $run->result_summary : [],
+                                [
+                                    'source_count' => count($sources),
+                                    'sources' => $sources,
+                                    'soft_completed_on_timeout' => true,
+                                ]
+                            ),
+                            'finished_at' => now(),
+                        ]);
+                        $this->finalizePlaceholder(
+                            $run,
+                            $narrative,
+                            null,
+                            [
+                                'timed_out' => false,
+                                'soft_completed_on_timeout' => true,
+                                'research' => [
+                                    'sub_queries' => is_array($run->result_summary['sub_queries'] ?? null)
+                                        ? $run->result_summary['sub_queries']
+                                        : [],
+                                    'sources' => $sources,
+                                ],
+                            ],
+                        );
+
+                        return;
+                    }
+                }
+
                 $recoveredLeads = $this->recoverLeadsCreatedDuringRun($run);
             }
 
@@ -198,6 +237,40 @@ class ProcessChatIntentJob implements ShouldQueue
                 ];
             })
             ->all();
+    }
+
+    /**
+     * @return list<array{title: string, url: ?string, snippet: ?string, provider: ?string, icp_relevance_reason?: string}>
+     */
+    private function recoverResearchSourcesFromRun(DiscoveryRun $run): array
+    {
+        $summary = is_array($run->result_summary) ? $run->result_summary : [];
+        $sources = $summary['sources'] ?? [];
+        if (! is_array($sources) || $sources === []) {
+            return [];
+        }
+
+        $normalized = [];
+        foreach ($sources as $source) {
+            if (! is_array($source)) {
+                continue;
+            }
+            $title = trim((string) ($source['title'] ?? ''));
+            if ($title === '') {
+                continue;
+            }
+            $normalized[] = [
+                'title' => $title,
+                'url' => isset($source['url']) ? (string) $source['url'] : null,
+                'snippet' => isset($source['snippet']) ? (string) $source['snippet'] : null,
+                'provider' => isset($source['provider']) ? (string) $source['provider'] : null,
+                'icp_relevance_reason' => isset($source['icp_relevance_reason'])
+                    ? (string) $source['icp_relevance_reason']
+                    : null,
+            ];
+        }
+
+        return $normalized;
     }
 
     private function formatRecoveredNarration(int $count): string

@@ -23,7 +23,9 @@ class ChatIntentResolver
         $organization ??= Organization::query()->find($session->organization_id);
         $effectiveBody = $body;
 
-        if ($organization) {
+        // Skip the expensive contextualize GLM call when the prompt is already
+        // self-contained — especially important for Quick Research latency.
+        if ($organization && $this->needsConversationContext($session, $body)) {
             $contextualized = $this->memory->contextualize($session, $body, $organization);
             $effectiveBody = $contextualized['effective_query'];
         }
@@ -49,6 +51,44 @@ class ChatIntentResolver
             'body' => $body,
             'effective_body' => $effectiveBody,
         ];
+    }
+
+    /**
+     * True when the latest message likely depends on prior turns (pronouns,
+     * very short follow-ups, or explicit references to earlier context).
+     */
+    public function needsConversationContext(ChatSession $session, string $body): bool
+    {
+        $normalized = mb_strtolower(trim($body));
+        if ($normalized === '') {
+            return false;
+        }
+
+        // Short follow-ups almost always need history ("and Nigeria?", "more on that").
+        $wordCount = count(preg_split('/\s+/u', $normalized, -1, PREG_SPLIT_NO_EMPTY) ?: []);
+        if ($wordCount > 0 && $wordCount <= 6) {
+            return $this->sessionHasPriorUserTurns($session);
+        }
+
+        $referencePatterns = [
+            '/\b(this|that|these|those|it|they|them|their)\b/u',
+            '/\b(above|earlier|previous|prior|same|again)\b/u',
+            '/\b(also|more|another|expand|elaborate|follow[- ]?up)\b/u',
+            '/\b(what about|how about|and for)\b/u',
+        ];
+
+        foreach ($referencePatterns as $pattern) {
+            if (preg_match($pattern, $normalized)) {
+                return $this->sessionHasPriorUserTurns($session);
+            }
+        }
+
+        return false;
+    }
+
+    private function sessionHasPriorUserTurns(ChatSession $session): bool
+    {
+        return $this->memory->recentTurns($session, 2) !== [];
     }
 
     public function looksLikeLeadGeneration(string $body): bool
