@@ -48,8 +48,20 @@ class LeadProfileEnrichmentService
         string $queryContext = '',
         array $extracted = [],
     ): EnrichedLeadProfile {
-        if (! $this->shouldEnrich($icp)) {
-            return new EnrichedLeadProfile;
+        if (! $this->shouldEnrich($icp) || $this->deferContactWaterfall) {
+            // First-batch path: keep title/company/linkedin from extraction; enrich contacts later.
+            return new EnrichedLeadProfile(
+                title: trim((string) ($extracted['title'] ?? '')),
+                companyName: trim((string) ($extracted['company'] ?? '')),
+                email: trim((string) ($extracted['email'] ?? '')),
+                phone: trim((string) ($extracted['phone'] ?? '')),
+                website: trim((string) ($extracted['website'] ?? '')),
+                profileUrls: array_values(array_filter([
+                    trim((string) ($extracted['linkedin_url'] ?? '')),
+                ])),
+                nextAction: 'Review profile and draft outreach',
+                confidence: 40.0,
+            );
         }
 
         $cacheKey = $this->cacheKey($organization->id, $personName);

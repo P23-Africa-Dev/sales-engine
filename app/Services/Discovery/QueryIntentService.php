@@ -77,7 +77,7 @@ class QueryIntentService
             return self::TARGET_COMPANIES;
         }
 
-        if (preg_match('/\b(people|person|persons|executives?|founders?|ceos?|cto|cfo|vp|directors?|contacts?|individuals?|partnership contacts?|decision makers?|professionals?|influencers?|leaders?|men|women|billionaires?|millionaires?|wealthiest|richest|magnates?|names|prospects?)\b/u', $normalized)) {
+        if (preg_match('/\b(people|person|persons|executives?|founders?|ceos?|cto|cfo|vp|directors?|contacts?|individuals?|partnership contacts?|decision makers?|professionals?|influencers?|leaders?|men|women|billionaires?|millionaires?|wealthiest|richest|magnates?|names|prospects?|head of|managers?)\b/u', $normalized)) {
             return self::TARGET_PEOPLE;
         }
 

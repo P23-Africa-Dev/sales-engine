@@ -238,8 +238,17 @@ class ExtractionService
      */
     private function extractPerson(RawDiscoveryHit $hit, IcpBrief $brief, Organization $organization): array
     {
+        // Fast path: LinkedIn profile URLs and clear snippet names — skip slow GLM.
+        $heuristic = $this->fallbackPerson($hit, $brief);
+        if (filled($heuristic['person_name'] ?? null) && ! ($heuristic['low_confidence'] ?? true)) {
+            return $heuristic;
+        }
+        if ($this->isLinkedInProfileUrl($hit->url) && filled($heuristic['person_name'] ?? null)) {
+            return $heuristic;
+        }
+
         if (! $this->glm->isConfigured()) {
-            return $this->fallbackPerson($hit, $brief);
+            return $heuristic;
         }
 
         try {
@@ -259,11 +268,11 @@ class ExtractionService
                         ],
                     ], JSON_UNESCAPED_UNICODE),
                 ],
-            ], 'extract', $organization);
+            ], 'extract', $organization, ['timeout' => 12, 'max_tokens' => 400]);
 
             $personName = trim((string) ($result['person_name'] ?? ''));
             if ($personName === '' || mb_strtolower($personName) === mb_strtolower($brief->name)) {
-                return $this->fallbackPerson($hit, $brief);
+                return $heuristic;
             }
 
             $summary = (string) ($result['summary'] ?? $hit->snippet ?? $hit->name);
@@ -304,9 +313,9 @@ class ExtractionService
                 ]),
                 'commercial_signals' => [],
                 'low_confidence' => false,
-            ], fn ($v) => $v !== null && $v !== '');
+            ], fn($v) => $v !== null && $v !== '');
         } catch (\Throwable) {
-            return $this->fallbackPerson($hit, $brief);
+            return $heuristic;
         }
     }
 
@@ -344,9 +353,36 @@ class ExtractionService
      */
     private function fallbackPerson(RawDiscoveryHit $hit, IcpBrief $brief): array
     {
-        $name = $hit->name;
+        $name = '';
+        $linkedinUrl = null;
+        $lowConfidence = true;
 
-        if ($this->queryIntent->looksLikeArticleTitle($name) && ! $brief->isListiclePeopleQuery()) {
+        if ($this->isLinkedInProfileUrl($hit->url)) {
+            $fromSlug = $this->personNameFromLinkedInUrl((string) $hit->url);
+            if ($fromSlug !== '') {
+                $name = $fromSlug;
+                $linkedinUrl = $hit->url;
+                $lowConfidence = false;
+            }
+        }
+
+        if ($name === '') {
+            $fromSnippet = $this->personNameFromSnippet((string) ($hit->snippet ?? ''), (string) $hit->name);
+            if ($fromSnippet !== '') {
+                $name = $fromSnippet;
+                $lowConfidence = false;
+            }
+        }
+
+        if ($name === '') {
+            $name = $hit->name;
+        }
+
+        if (
+            ($this->queryIntent->looksLikeArticleTitle($name) || $this->queryIntent->looksLikeContentOrGenericPhrase($name))
+            && ! $brief->isListiclePeopleQuery()
+            && ! $this->isLinkedInProfileUrl($hit->url)
+        ) {
             return [
                 'name' => '',
                 'person_name' => '',
@@ -357,14 +393,76 @@ class ExtractionService
             ];
         }
 
-        return [
+        return array_filter([
             'name' => $name,
             'person_name' => $name,
+            'linkedin_url' => $linkedinUrl,
             'summary' => $this->queryIntent->isListicleUrl($hit->url) ? '' : ($hit->snippet ?? $name),
-            'business_fields' => ['source_url' => $hit->url],
+            'business_fields' => array_filter([
+                'source_url' => $hit->url,
+                'linkedin_url' => $linkedinUrl,
+            ]),
             'commercial_signals' => [],
-            'low_confidence' => true,
-        ];
+            'low_confidence' => $lowConfidence,
+        ], fn($v) => $v !== null && $v !== '');
+    }
+
+    private function isLinkedInProfileUrl(?string $url): bool
+    {
+        if (! filled($url)) {
+            return false;
+        }
+
+        $host = mb_strtolower((string) parse_url($url, PHP_URL_HOST));
+        $path = (string) parse_url($url, PHP_URL_PATH);
+
+        return str_contains($host, 'linkedin.com') && (bool) preg_match('#/in/[^/]+#', $path);
+    }
+
+    private function personNameFromLinkedInUrl(string $url): string
+    {
+        $path = parse_url($url, PHP_URL_PATH) ?? '';
+        if (! preg_match('#/in/([^/?]+)#', $path, $matches)) {
+            return '';
+        }
+
+        $slug = urldecode($matches[1]);
+        // Drop trailing id segments that contain digits (e.g. -80511172, -b1a81334).
+        while (preg_match('/^(.*)-([a-z]*\d[a-z0-9]*)$/iu', $slug, $idMatch)) {
+            $slug = $idMatch[1];
+        }
+        $slug = str_replace(['-', '_'], ' ', $slug);
+        $candidate = trim(ucwords(mb_strtolower($slug)));
+
+        if ($candidate === '' || $this->queryIntent->looksLikeContentOrGenericPhrase($candidate)) {
+            return '';
+        }
+
+        return $candidate;
+    }
+
+    private function personNameFromSnippet(string $snippet, string $title): string
+    {
+        $haystack = trim($snippet . ' ' . $title);
+        if ($haystack === '') {
+            return '';
+        }
+
+        if (preg_match('/\b([A-Z][\p{L}\']+(?:\s+[A-Z][\p{L}\']+){1,2})\s+(?:has been appointed|appointed|is the|joins as|named)\b/u', $haystack, $m)) {
+            $candidate = trim($m[1]);
+            if (! $this->queryIntent->looksLikeContentOrGenericPhrase($candidate)) {
+                return $candidate;
+            }
+        }
+
+        if (preg_match('/^([A-Z][\p{L}\']+(?:\s+[A-Z][\p{L}\']+){1,2})\s*[-–|]/u', $title, $m)) {
+            $candidate = trim($m[1]);
+            if (! $this->queryIntent->looksLikeContentOrGenericPhrase($candidate)) {
+                return $candidate;
+            }
+        }
+
+        return '';
     }
 
     private function resolvePersonUrl(?string $candidate, ?string $fallback): ?string

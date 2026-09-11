@@ -135,7 +135,11 @@ readonly class IcpBrief
             }
 
             if ($this->isPeopleSearch()) {
-                // Keep primary query free-tier friendly (no nested OR / heavy quotes).
+                // Avoid stacking extra titles when the query already names a role.
+                if (preg_match('/\b(ceo|cto|cfo|coo|founder|director|manager|head of|vp|president)\b/iu', $cleaned)) {
+                    return trim($cleaned);
+                }
+
                 return trim($cleaned).' CEO founder managing director';
             }
 

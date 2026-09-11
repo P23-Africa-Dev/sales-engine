@@ -101,12 +101,16 @@ class LeadQueryNormalizer
         $territories = array_values(array_filter(array_map('trim', $config['territories'] ?? [])));
         $decisionMakers = array_values(array_filter(array_map('trim', $config['decisionMakers'] ?? [])));
 
+        $title = $decisionMakers[0] ?? 'CEO';
+        $title = trim(preg_replace('/\s*\/\s*/u', ' ', $title) ?? $title);
+        $territory = $territories[0] ?? '';
+        $territory = trim(preg_replace('/\s*,.*$/u', '', $territory) ?? $territory);
+
         $parts = array_filter([
             $theme,
-            implode(' ', array_slice($industries, 0, 2)),
-            implode(' ', array_slice($territories, 0, 2)),
-            implode(' ', array_slice($decisionMakers !== [] ? $decisionMakers : ['CEO', 'founder'], 0, 3)),
-            'partnerships distributors',
+            $industries[0] ?? null,
+            $territory !== '' ? $territory : null,
+            $title,
         ]);
 
         $query = trim(preg_replace('/\s+/u', ' ', implode(' ', $parts)) ?? '');
@@ -117,13 +121,53 @@ class LeadQueryNormalizer
     private function icpSeededQuery(IcpProfile $icp): string
     {
         $config = is_array($icp->config) ? $icp->config : [];
+        $industries = array_values(array_filter(array_map('trim', $config['industries'] ?? [])));
+        $territories = array_values(array_filter(array_map('trim', $config['territories'] ?? [])));
+        $decisionMakers = array_values(array_filter(array_map('trim', $config['decisionMakers'] ?? [])));
+
+        $title = $decisionMakers[0] ?? 'CEO';
+        $title = trim(preg_replace('/\s*\/\s*/u', ' ', $title) ?? $title);
+        $territory = $territories[0] ?? '';
+        $territory = trim(preg_replace('/\s*,.*$/u', '', $territory) ?? $territory);
+
         $parts = array_filter([
-            implode(' ', array_slice(array_values($config['industries'] ?? []), 0, 2)),
-            implode(' ', array_slice(array_values($config['territories'] ?? []), 0, 2)),
-            implode(' ', array_slice(array_values($config['decisionMakers'] ?? ['CEO', 'founder']), 0, 3)),
-            'companies startups',
+            $industries[0] ?? null,
+            $territory !== '' ? $territory : null,
+            $title,
         ]);
 
-        return trim(implode(' ', $parts)) ?: 'B2B decision makers founders CEO';
+        return trim(implode(' ', $parts)) ?: 'B2B CEO founder';
+    }
+
+    /**
+     * Short LinkedIn-friendly queries for high-yield first batches.
+     *
+     * @return list<string>
+     */
+    public function firstBatchPeopleQueries(IcpProfile $icp): array
+    {
+        $config = is_array($icp->config) ? $icp->config : [];
+        $industries = array_values(array_filter(array_map('trim', $config['industries'] ?? [])));
+        $territories = array_values(array_filter(array_map('trim', $config['territories'] ?? [])));
+        $decisionMakers = array_values(array_filter(array_map('trim', $config['decisionMakers'] ?? [])));
+        if ($decisionMakers === []) {
+            $decisionMakers = ['CEO', 'Founder', 'Head of Sales'];
+        }
+
+        $industry = $industries[0] ?? 'B2B';
+        $territory = $territories[0] ?? '';
+        $territory = trim(preg_replace('/\s*,.*$/u', '', $territory) ?? $territory);
+
+        $queries = [];
+        foreach (array_slice($decisionMakers, 0, 3) as $i => $rawTitle) {
+            $title = trim(preg_replace('/\s*\/\s*/u', ' ', $rawTitle) ?? $rawTitle);
+            if ($title === '') {
+                continue;
+            }
+            $base = trim('"'.$title.'" '.$industry.($territory !== '' ? ' '.$territory : ''));
+            $queries[] = $i % 2 === 0 ? $base.' site:linkedin.com/in' : $base;
+        }
+
+        return array_values(array_unique(array_filter($queries)));
     }
 }

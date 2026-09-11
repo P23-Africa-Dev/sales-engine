@@ -62,6 +62,7 @@ class DiscoveryOrchestrator
         private readonly LeadProfileEnrichmentService $enrichment,
         private readonly QueryVariationGenerator $queryVariationGenerator,
         private readonly ProfileUrlValidator $profileUrlValidator,
+        private readonly LeadQueryNormalizer $leadQueryNormalizer,
     ) {}
 
     public function setQualityThreshold(string $threshold): self
@@ -164,9 +165,11 @@ class DiscoveryOrchestrator
                 $isBackfill = $pass > 0;
                 if ($isBackfill) {
                     // Skip deeper search once we have a usable first batch or soft time elapsed.
-                    if (count($leadsPayload) >= $minAcceptableYield
+                    if (
+                        count($leadsPayload) >= $minAcceptableYield
                         || (count($leadsPayload) >= $minUsableBatch && $this->pastSoftDeadline())
-                        || count($leadsPayload) >= 1 && $this->pastSoftDeadline()) {
+                        || count($leadsPayload) >= 1 && $this->pastSoftDeadline()
+                    ) {
                         break;
                     }
 
@@ -191,7 +194,23 @@ class DiscoveryOrchestrator
                         $backfillQueries,
                     );
                 } else {
-                    [$hits, $sourcesChecked, $fanOutMeta] = $this->collectHits($brief, $ctx, $effectiveLimit);
+                    $firstPassQueries = null;
+                    if (
+                        in_array($intent, ['generate_leads', 'generate_more_leads'], true)
+                        && $effectiveLimit <= QueryVariationGenerator::FAN_OUT_THRESHOLD
+                    ) {
+                        $firstPassQueries = $this->leadQueryNormalizer->firstBatchPeopleQueries($icp);
+                        if ($firstPassQueries !== [] && ! $brief->isPeopleSearch()) {
+                            $brief = $brief->withTarget(QueryIntentService::TARGET_PEOPLE);
+                        }
+                    }
+
+                    [$hits, $sourcesChecked, $fanOutMeta] = $this->collectHits(
+                        $brief,
+                        $ctx,
+                        $effectiveLimit,
+                        $firstPassQueries,
+                    );
                 }
 
                 $allQueriesExecuted = array_values(array_unique(array_merge(
@@ -380,6 +399,15 @@ class DiscoveryOrchestrator
     private function pastSoftDeadline(): bool
     {
         return $this->startedAt > 0 && (microtime(true) - $this->startedAt) >= self::FIRST_BATCH_SOFT_SECONDS;
+    }
+
+    private function remainingSeconds(): float
+    {
+        if ($this->deadlineAt <= 0) {
+            return 999;
+        }
+
+        return max(0, $this->deadlineAt - microtime(true));
     }
 
     private function shouldUseFanOut(int $limit): bool
@@ -589,29 +617,49 @@ class DiscoveryOrchestrator
         $seenNames = $seenLeadNames;
         $gatherCap = max($effectiveLimit, (int) ceil($effectiveLimit * 1.5));
 
+        $orderedHits = $hits
+            ->unique(fn(RawDiscoveryHit $h) => mb_strtolower($h->name . '|' . (string) $h->url))
+            ->sortByDesc(function (RawDiscoveryHit $h): int {
+                $url = mb_strtolower((string) $h->url);
+                if (str_contains($url, 'linkedin.com/in/')) {
+                    return 100;
+                }
+                if (str_contains($url, 'linkedin.com/')) {
+                    return 40;
+                }
+
+                return 0;
+            })
+            ->values();
+
         /** @var RawDiscoveryHit $hit */
-        foreach ($hits->unique(fn(RawDiscoveryHit $h) => mb_strtolower($h->name)) as $hit) {
-            if (count($candidates) >= $gatherCap || $this->pastDeadline()) {
+        foreach ($orderedHits as $hit) {
+            if (count($candidates) >= $gatherCap || $this->pastDeadline() || $this->remainingSeconds() < 20) {
                 break;
             }
 
             // Gate junk titles before expensive GLM extract/score.
-            if ($this->queryIntent->looksLikeContentOrGenericPhrase($hit->name)) {
+            if (
+                $this->queryIntent->looksLikeContentOrGenericPhrase($hit->name)
+                && ! str_contains(mb_strtolower((string) $hit->url), 'linkedin.com/in/')
+            ) {
                 continue;
             }
 
             if ($brief->isPeopleSearch()) {
                 $normalizedHit = $this->personNameValidator->normalizePersonName($hit->name);
                 $probeName = $normalizedHit !== '' ? $normalizedHit : $hit->name;
-                if (! $this->personNameValidator->isValidPersonName($probeName, [
-                    'linkedin_url' => $hit->url,
-                    'title' => $hit->snippet,
-                    'company' => $hit->website,
-                ]) && ! str_contains(mb_strtolower((string) $hit->url), 'linkedin.com/in/')) {
-                    // Still allow company-shaped hits through extraction for company target flips.
-                    if (! $this->companyNameValidator->isValidCompanyName($hit->name, [])) {
-                        continue;
-                    }
+                $isLinkedInProfile = str_contains(mb_strtolower((string) $hit->url), 'linkedin.com/in/');
+                if (
+                    ! $isLinkedInProfile
+                    && ! $this->personNameValidator->isValidPersonName($probeName, [
+                        'linkedin_url' => $hit->url,
+                        'title' => $hit->snippet,
+                        'company' => $hit->website,
+                    ])
+                    && ! $this->companyNameValidator->isValidCompanyName($hit->name, [])
+                ) {
+                    continue;
                 }
             } elseif (! $this->companyNameValidator->isValidCompanyName($hit->name, [
                 'website' => $hit->website,
@@ -701,12 +749,17 @@ class DiscoveryOrchestrator
             }
             $fromListicle = (bool) ($extracted['from_listicle'] ?? false);
 
-            $scores = $this->scoring->score(array_merge($extracted, [
+            $scorePayload = array_merge($extracted, [
                 'name' => $displayName,
                 'source' => $hit->source,
                 'provider' => $hit->provider,
                 'authoritative_source' => $this->isAuthoritativeUrl($hit->url),
-            ]), $brief, $organization);
+            ]);
+
+            // First-batch / near-deadline: heuristic scoring only (skip 60s GLM).
+            $scores = ($this->deferContactEnrichment || $this->pastSoftDeadline() || $this->remainingSeconds() < 45)
+                ? $this->scoring->heuristicScore($scorePayload, $brief)
+                : $this->scoring->score($scorePayload, $brief, $organization);
 
             $scores = $this->applyScorePenalties($scores, $displayName, $brief, $extracted, $fromListicle);
 

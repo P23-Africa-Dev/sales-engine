@@ -45,6 +45,7 @@ class AppServiceProvider extends ServiceProvider
                 enrichment: $app->make(\App\Services\Enrichment\LeadProfileEnrichmentService::class),
                 queryVariationGenerator: $app->make(\App\Services\Discovery\QueryVariationGenerator::class),
                 profileUrlValidator: $app->make(\App\Services\Enrichment\ProfileUrlValidator::class),
+                leadQueryNormalizer: $app->make(\App\Services\Discovery\LeadQueryNormalizer::class),
             );
         });
 

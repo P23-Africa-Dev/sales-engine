@@ -24,7 +24,7 @@ spec:
         - name: do-registry
       containers:
         - name: worker
-          image: registry.digitalocean.com/con-reg/sales-engine-api:5d9a195
+          image: registry.digitalocean.com/con-reg/sales-engine-api:00e1eb9
           imagePullPolicy: IfNotPresent
           command:
             - /bin/sh

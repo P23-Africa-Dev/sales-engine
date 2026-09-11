@@ -61,6 +61,7 @@ class LeadQueryNormalizerTest extends TestCase
         $this->assertStringContainsString('FinTech', $out);
         $this->assertStringContainsString('Lagos', $out);
         $this->assertStringContainsString('CEO', $out);
+        $this->assertStringNotContainsString('CTO', $out);
     }
 
     public function test_ideal_prospect_for_brand_seeds_from_icp(): void
@@ -78,6 +79,25 @@ class LeadQueryNormalizerTest extends TestCase
         $out = $normalizer->normalize('kind generate ideal prospect for my brand', $icp);
 
         $this->assertStringNotContainsString('kind generate ideal', mb_strtolower($out));
-        $this->assertMatchesRegularExpression('/fmcg|textile|lagos|nigeria|sales|ceo/i', $out);
+        $this->assertMatchesRegularExpression('/fmcg|textile|lagos|sales/i', $out);
+        $this->assertLessThanOrEqual(80, mb_strlen($out), 'Seed query should stay short for Serper yield');
+    }
+
+    public function test_first_batch_people_queries_prefer_linkedin(): void
+    {
+        $normalizer = app(LeadQueryNormalizer::class);
+        $icp = new IcpProfile([
+            'name' => 'Tommy Test',
+            'config' => [
+                'industries' => ['textile'],
+                'territories' => ['Lagos, NG'],
+                'decisionMakers' => ['Head of Sales', 'CEO'],
+            ],
+        ]);
+
+        $queries = $normalizer->firstBatchPeopleQueries($icp);
+        $this->assertNotEmpty($queries);
+        $this->assertTrue(collect($queries)->contains(fn ($q) => str_contains($q, 'site:linkedin.com/in')));
+        $this->assertTrue(collect($queries)->contains(fn ($q) => str_contains($q, 'Head of Sales')));
     }
 }

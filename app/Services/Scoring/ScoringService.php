@@ -11,6 +11,43 @@ class ScoringService
     public function __construct(private readonly GlmClient $glm) {}
 
     /**
+     * Fast heuristic score for first-batch discovery (no GLM round-trip).
+     *
+     * @param  array<string, mixed>  $companyPayload
+     * @return array{icp_fit_score: float, intent_score: float, priority_score: float, query_relevance_score: float, rationale: string, icp_relevance_reason: string}
+     */
+    public function heuristicScore(array $companyPayload, IcpBrief $brief): array
+    {
+        $hasUserQuery = $brief->hasUserQuery();
+        $isFactualQuery = $brief->isAuthoritativePeopleQuery();
+        $queryScore = $hasUserQuery
+            ? $this->heuristicQueryRelevance($companyPayload, $brief->query)
+            : 55.0;
+        $icpBase = 55.0 + (count($brief->industries) > 0 ? 12 : 0) + (count($brief->territories) > 0 ? 8 : 0);
+        if (filled($companyPayload['linkedin_url'] ?? null) || filled($companyPayload['title'] ?? null)) {
+            $icpBase += 8;
+        }
+        $icpFit = min(92, $icpBase);
+        $priority = $hasUserQuery
+            ? min(95, ($queryScore * 0.55) + ($icpFit * 0.45))
+            : min(92, $icpFit);
+
+        return [
+            'icp_fit_score' => $icpFit,
+            'intent_score' => 45.0,
+            'priority_score' => $priority,
+            'query_relevance_score' => $queryScore,
+            'rationale' => 'Heuristic first-batch score.',
+            'icp_relevance_reason' => $this->buildIcpRelevanceReason(
+                $brief,
+                $icpFit,
+                $isFactualQuery,
+                $companyPayload,
+            ),
+        ];
+    }
+
+    /**
      * @param  array<string, mixed>  $companyPayload
      * @return array{icp_fit_score: float, intent_score: float, priority_score: float, query_relevance_score: float, rationale: string, icp_relevance_reason: string}
      */
@@ -20,29 +57,7 @@ class ScoringService
         $isFactualQuery = $brief->isAuthoritativePeopleQuery();
 
         if (! $this->glm->isConfigured()) {
-            $queryScore = $hasUserQuery
-                ? $this->heuristicQueryRelevance($companyPayload, $brief->query)
-                : 50.0;
-            $icpBase = 55.0 + (count($brief->industries) > 0 ? 10 : 0);
-            $icpFit = min(95, $icpBase);
-
-            $priority = $hasUserQuery
-                ? min(95, ($queryScore * 0.7) + ($icpFit * 0.3))
-                : min(95, $icpFit - 5);
-
-            return [
-                'icp_fit_score' => $icpFit,
-                'intent_score' => 40.0,
-                'priority_score' => $priority,
-                'query_relevance_score' => $queryScore,
-                'rationale' => 'Heuristic score (GLM unavailable).',
-                'icp_relevance_reason' => $this->buildIcpRelevanceReason(
-                    $brief,
-                    $icpFit,
-                    $isFactualQuery,
-                    $companyPayload,
-                ),
-            ];
+            return $this->heuristicScore($companyPayload, $brief);
         }
 
         try {
