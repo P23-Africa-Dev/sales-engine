@@ -8,6 +8,8 @@ class QueryIntentService
 
     public const TARGET_COMPANIES = 'companies';
 
+    public const TARGET_BOTH = 'both';
+
     /** First-batch size for count-free generate_leads (keeps fan-out off: FAN_OUT_THRESHOLD = 20). */
     public const DEFAULT_LEAD_LIMIT = 12;
 
@@ -77,15 +79,76 @@ class QueryIntentService
             return self::TARGET_COMPANIES;
         }
 
-        if (preg_match('/\b(people|person|persons|executives?|founders?|ceos?|cto|cfo|vp|directors?|contacts?|individuals?|partnership contacts?|decision makers?|professionals?|influencers?|leaders?|men|women|billionaires?|millionaires?|wealthiest|richest|magnates?|names|prospects?|head of|managers?)\b/u', $normalized)) {
+        $hasCompanyCues = $this->hasCompanyCues($normalized);
+        $hasPeopleCues = $this->hasStrongPeopleCues($normalized);
+        $explicitBoth = (bool) preg_match(
+            '/\b(both|accounts?\s+and\s+contacts?|companies?\s+and\s+(their\s+)?(ceos?|founders?|executives?|contacts?|decision\s+makers?)|people\s+and\s+companies|companies\s+and\s+people|and\s+their\s+(ceos?|founders?|executives?))\b/u',
+            $normalized
+        );
+
+        // "CEOs at FinTech startups" — org nouns are employer context, not the lead entity.
+        $roleAtOrg = (bool) preg_match(
+            '/\b(ceos?|ctos?|cfos?|founders?|executives?|directors?|heads?\s+of|decision\s+makers?|leaders?)\s+(at|of|in|for)\b/u',
+            $normalized
+        );
+
+        if ($explicitBoth) {
+            return self::TARGET_BOTH;
+        }
+
+        if ($roleAtOrg && $hasPeopleCues) {
             return self::TARGET_PEOPLE;
+        }
+
+        if ($hasCompanyCues && $hasPeopleCues) {
+            return self::TARGET_BOTH;
+        }
+
+        if ($hasCompanyCues) {
+            return self::TARGET_COMPANIES;
+        }
+
+        if ($hasPeopleCues) {
+            return self::TARGET_PEOPLE;
+        }
+
+        // Ambiguous ICP seeds / demoted "prospects" → account-first default.
+        return self::TARGET_COMPANIES;
+    }
+
+    private function hasCompanyCues(string $normalized): bool
+    {
+        return (bool) preg_match(
+            '/\b(companies|company|accounts?|organizations?|organisations?|enterprises?|distributors?|vendors?|agencies|agency|startups?|businesses|firms?|brands?)\b/u',
+            $normalized
+        );
+    }
+
+    /**
+     * Strong person cues only — vague sales words like "prospects" / bare "contacts"
+     * / bare "managers" are intentionally excluded so they no longer force people mode.
+     */
+    private function hasStrongPeopleCues(string $normalized): bool
+    {
+        if (preg_match(
+            '/\b(people|person|persons|executives?|founders?|ceos?|cto|cfo|coo|vp|directors?|individuals?|partnership contacts?|decision makers?|professionals?|influencers?|leaders?|men|women|billionaires?|millionaires?|wealthiest|richest|magnates?|names|head of)\b/u',
+            $normalized
+        )) {
+            return true;
         }
 
         if (preg_match('/\bimportant (people|persons|names|contacts|executives)\b/u', $normalized)) {
-            return self::TARGET_PEOPLE;
+            return true;
         }
 
-        return self::TARGET_COMPANIES;
+        // "contacts" / "managers" only count when paired with a role or person noun.
+        if (preg_match('/\b(contacts?|managers?)\b/u', $normalized)
+            && preg_match('/\b(ceo|cto|cfo|founder|executive|director|decision|partnership|sales|marketing|product)\b/u', $normalized)
+        ) {
+            return true;
+        }
+
+        return false;
     }
 
     private function parseLimit(string $normalized, string $intent = 'generate_leads'): int

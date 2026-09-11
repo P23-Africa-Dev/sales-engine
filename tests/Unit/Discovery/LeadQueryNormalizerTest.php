@@ -27,7 +27,7 @@ class LeadQueryNormalizerTest extends TestCase
 
         $this->assertFalse($normalizer->isMetaPromptRequest($out));
         $this->assertStringNotContainsString('prompt', mb_strtolower($out));
-        $this->assertMatchesRegularExpression('/ajo|fintech|ceo|founder|nigeria|africa/i', $out);
+        $this->assertMatchesRegularExpression('/ajo|fintech|companies|nigeria|africa/i', $out);
     }
 
     public function test_specific_ceo_query_is_preserved(): void
@@ -60,8 +60,8 @@ class LeadQueryNormalizerTest extends TestCase
 
         $this->assertStringContainsString('FinTech', $out);
         $this->assertStringContainsString('Lagos', $out);
-        $this->assertStringContainsString('CEO', $out);
-        $this->assertStringNotContainsString('CTO', $out);
+        $this->assertStringContainsString('companies', $out);
+        $this->assertStringNotContainsString('CEO', $out);
     }
 
     public function test_ideal_prospect_for_brand_seeds_from_icp(): void

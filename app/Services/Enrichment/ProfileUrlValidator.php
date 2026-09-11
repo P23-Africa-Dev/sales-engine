@@ -157,6 +157,6 @@ class ProfileUrlValidator
             return false;
         }
 
-        return (bool) preg_match('~/in/[A-Za-z0-9\\-_%]+/?$~', $path);
+        return (bool) preg_match('~/(?:in|company)/[A-Za-z0-9\\-_%]+/?$~', $path);
     }
 }

@@ -334,6 +334,7 @@ class DiscoveryTest extends TestCase
             'stage' => 'new',
             'score' => 80,
             'meta' => [
+                'entity_type' => 'person',
                 'title' => 'CEO',
                 'company' => 'Acme',
                 'email' => 'jane@acme.example.com',
@@ -349,6 +350,168 @@ class DiscoveryTest extends TestCase
             ->assertJsonPath('data.email', 'jane@acme.example.com')
             ->assertJsonPath('data.phone', '+1234567890')
             ->assertJsonPath('data.linkedin_url', 'https://linkedin.com/in/jane-doe')
-            ->assertJsonPath('data.contact_ready', true);
+            ->assertJsonPath('data.contact_ready', true)
+            ->assertJsonPath('data.entity_type', 'person');
+    }
+
+    public function test_company_prompt_sets_entity_type_company_and_keeps_company_name(): void
+    {
+        config([
+            'services.serper.api_key' => 'test-serper',
+            'services.glm.api_key' => '',
+        ]);
+
+        [, $org] = $this->actingAsOrgMember();
+
+        IcpProfile::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'FinTech ICP',
+            'is_active' => true,
+            'config' => array_merge(IcpProfile::defaultConfig(), [
+                'industries' => ['FinTech'],
+                'territories' => ['Lagos, NG'],
+                'minMatchScore' => 1,
+                'enrichContactDetails' => false,
+            ]),
+        ]);
+
+        Http::fake([
+            'google.serper.dev/*' => Http::response([
+                'organic' => [
+                    [
+                        'title' => 'Paystack | Home',
+                        'link' => 'https://www.linkedin.com/company/paystack',
+                        'snippet' => 'FinTech payments company in Lagos.',
+                    ],
+                ],
+            ], 200),
+        ]);
+
+        $response = $this->withHeaders($this->orgHeaders($org))
+            ->postJson('/api/v1/discovery/runs', [
+                'query' => 'FinTech companies in Lagos',
+                'intent' => 'generate_leads',
+                'limit' => 5,
+            ]);
+
+        $response->assertCreated()
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonPath('data.leads.0.entity_type', 'company');
+
+        $leadName = (string) $response->json('data.leads.0.name');
+        $this->assertNotSame('', $leadName);
+        $this->assertStringContainsStringIgnoringCase('Paystack', $leadName);
+
+        $lead = Lead::query()->where('organization_id', $org->id)->first();
+        $this->assertNotNull($lead);
+        $this->assertSame('company', $lead->meta['entity_type'] ?? null);
+        $this->assertSame($leadName, $lead->name);
+    }
+
+    public function test_people_prompt_sets_entity_type_person(): void
+    {
+        config([
+            'services.serper.api_key' => 'test-serper',
+            'services.glm.api_key' => '',
+        ]);
+
+        [, $org] = $this->actingAsOrgMember();
+
+        IcpProfile::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'FinTech ICP',
+            'is_active' => true,
+            'config' => array_merge(IcpProfile::defaultConfig(), [
+                'industries' => ['FinTech'],
+                'territories' => ['Lagos, NG'],
+                'minMatchScore' => 1,
+                'enrichContactDetails' => false,
+            ]),
+        ]);
+
+        Http::fake([
+            'google.serper.dev/*' => Http::response([
+                'organic' => [
+                    [
+                        'title' => 'Ada Okoye - CEO at NovaPay',
+                        'link' => 'https://www.linkedin.com/in/ada-okoye',
+                        'snippet' => 'CEO at NovaPay, FinTech startup in Lagos.',
+                    ],
+                ],
+            ], 200),
+        ]);
+
+        $response = $this->withHeaders($this->orgHeaders($org))
+            ->postJson('/api/v1/discovery/runs', [
+                'query' => 'CEOs at FinTech startups',
+                'intent' => 'generate_leads',
+                'limit' => 5,
+            ]);
+
+        $response->assertCreated()
+            ->assertJsonPath('data.status', 'completed')
+            ->assertJsonPath('data.leads.0.entity_type', 'person');
+
+        $leadName = (string) $response->json('data.leads.0.name');
+        $this->assertStringContainsStringIgnoringCase('Ada', $leadName);
+    }
+
+    public function test_both_prompt_returns_mixed_entity_types_within_limit(): void
+    {
+        config([
+            'services.serper.api_key' => 'test-serper',
+            'services.glm.api_key' => '',
+        ]);
+
+        [, $org] = $this->actingAsOrgMember();
+
+        IcpProfile::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'FinTech ICP',
+            'is_active' => true,
+            'config' => array_merge(IcpProfile::defaultConfig(), [
+                'industries' => ['FinTech'],
+                'territories' => ['Lagos, NG'],
+                'minMatchScore' => 1,
+                'enrichContactDetails' => false,
+            ]),
+        ]);
+
+        Http::fake([
+            'google.serper.dev/*' => Http::response([
+                'organic' => [
+                    [
+                        'title' => 'OrbitPay | Company',
+                        'link' => 'https://www.linkedin.com/company/orbitpay',
+                        'snippet' => 'FinTech company in Lagos.',
+                    ],
+                    [
+                        'title' => 'Chidi Bassey - Founder at OrbitPay',
+                        'link' => 'https://www.linkedin.com/in/chidi-bassey',
+                        'snippet' => 'Founder at OrbitPay.',
+                    ],
+                ],
+            ], 200),
+        ]);
+
+        $response = $this->withHeaders($this->orgHeaders($org))
+            ->postJson('/api/v1/discovery/runs', [
+                'query' => 'companies and their founders',
+                'intent' => 'generate_leads',
+                'limit' => 4,
+            ]);
+
+        $response->assertCreated()
+            ->assertJsonPath('data.status', 'completed');
+
+        $leads = $response->json('data.leads') ?? [];
+        $this->assertLessThanOrEqual(4, count($leads));
+        $types = collect($leads)->pluck('entity_type')->unique()->sort()->values()->all();
+        $this->assertContains('company', $types);
+        $this->assertContains('person', $types);
+
+        $stages = $response->json('data.stages') ?? [];
+        $this->assertContains('company_pass', $stages);
+        $this->assertContains('people_pass', $stages);
     }
 }

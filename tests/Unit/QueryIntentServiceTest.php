@@ -38,6 +38,28 @@ class QueryIntentServiceTest extends TestCase
         $this->assertFalse($this->service->isListiclePeopleQuery('FMCG distributors in Lagos'));
     }
 
+    public function test_target_detection_matrix(): void
+    {
+        $cases = [
+            ['Generate leads relevant to my ICP', QueryIntentService::TARGET_COMPANIES],
+            ['business prospects in fintech', QueryIntentService::TARGET_COMPANIES],
+            ['generate new prospects', QueryIntentService::TARGET_COMPANIES],
+            ['FinTech companies in Lagos', QueryIntentService::TARGET_COMPANIES],
+            ['enterprise accounts in Kenya', QueryIntentService::TARGET_COMPANIES],
+            ['CEOs at FinTech startups', QueryIntentService::TARGET_PEOPLE],
+            ['founders of SaaS companies', QueryIntentService::TARGET_PEOPLE],
+            ['decision makers in payments', QueryIntentService::TARGET_PEOPLE],
+            ['companies and their founders', QueryIntentService::TARGET_BOTH],
+            ['accounts and contacts in Lagos', QueryIntentService::TARGET_BOTH],
+            ['both people and companies in fintech', QueryIntentService::TARGET_BOTH],
+        ];
+
+        foreach ($cases as [$query, $expected]) {
+            $result = $this->service->analyze($query, 'generate_leads');
+            $this->assertSame($expected, $result['target'], "Failed for: {$query}");
+        }
+    }
+
     public function test_looks_like_content_or_generic_phrase(): void
     {
         $this->assertTrue($this->service->looksLikeContentOrGenericPhrase('11 Tips to Generate Sales Leads'));

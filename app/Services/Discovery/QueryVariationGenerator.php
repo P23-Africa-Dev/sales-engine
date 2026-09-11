@@ -273,6 +273,10 @@ class QueryVariationGenerator
             return trim($query.' site:linkedin.com/in');
         }
 
+        if ($brief->isCompanySearch() && $preferLinkedIn) {
+            return trim($query.' site:linkedin.com/company');
+        }
+
         return $query;
     }
 

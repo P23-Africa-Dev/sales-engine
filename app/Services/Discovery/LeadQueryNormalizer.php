@@ -99,10 +99,7 @@ class LeadQueryNormalizer
         $config = is_array($icp->config) ? $icp->config : [];
         $industries = array_values(array_filter(array_map('trim', $config['industries'] ?? [])));
         $territories = array_values(array_filter(array_map('trim', $config['territories'] ?? [])));
-        $decisionMakers = array_values(array_filter(array_map('trim', $config['decisionMakers'] ?? [])));
 
-        $title = $decisionMakers[0] ?? 'CEO';
-        $title = trim(preg_replace('/\s*\/\s*/u', ' ', $title) ?? $title);
         $territory = $territories[0] ?? '';
         $territory = trim(preg_replace('/\s*,.*$/u', '', $territory) ?? $territory);
 
@@ -110,7 +107,7 @@ class LeadQueryNormalizer
             $theme,
             $industries[0] ?? null,
             $territory !== '' ? $territory : null,
-            $title,
+            'companies',
         ]);
 
         $query = trim(preg_replace('/\s+/u', ' ', implode(' ', $parts)) ?? '');
@@ -123,20 +120,17 @@ class LeadQueryNormalizer
         $config = is_array($icp->config) ? $icp->config : [];
         $industries = array_values(array_filter(array_map('trim', $config['industries'] ?? [])));
         $territories = array_values(array_filter(array_map('trim', $config['territories'] ?? [])));
-        $decisionMakers = array_values(array_filter(array_map('trim', $config['decisionMakers'] ?? [])));
 
-        $title = $decisionMakers[0] ?? 'CEO';
-        $title = trim(preg_replace('/\s*\/\s*/u', ' ', $title) ?? $title);
         $territory = $territories[0] ?? '';
         $territory = trim(preg_replace('/\s*,.*$/u', '', $territory) ?? $territory);
 
         $parts = array_filter([
             $industries[0] ?? null,
+            'companies',
             $territory !== '' ? $territory : null,
-            $title,
         ]);
 
-        return trim(implode(' ', $parts)) ?: 'B2B CEO founder';
+        return trim(implode(' ', $parts)) ?: 'B2B companies';
     }
 
     /**

@@ -165,12 +165,25 @@ class SerperDiscoveryAdapter implements DiscoverySourceInterface
                 }
 
                 $allowListicle = $brief->isPeopleSearch() || $brief->isListiclePeopleQuery() || $brief->isAuthoritativePeopleQuery();
+                $urlLower = mb_strtolower((string) ($h->url ?? ''));
+                $isCompanyLinkedIn = $brief->isCompanySearch() && str_contains($urlLower, 'linkedin.com/company/');
 
-                if (! $allowListicle && $this->queryIntent->isListicleUrl($h->url)) {
+                // Company searches should keep account pages, not person profiles.
+                if ($brief->isCompanySearch() && str_contains($urlLower, 'linkedin.com/in/')) {
                     return false;
                 }
 
-                if (! $allowListicle && $this->queryIntent->looksLikeContentOrGenericPhrase($h->name)) {
+                // People searches should keep person profiles, not company pages.
+                if ($brief->isPeopleSearch() && str_contains($urlLower, 'linkedin.com/company/')) {
+                    return false;
+                }
+
+                // Keep company LinkedIn pages for company searches even when listicle filters are on.
+                if (! $allowListicle && ! $isCompanyLinkedIn && $this->queryIntent->isListicleUrl($h->url)) {
+                    return false;
+                }
+
+                if (! $allowListicle && ! $isCompanyLinkedIn && $this->queryIntent->looksLikeContentOrGenericPhrase($h->name)) {
                     return false;
                 }
 

@@ -19,6 +19,11 @@ class LeadResource extends JsonResource
         $linkedinUrl = trim((string) ($meta['linkedin_url'] ?? ($profileUrls[0] ?? '')));
         $title = trim((string) ($meta['title'] ?? ''));
         $company = trim((string) ($meta['company'] ?? ''));
+        $entityType = trim((string) ($meta['entity_type'] ?? ''));
+        if (! in_array($entityType, ['person', 'company'], true)) {
+            $entityType = 'person';
+        }
+        $contactPerson = trim((string) ($meta['contact_person'] ?? ''));
         $contactReady = array_key_exists('contact_ready', $meta)
             ? (bool) $meta['contact_ready']
             : ($email !== '' || $phone !== '' || $linkedinUrl !== '' || $profileUrls !== [] || ($title !== '' && $company !== ''));
@@ -32,8 +37,10 @@ class LeadResource extends JsonResource
             'stage' => $this->stage,
             'company_id' => $this->company_id,
             'icp_profile_id' => $this->icp_profile_id,
+            'entity_type' => $entityType,
             'title' => $title !== '' ? $title : null,
             'company' => $company !== '' ? $company : null,
+            'contact_person' => $contactPerson !== '' ? $contactPerson : null,
             'location' => isset($meta['location']) ? (string) $meta['location'] : null,
             'website' => isset($meta['website']) ? (string) $meta['website'] : null,
             'email' => $email !== '' ? $email : null,

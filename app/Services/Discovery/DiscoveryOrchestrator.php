@@ -130,7 +130,6 @@ class DiscoveryOrchestrator
             $this->enrichment->resetBudget();
             $this->profileUrlValidator->resetBudget();
 
-            $isAuthoritativeQuery = $brief->isAuthoritativePeopleQuery();
             $leadsPayload = [];
             $companies = collect();
             $candidatesFound = 0;
@@ -151,137 +150,198 @@ class DiscoveryOrchestrator
             $minUsableBatch = max(1, (int) ceil($effectiveLimit / 4));
             $softCompletedEarly = false;
 
-            for ($pass = 0; $pass <= self::MAX_BACKFILL_PASSES; $pass++) {
-                if ($this->pastDeadline()) {
-                    $softCompletedEarly = true;
+            $targetPasses = [];
+            if ($brief->isBothSearch() && in_array($intent, ['generate_leads', 'generate_more_leads'], true)) {
+                $companyLimit = max(1, (int) ceil($effectiveLimit * 0.6));
+                $peopleLimit = $effectiveLimit - $companyLimit;
+                if ($peopleLimit < 1 && $effectiveLimit >= 2) {
+                    $peopleLimit = 1;
+                    $companyLimit = $effectiveLimit - 1;
+                }
+                $targetPasses = [
+                    [
+                        'stage' => 'company_pass',
+                        'brief' => $brief->withTarget(QueryIntentService::TARGET_COMPANIES),
+                        'limit' => $companyLimit,
+                    ],
+                ];
+                if ($peopleLimit >= 1) {
+                    $targetPasses[] = [
+                        'stage' => 'people_pass',
+                        'brief' => $brief->withTarget(QueryIntentService::TARGET_PEOPLE),
+                        'limit' => $peopleLimit,
+                    ];
+                }
+            } else {
+                $targetPasses = [
+                    [
+                        'stage' => null,
+                        'brief' => $brief,
+                        'limit' => $effectiveLimit,
+                    ],
+                ];
+            }
+
+            foreach ($targetPasses as $targetPass) {
+                if ($this->pastDeadline() || count($leadsPayload) >= $effectiveLimit) {
                     break;
                 }
 
-                $remaining = $effectiveLimit - count($leadsPayload);
-                if ($remaining <= 0) {
-                    break;
+                /** @var IcpBrief $passBrief */
+                $passBrief = $targetPass['brief'];
+                $passLimit = (int) $targetPass['limit'];
+                $isAuthoritativePass = $passBrief->isAuthoritativePeopleQuery();
+
+                if (is_string($targetPass['stage'] ?? null) && $targetPass['stage'] !== '') {
+                    $this->appendStage($run, (string) $targetPass['stage']);
                 }
 
-                $isBackfill = $pass > 0;
-                if ($isBackfill) {
-                    // Skip deeper search once we have a usable first batch or soft time elapsed.
-                    if (
-                        count($leadsPayload) >= $minAcceptableYield
-                        || (count($leadsPayload) >= $minUsableBatch && $this->pastSoftDeadline())
-                        || count($leadsPayload) >= 1 && $this->pastSoftDeadline()
-                    ) {
+                $passStartCount = count($leadsPayload);
+                $multiTarget = count($targetPasses) > 1;
+                $passMinAcceptable = $multiTarget
+                    ? max(1, (int) ceil($passLimit / 2))
+                    : $minAcceptableYield;
+                $passMinUsable = $multiTarget
+                    ? max(1, (int) ceil($passLimit / 4))
+                    : $minUsableBatch;
+
+                for ($pass = 0; $pass <= self::MAX_BACKFILL_PASSES; $pass++) {
+                    if ($this->pastDeadline()) {
+                        $softCompletedEarly = true;
                         break;
                     }
 
-                    $this->qualityThreshold = self::QUALITY_VOLUME;
-                    $this->appendStage($run, 'backfill_pass_' . $pass);
-                    $backfillPasses++;
+                    $passYield = count($leadsPayload) - $passStartCount;
+                    $remaining = min(
+                        $passLimit - $passYield,
+                        $effectiveLimit - count($leadsPayload),
+                    );
+                    if ($remaining <= 0) {
+                        break;
+                    }
 
-                    $backfillQueries = $this->queryVariationGenerator->generateBackfill(
-                        $brief,
-                        $effectiveLimit,
+                    $isBackfill = $pass > 0;
+                    if ($isBackfill) {
+                        // Skip deeper search once we have a usable first batch or soft time elapsed.
+                        if (
+                            $passYield >= $passMinAcceptable
+                            || ($passYield >= $passMinUsable && $this->pastSoftDeadline())
+                            || ($passYield >= 1 && $this->pastSoftDeadline())
+                        ) {
+                            break;
+                        }
+
+                        $this->qualityThreshold = self::QUALITY_VOLUME;
+                        $this->appendStage($run, 'backfill_pass_' . $pass);
+                        $backfillPasses++;
+
+                        $backfillQueries = $this->queryVariationGenerator->generateBackfill(
+                            $passBrief,
+                            $passLimit,
+                            $allQueriesExecuted,
+                        );
+
+                        if ($backfillQueries === []) {
+                            break;
+                        }
+
+                        [$hits, $sourcesChecked, $fanOutMeta] = $this->collectHits(
+                            $passBrief,
+                            $ctx,
+                            $passLimit,
+                            $backfillQueries,
+                        );
+                    } else {
+                        $firstPassQueries = null;
+                        // LinkedIn-first shortcut only for small people batches (chat default),
+                        // not company searches or high-capacity fan-out / backfill paths.
+                        if (
+                            in_array($intent, ['generate_leads', 'generate_more_leads'], true)
+                            && $passBrief->isPeopleSearch()
+                            && $passLimit <= QueryIntentService::DEFAULT_LEAD_LIMIT
+                        ) {
+                            $firstPassQueries = $this->leadQueryNormalizer->firstBatchPeopleQueries($icp);
+                        }
+
+                        [$hits, $sourcesChecked, $fanOutMeta] = $this->collectHits(
+                            $passBrief,
+                            $ctx,
+                            $passLimit,
+                            $firstPassQueries !== [] ? $firstPassQueries : null,
+                        );
+                    }
+
+                    $allQueriesExecuted = array_values(array_unique(array_merge(
                         $allQueriesExecuted,
-                    );
+                        $fanOutMeta['queries_executed'] ?? [],
+                    )));
+                    foreach ($fanOutMeta['sources_hit_count'] ?? [] as $key => $count) {
+                        $allSourcesHitCount[$key] = ($allSourcesHitCount[$key] ?? 0) + (int) $count;
+                    }
+                    $fanOutUsed = $fanOutUsed || (bool) ($fanOutMeta['fan_out_strategy_used'] ?? false);
 
-                    if ($backfillQueries === []) {
+                    $this->updateProgress($run, 2, $sourcesChecked, $candidatesFound);
+                    if (! $isBackfill) {
+                        $this->appendStage($run, 'extracting');
+                    }
+
+                    if ($this->pastDeadline()) {
+                        $softCompletedEarly = true;
                         break;
                     }
 
-                    [$hits, $sourcesChecked, $fanOutMeta] = $this->collectHits(
-                        $brief,
-                        $ctx,
-                        $effectiveLimit,
-                        $backfillQueries,
-                    );
-                } else {
-                    $firstPassQueries = null;
-                    // LinkedIn-first shortcut only for small people batches (chat default),
-                    // not company searches or high-capacity fan-out / backfill paths.
-                    if (
-                        in_array($intent, ['generate_leads', 'generate_more_leads'], true)
-                        && $brief->isPeopleSearch()
-                        && $effectiveLimit <= QueryIntentService::DEFAULT_LEAD_LIMIT
-                    ) {
-                        $firstPassQueries = $this->leadQueryNormalizer->firstBatchPeopleQueries($icp);
+                    if ($isAuthoritativePass && ! $isBackfill) {
+                        [$passLeads, $passCompanies, $passFound] = $this->processAuthoritativePeopleQuery(
+                            $organization,
+                            $icp,
+                            $passBrief,
+                            $hits,
+                            $intent,
+                            $hasUserQuery,
+                            $remaining,
+                            $sourcesChecked,
+                            $run,
+                            $seenLeadNames,
+                        );
+                    } else {
+                        [$passLeads, $passCompanies, $passFound] = $this->processStandardQuery(
+                            $organization,
+                            $icp,
+                            $passBrief,
+                            $hits,
+                            $intent,
+                            $hasUserQuery,
+                            $remaining,
+                            $sourcesChecked,
+                            $run,
+                            $seenLeadNames,
+                        );
                     }
 
-                    [$hits, $sourcesChecked, $fanOutMeta] = $this->collectHits(
-                        $brief,
-                        $ctx,
-                        $effectiveLimit,
-                        $firstPassQueries !== [] ? $firstPassQueries : null,
-                    );
-                }
-
-                $allQueriesExecuted = array_values(array_unique(array_merge(
-                    $allQueriesExecuted,
-                    $fanOutMeta['queries_executed'] ?? [],
-                )));
-                foreach ($fanOutMeta['sources_hit_count'] ?? [] as $key => $count) {
-                    $allSourcesHitCount[$key] = ($allSourcesHitCount[$key] ?? 0) + (int) $count;
-                }
-                $fanOutUsed = $fanOutUsed || (bool) ($fanOutMeta['fan_out_strategy_used'] ?? false);
-
-                $this->updateProgress($run, 2, $sourcesChecked, $candidatesFound);
-                if (! $isBackfill) {
-                    $this->appendStage($run, 'extracting');
-                }
-
-                if ($this->pastDeadline()) {
-                    $softCompletedEarly = true;
-                    break;
-                }
-
-                if ($isAuthoritativeQuery && ! $isBackfill) {
-                    [$passLeads, $passCompanies, $passFound] = $this->processAuthoritativePeopleQuery(
-                        $organization,
-                        $icp,
-                        $brief,
-                        $hits,
-                        $intent,
-                        $hasUserQuery,
-                        $effectiveLimit,
-                        $sourcesChecked,
-                        $run,
-                        $seenLeadNames,
-                    );
-                } else {
-                    [$passLeads, $passCompanies, $passFound] = $this->processStandardQuery(
-                        $organization,
-                        $icp,
-                        $brief,
-                        $hits,
-                        $intent,
-                        $hasUserQuery,
-                        $remaining,
-                        $sourcesChecked,
-                        $run,
-                        $seenLeadNames,
-                    );
-                }
-
-                foreach ($passLeads as $lead) {
-                    $nameKey = mb_strtolower(trim((string) ($lead['name'] ?? '')));
-                    if ($nameKey !== '') {
-                        $seenLeadNames[$nameKey] = true;
+                    foreach ($passLeads as $lead) {
+                        $nameKey = mb_strtolower(trim((string) ($lead['name'] ?? '')));
+                        if ($nameKey !== '') {
+                            $seenLeadNames[$nameKey] = true;
+                        }
+                        $leadsPayload[] = $lead;
                     }
-                    $leadsPayload[] = $lead;
-                }
-                $companies = $companies->merge($passCompanies);
-                $candidatesFound += $passFound;
+                    $companies = $companies->merge($passCompanies);
+                    $candidatesFound += $passFound;
 
-                if (count($leadsPayload) >= $effectiveLimit) {
-                    break;
-                }
+                    $passYield = count($leadsPayload) - $passStartCount;
+                    if ($passYield >= $passLimit || count($leadsPayload) >= $effectiveLimit) {
+                        break;
+                    }
 
-                // First pass: stop when we have enough for a first batch.
-                if (! $isBackfill && count($leadsPayload) >= $minAcceptableYield) {
-                    break;
-                }
+                    // First pass: stop when we have enough for a first batch.
+                    if (! $isBackfill && $passYield >= $passMinAcceptable) {
+                        break;
+                    }
 
-                if (count($leadsPayload) >= $minUsableBatch && $this->pastSoftDeadline()) {
-                    $softCompletedEarly = true;
-                    break;
+                    if ($passYield >= $passMinUsable && $this->pastSoftDeadline()) {
+                        $softCompletedEarly = true;
+                        break;
+                    }
                 }
             }
 
@@ -324,6 +384,66 @@ class DiscoveryOrchestrator
                         $organization,
                         $icp,
                         $companyBrief,
+                        $hits,
+                        $intent,
+                        $hasUserQuery,
+                        $effectiveLimit,
+                        $sourcesChecked,
+                        $run,
+                        $seenLeadNames,
+                    );
+
+                    foreach ($passLeads as $lead) {
+                        $nameKey = mb_strtolower(trim((string) ($lead['name'] ?? '')));
+                        if ($nameKey !== '') {
+                            $seenLeadNames[$nameKey] = true;
+                        }
+                        $leadsPayload[] = $lead;
+                    }
+                    $companies = $companies->merge($passCompanies);
+                    $candidatesFound += $passFound;
+                }
+            }
+
+            // Company searches that still yield nothing → people rescue (symmetric, empty-only).
+            if (
+                $leadsPayload === []
+                && $brief->isCompanySearch()
+                && in_array($intent, ['generate_leads', 'generate_more_leads'], true)
+                && ! $this->pastSoftDeadline()
+            ) {
+                $this->appendStage($run, 'people_rescue_pass');
+                $this->qualityThreshold = self::QUALITY_VOLUME;
+                $peopleBrief = $brief->withTarget(QueryIntentService::TARGET_PEOPLE);
+                $rescueQueries = $this->queryVariationGenerator->generateBackfill(
+                    $peopleBrief,
+                    $effectiveLimit,
+                    $allQueriesExecuted,
+                );
+                if ($rescueQueries === []) {
+                    $rescueQueries = $this->queryVariationGenerator->generate($peopleBrief, $effectiveLimit);
+                }
+
+                if ($rescueQueries !== []) {
+                    [$hits, $sourcesChecked, $fanOutMeta] = $this->collectHits(
+                        $peopleBrief,
+                        $ctx,
+                        $effectiveLimit,
+                        $rescueQueries,
+                    );
+                    $allQueriesExecuted = array_values(array_unique(array_merge(
+                        $allQueriesExecuted,
+                        $fanOutMeta['queries_executed'] ?? [],
+                    )));
+                    foreach ($fanOutMeta['sources_hit_count'] ?? [] as $key => $count) {
+                        $allSourcesHitCount[$key] = ($allSourcesHitCount[$key] ?? 0) + (int) $count;
+                    }
+                    $fanOutUsed = true;
+
+                    [$passLeads, $passCompanies, $passFound] = $this->processStandardQuery(
+                        $organization,
+                        $icp,
+                        $peopleBrief,
                         $hits,
                         $intent,
                         $hasUserQuery,
@@ -620,9 +740,12 @@ class DiscoveryOrchestrator
 
         $orderedHits = $hits
             ->unique(fn(RawDiscoveryHit $h) => mb_strtolower($h->name . '|' . (string) $h->url))
-            ->sortByDesc(function (RawDiscoveryHit $h): int {
+            ->sortByDesc(function (RawDiscoveryHit $h) use ($brief): int {
                 $url = mb_strtolower((string) $h->url);
-                if (str_contains($url, 'linkedin.com/in/')) {
+                if ($brief->isPeopleSearch() && str_contains($url, 'linkedin.com/in/')) {
+                    return 100;
+                }
+                if ($brief->isCompanySearch() && str_contains($url, 'linkedin.com/company/')) {
                     return 100;
                 }
                 if (str_contains($url, 'linkedin.com/')) {
@@ -741,7 +864,7 @@ class DiscoveryOrchestrator
             $hit = $candidate['hit'];
             $extracted = $candidate['extracted'];
             $displayName = trim((string) ($extracted['person_name'] ?? $extracted['name'] ?? $hit->name));
-            if ($brief->isPeopleSearch() || filled($extracted['person_name'] ?? null)) {
+            if ($brief->isPeopleSearch()) {
                 $normalized = $this->personNameValidator->normalizePersonName($displayName);
                 if ($normalized !== '') {
                     $displayName = $normalized;
@@ -803,7 +926,7 @@ class DiscoveryOrchestrator
                 && ! $hasUserQuery
                 && $scores['priority_score'] < $minPriority;
 
-            if ($brief->isPeopleSearch() || filled($extracted['person_name'] ?? null)) {
+            if ($brief->isPeopleSearch()) {
                 $enrichedProfile = $this->enrichment->enrich(
                     $organization,
                     $icp,
@@ -812,7 +935,7 @@ class DiscoveryOrchestrator
                     $extracted,
                 );
                 $extracted = $enrichedProfile->mergeIntoExtraction($extracted);
-            } elseif (! $brief->isPeopleSearch()) {
+            } else {
                 $extracted = $this->enrichment->enrichCompanyDecisionMaker(
                     $organization,
                     $icp,
@@ -822,22 +945,26 @@ class DiscoveryOrchestrator
                 );
             }
 
-            // Prefer a real person name on the card when enrichment found a contact.
-            $contactPerson = trim((string) ($extracted['contact_person'] ?? $extracted['person_name'] ?? ''));
-            if (
-                $contactPerson !== ''
-                && $contactPerson !== $displayName
-                && $this->personNameValidator->isValidPersonName($contactPerson, $extracted)
-            ) {
-                if (trim((string) ($extracted['company'] ?? '')) === '') {
-                    $extracted['company'] = $displayName;
+            // Prefer a real person name on the card only for people searches.
+            // Company/account leads keep the company as Lead.name; DM stays in meta.
+            if ($brief->isPeopleSearch()) {
+                $contactPerson = trim((string) ($extracted['contact_person'] ?? $extracted['person_name'] ?? ''));
+                if (
+                    $contactPerson !== ''
+                    && $contactPerson !== $displayName
+                    && $this->personNameValidator->isValidPersonName($contactPerson, $extracted)
+                ) {
+                    if (trim((string) ($extracted['company'] ?? '')) === '') {
+                        $extracted['company'] = $displayName;
+                    }
+                    $displayName = $contactPerson;
                 }
-                $displayName = $contactPerson;
             }
 
             $leadPayload = $this->createLeadFromExtraction(
                 $organization,
                 $icp,
+                $brief,
                 $hit,
                 $extracted,
                 $displayName,
@@ -908,7 +1035,7 @@ class DiscoveryOrchestrator
             return false;
         }
 
-        if ($brief->isPeopleSearch() || filled($extracted['person_name'] ?? null)) {
+        if ($brief->isPeopleSearch()) {
             return $this->personNameValidator->isValidPersonName($displayName, $extracted);
         }
 
@@ -959,6 +1086,7 @@ class DiscoveryOrchestrator
     private function createLeadFromExtraction(
         Organization $organization,
         IcpProfile $icp,
+        IcpBrief $brief,
         RawDiscoveryHit $hit,
         array $extracted,
         string $displayName,
@@ -966,10 +1094,21 @@ class DiscoveryOrchestrator
         bool $icpRecommended,
         bool $queryMatch,
     ): array {
-        $companyName = trim((string) ($extracted['company'] ?? $extracted['name'] ?? $displayName));
+        $entityType = $brief->isPeopleSearch() ? 'person' : 'company';
+        $contactPerson = trim((string) ($extracted['contact_person'] ?? ''));
+        if ($entityType === 'company' && $contactPerson === '') {
+            $contactPerson = trim((string) ($extracted['person_name'] ?? ''));
+            if ($contactPerson !== '' && ! $this->personNameValidator->isValidPersonName($contactPerson, $extracted)) {
+                $contactPerson = '';
+            }
+        }
+
+        $companyName = $entityType === 'company'
+            ? $displayName
+            : trim((string) ($extracted['company'] ?? $extracted['name'] ?? $displayName));
 
         $company = $this->cache->upsertFromHit($organization, $hit, [
-            'name' => $companyName,
+            'name' => $companyName !== '' ? $companyName : $displayName,
             'sector' => $extracted['sector'] ?? $hit->sector,
             'location' => $extracted['location'] ?? $hit->location,
             'summary' => $extracted['summary'] ?? $hit->snippet,
@@ -988,7 +1127,7 @@ class DiscoveryOrchestrator
                 'organization_id' => $organization->id,
                 'company_id' => $company->id,
                 'signal_type' => 'discovery',
-                'confidence' => $scores['icp_fit_score'] / 100,
+                'strength' => $scores['icp_fit_score'] / 100,
                 'score' => $scores['priority_score'],
                 'source' => $hit->provider,
                 'url' => $signalUrl,
@@ -1021,30 +1160,42 @@ class DiscoveryOrchestrator
         }
 
         $validUrls = $this->profileUrlValidator->filterValid($candidateUrls, $trustedUrls);
+        $allowCompanyLinkedIn = $entityType === 'company';
         $profileUrls = array_values(array_filter(
             $validUrls,
-            fn(string $url): bool => ! str_contains(mb_strtolower(parse_url($url, PHP_URL_HOST) ?: ''), 'linkedin.com')
-                || (bool) preg_match('~/in/~', (string) parse_url($url, PHP_URL_PATH))
+            function (string $url) use ($allowCompanyLinkedIn): bool {
+                $host = mb_strtolower((string) (parse_url($url, PHP_URL_HOST) ?: ''));
+                if (! str_contains($host, 'linkedin.com')) {
+                    return true;
+                }
+                $path = (string) parse_url($url, PHP_URL_PATH);
+                if (preg_match('~/in/~', $path)) {
+                    return true;
+                }
+
+                return $allowCompanyLinkedIn && (bool) preg_match('~/company/~', $path);
+            }
         ));
 
         $linkedinUrl = '';
         foreach ($validUrls as $url) {
             $host = mb_strtolower((string) parse_url($url, PHP_URL_HOST));
             $path = (string) parse_url($url, PHP_URL_PATH);
-            if (str_contains($host, 'linkedin.com') && preg_match('~/in/~', $path)) {
+            if (! str_contains($host, 'linkedin.com')) {
+                continue;
+            }
+            if (preg_match('~/in/~', $path) || ($allowCompanyLinkedIn && preg_match('~/company/~', $path))) {
                 $linkedinUrl = $url;
                 break;
             }
         }
         if ($linkedinUrl === '' && $validUrls !== []) {
-            // Prefer first valid URL as linkedin_url only when it is LinkedIn-shaped; otherwise leave blank.
             $first = $validUrls[0];
             if (str_contains(mb_strtolower((string) parse_url($first, PHP_URL_HOST)), 'linkedin.com')) {
                 $linkedinUrl = $first;
             }
         }
 
-        // Keep hit URL as source_url fallback even if not a profile link.
         $sourceUrl = trim((string) (
             ($linkedinUrl !== '' ? $linkedinUrl : null)
             ?? ($profileUrls[0] ?? null)
@@ -1054,7 +1205,9 @@ class DiscoveryOrchestrator
 
         $nextAction = trim((string) ($extracted['next_action'] ?? ''));
         if ($nextAction === '') {
-            $nextAction = 'Review and qualify this lead';
+            $nextAction = $entityType === 'company'
+                ? 'Review account fit and identify a decision maker'
+                : 'Review and qualify this lead';
         }
 
         $summary = trim((string) ($extracted['summary'] ?? ''));
@@ -1069,6 +1222,10 @@ class DiscoveryOrchestrator
             $profileUrls,
         );
 
+        $metaCompany = $entityType === 'company'
+            ? $displayName
+            : ($extracted['company'] ?? null);
+
         $lead = Lead::query()->create([
             'organization_id' => $organization->id,
             'company_id' => $company->id,
@@ -1080,10 +1237,12 @@ class DiscoveryOrchestrator
             'stage' => 'new',
             'save_status' => Lead::SAVE_DRAFT,
             'meta' => array_filter([
+                'entity_type' => $entityType,
                 'rationale' => $scores['rationale'],
                 'low_confidence' => (bool) ($extracted['low_confidence'] ?? false),
                 'title' => $extracted['title'] ?? null,
-                'company' => $extracted['company'] ?? null,
+                'company' => $metaCompany,
+                'contact_person' => $entityType === 'company' && $contactPerson !== '' ? $contactPerson : null,
                 'location' => $extracted['location'] ?? null,
                 'email' => $email !== '' ? $email : null,
                 'phone' => $phone !== '' ? $phone : null,
@@ -1113,8 +1272,10 @@ class DiscoveryOrchestrator
                 'source' => $lead->source,
                 'score' => (int) round((float) $lead->score),
                 'summary' => $lead->summary,
+                'entity_type' => $entityType,
                 'title' => $extracted['title'] ?? null,
-                'company' => $extracted['company'] ?? null,
+                'company' => $metaCompany,
+                'contact_person' => $entityType === 'company' && $contactPerson !== '' ? $contactPerson : null,
                 'location' => $extracted['location'] ?? null,
                 'website' => $extracted['website'] ?? null,
                 'email' => $email !== '' ? $email : null,

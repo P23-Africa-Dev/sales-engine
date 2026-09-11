@@ -102,6 +102,16 @@ readonly class IcpBrief
         return $this->target === QueryIntentService::TARGET_PEOPLE;
     }
 
+    public function isCompanySearch(): bool
+    {
+        return $this->target === QueryIntentService::TARGET_COMPANIES;
+    }
+
+    public function isBothSearch(): bool
+    {
+        return $this->target === QueryIntentService::TARGET_BOTH;
+    }
+
     public function isListiclePeopleQuery(): bool
     {
         return app(QueryIntentService::class)->isListiclePeopleQuery($this->query);
@@ -134,9 +144,14 @@ readonly class IcpBrief
                 return trim($cleaned) . ' Forbes Bloomberg billionaires richest people world ranking list';
             }
 
-            if ($this->isPeopleSearch()) {
+            if ($this->isPeopleSearch() || $this->isBothSearch()) {
                 // Avoid stacking extra titles when the query already names a role.
                 if (preg_match('/\b(ceo|cto|cfo|coo|founder|director|manager|head of|vp|president)\b/iu', $cleaned)) {
+                    return trim($cleaned);
+                }
+
+                // Both-mode default search leans company-first; people pass overrides via withTarget.
+                if ($this->isBothSearch()) {
                     return trim($cleaned);
                 }
 
