@@ -58,13 +58,19 @@ class ProcessChatIntentJob implements ShouldQueue
                 return;
             }
 
-            // Soft-complete already finished the run.
+            // Soft-complete / normal completion already finished the run.
             if ($run->status === 'completed') {
                 return;
             }
 
             $recoveredLeads = [];
-            if ($wasTimeout && in_array($run->status, ['queued', 'running'], true)) {
+            // Timeouts and "attempted too many times" often fire while leads were already
+            // persisted — recover before telling the user the search failed.
+            $shouldRecover = $wasTimeout
+                || str_contains(mb_strtolower($error), 'timed out')
+                || str_contains(mb_strtolower($error), 'attempted too many times');
+
+            if ($shouldRecover && in_array($run->status, ['queued', 'running', 'failed'], true)) {
                 $recoveredLeads = $this->recoverLeadsCreatedDuringRun($run);
             }
 
@@ -93,19 +99,24 @@ class ProcessChatIntentJob implements ShouldQueue
             }
 
             if (in_array($run->status, ['queued', 'running'], true)) {
+                $run->refresh();
+                if ($run->status === 'completed') {
+                    return;
+                }
+
                 $run->update([
                     'status' => 'failed',
                     'error' => mb_substr($error, 0, 2000),
                     'finished_at' => now(),
                 ]);
-            }
 
-            $this->finalizePlaceholder(
-                $run,
-                'Lead search timed out or was interrupted. Please try again — results usually appear within a couple of minutes.',
-                null,
-                ['timed_out' => true],
-            );
+                $this->finalizePlaceholder(
+                    $run,
+                    'Lead search timed out or was interrupted. Please try again — results usually appear within a couple of minutes.',
+                    null,
+                    ['timed_out' => true],
+                );
+            }
         } catch (\Throwable $inner) {
             Log::warning('Failed to mark discovery run as failed after job error', [
                 'run_id' => $this->runId,

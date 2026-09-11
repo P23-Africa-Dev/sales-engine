@@ -465,20 +465,16 @@ class ChatService
                 return;
             }
 
-            $placeholder = ChatMessage::query()
-                ->where('chat_session_id', $session->id)
-                ->where('role', 'assistant')
-                ->where('id', '>', $userMessage->id)
-                ->orderBy('id')
-                ->get()
-                ->first(fn(ChatMessage $message) => (bool) ($message->meta['pending'] ?? false));
+            // Prefer the message for this run (even if failRun already cleared pending
+            // and wrote a timeout body) so we do not leave duplicate assistant replies.
+            $placeholder = $this->assistantMessageForRun($session->id, $userMessage->id, $run->id);
 
             if ($placeholder) {
                 $placeholder->update([
                     'body' => $assistantBody,
                     'intent' => $intent,
                     'leads' => $leads ?: null,
-                    'meta' => $meta,
+                    'meta' => array_merge($meta, ['pending' => false]),
                 ]);
             } else {
                 ChatMessage::query()->create([
@@ -487,19 +483,23 @@ class ChatService
                     'body' => $assistantBody,
                     'intent' => $intent,
                     'leads' => $leads ?: null,
-                    'meta' => $meta,
+                    'meta' => array_merge($meta, ['pending' => false]),
                 ]);
+            }
+
+            if ($run->fresh()?->status !== 'completed') {
+                $run->update([
+                    'status' => 'completed',
+                    'error' => null,
+                    'finished_at' => $run->finished_at ?? now(),
+                ]);
+            } else {
+                $run->update(['error' => null]);
             }
 
             $session->touch();
         } catch (\Throwable $e) {
-            $placeholder = ChatMessage::query()
-                ->where('chat_session_id', $session->id)
-                ->where('role', 'assistant')
-                ->where('id', '>', $userMessage->id)
-                ->orderBy('id')
-                ->get()
-                ->first(fn(ChatMessage $message) => (bool) ($message->meta['pending'] ?? false));
+            $placeholder = $this->assistantMessageForRun($session->id, $userMessage->id, $run->id);
 
             if ($placeholder) {
                 $placeholder->update([
@@ -513,11 +513,30 @@ class ChatService
                     'role' => 'assistant',
                     'body' => 'Sorry, that request failed: ' . $e->getMessage(),
                     'intent' => $intent,
-                    'meta' => array_merge($meta, ['error' => $e->getMessage()]),
+                    'meta' => array_merge($meta, ['error' => $e->getMessage(), 'pending' => false]),
                 ]);
             }
             $session->touch();
         }
+    }
+
+    private function assistantMessageForRun(int $sessionId, int $userMessageId, int $runId): ?ChatMessage
+    {
+        $messages = ChatMessage::query()
+            ->where('chat_session_id', $sessionId)
+            ->where('role', 'assistant')
+            ->where('id', '>', $userMessageId)
+            ->orderBy('id')
+            ->get();
+
+        $forRun = $messages->first(
+            fn(ChatMessage $message) => (int) ($message->meta['discovery_run_id'] ?? 0) === $runId
+        );
+        if ($forRun) {
+            return $forRun;
+        }
+
+        return $messages->first(fn(ChatMessage $message) => (bool) ($message->meta['pending'] ?? false));
     }
 
     /**

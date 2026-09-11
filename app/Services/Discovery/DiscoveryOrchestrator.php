@@ -358,6 +358,7 @@ class DiscoveryOrchestrator
 
             $run->update([
                 'status' => 'completed',
+                'error' => null,
                 'result_summary' => array_merge(
                     is_array($run->result_summary) ? $run->result_summary : [],
                     [
