@@ -52,6 +52,7 @@ class QueryIntentServiceTest extends TestCase
             ['companies and their founders', QueryIntentService::TARGET_BOTH],
             ['accounts and contacts in Lagos', QueryIntentService::TARGET_BOTH],
             ['both people and companies in fintech', QueryIntentService::TARGET_BOTH],
+            ['partnership contacts at fintech startups in Lagos', QueryIntentService::TARGET_PEOPLE],
         ];
 
         foreach ($cases as [$query, $expected]) {

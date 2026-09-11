@@ -86,9 +86,10 @@ class QueryIntentService
             $normalized
         );
 
-        // "CEOs at FinTech startups" — org nouns are employer context, not the lead entity.
+        // "CEOs at FinTech startups" / "partnership contacts at agencies" —
+        // org nouns are employer context, not the lead entity.
         $roleAtOrg = (bool) preg_match(
-            '/\b(ceos?|ctos?|cfos?|founders?|executives?|directors?|heads?\s+of|decision\s+makers?|leaders?)\s+(at|of|in|for)\b/u',
+            '/\b(ceos?|ctos?|cfos?|founders?|executives?|directors?|heads?\s+of|decision\s+makers?|leaders?|partnership\s+contacts?)\s+(at|of|in|for)\b/u',
             $normalized
         );
 
@@ -142,7 +143,8 @@ class QueryIntentService
         }
 
         // "contacts" / "managers" only count when paired with a role or person noun.
-        if (preg_match('/\b(contacts?|managers?)\b/u', $normalized)
+        if (
+            preg_match('/\b(contacts?|managers?)\b/u', $normalized)
             && preg_match('/\b(ceo|cto|cfo|founder|executive|director|decision|partnership|sales|marketing|product)\b/u', $normalized)
         ) {
             return true;
