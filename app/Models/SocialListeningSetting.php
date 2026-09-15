@@ -30,6 +30,7 @@ class SocialListeningSetting extends Model
         'min_score',
         'freshness_window_days',
         'intent_filters',
+        'icp_filter_enabled',
         'crm_destination',
         'outreach_channel_default',
         'sender_mode',
@@ -45,6 +46,7 @@ class SocialListeningSetting extends Model
             'enabled_sources' => 'array',
             'meta_page_ids' => 'array',
             'intent_filters' => 'array',
+            'icp_filter_enabled' => 'boolean',
             'last_run_at' => 'datetime',
         ];
     }
@@ -70,6 +72,7 @@ class SocialListeningSetting extends Model
             'min_score' => 55,
             'freshness_window_days' => 14,
             'intent_filters' => self::DEFAULT_INTENT_FILTERS,
+            'icp_filter_enabled' => (bool) config('services.social_listening.icp_filter_enabled_default', true),
             'crm_destination' => 'qualified_pipeline',
             'outreach_channel_default' => 'email',
             'sender_mode' => 'platform',

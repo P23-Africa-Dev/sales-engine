@@ -52,6 +52,7 @@ class SocialListeningController extends Controller
         }
 
         $query = SocialSignal::query()
+            ->with('enrichmentLogs')
             ->where('organization_id', $org->id)
             ->where('icp_profile_id', $icp->id)
             ->where('status', '!=', 'dismissed')
@@ -108,6 +109,7 @@ class SocialListeningController extends Controller
     {
         $org = OrgContext::require();
         $signal = SocialSignal::query()
+            ->with('enrichmentLogs')
             ->where('organization_id', $org->id)
             ->where('id', $id)
             ->firstOrFail();

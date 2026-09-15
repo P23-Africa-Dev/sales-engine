@@ -10,6 +10,19 @@
 
 ---
 
+## Implementation status (updated as work lands)
+
+- ✅ **Phase 2 quick wins were already live before this rebuild started** — correcting v1/v2's assumption. `ChatLead`/lead-card rendering of `contact_ready`, `contact_enrichment_tier`, `contact_enrichment_provider`, `icp_relevance_reason`, and `crm_duplicate` all already existed in `sales-engine-view.tsx` prior to this session. No work needed there.
+- ✅ **Phase 1 types (partial) + Phase 3 (partial)** — `SocialSignalApi` now has `icpFilter`, `discreteSignalType`, `territory`, `namedPeople`, `enrichment.{status,attemptedAt}`, matching the backend's shipped `SocialSignalResource` fields. The Social Listening detail panel (`SocialOpportunityDetail` in `sales-engine-view.tsx`) now renders: a "Detected Event" row (formatted from the discrete signal-type key) and a "Territory" row in the Intent & Context grid when present, a "Named in this signal" chip list when `namedPeople` is non-empty, and a "Contact Enrichment" block showing found/not-found (nothing rendered when `not_attempted`, to avoid cluttering legacy signals).
+- ✅ **Phase 6 (pipeline visibility panel)** — new `ScanRunSummaryPanel` component renders "Checked N potential signals — N qualified" plus a plain-language rejection breakdown ("N didn't match your ICP filters, N had no publish date...") right where the in-progress `SocialScanPanel` used to leave a gap after a scan completed. Reads the backend's newly-structured `result_summary`; renders nothing for legacy runs (plain-string summary), in-progress runs, or a zero-hits run. 6 dedicated component tests.
+- ✅ **Compact signal list-row badge** — the discrete signal type (when present) now shows as a small outlined pill under the existing intent-color badge in the signal table row, not just in the detail panel.
+- ✅ **ICP builder signal-type-pack selector** — `IcpConfig.signalTypePacks?: string[]` added; a toggle-chip UI (matching the existing industries/decision-makers pattern) lets a user opt into "Core Buyer Signals," "Software / Dev Buying Signals," or "Lagos Corporate Transport" — each chip's tooltip explains what it adds. Unselected (default) = zero change in scan behavior or cost, matching the backend's strict opt-in design. (The custom-prompt placeholder already invited "opportunity interests beyond sales leads" before this session — that v1-planned copy tweak turned out to already be live too.)
+- ✅ **Trust-mode explainer** — a one-line subtitle under the Smart Lead / Social Listening tab bar now states the mode's actual behavior ("follows your question first" vs. "strictly follows your saved ICP filters"), sourced from a single copy table keyed by tab so it can't drift out of sync with which tab is active.
+- ⏳ **Not yet done:** nothing from the original v2 punch list remains — all planned Phase 1-6 frontend items have shipped in some form. Future work would be net-new (e.g. an admin UI for org-specific `signal_type_definitions` overrides), not backlog.
+- **Verification:** TypeScript compiles clean, full test suite passes (320/320), `npm run lint` on all touched files shows 0 errors (pre-existing warnings elsewhere in the codebase, none introduced). **Not verified in a running browser** — the detail-panel, scan-summary, and pack-selector changes render/behave correctly against real Stage 1/2/3 data that requires a live backend scan against an ICP with a signal-type pack enabled; this was not exercised end-to-end in this session.
+
+---
+
 ## Changelog — why this document was revised
 
 The backend just landed ~29 commits (re-audited in `backend_implementation_plan.md` v2). None of those commits touched `the-factory` — this is still a frontend rendering a backend contract that hasn't shipped the new fields yet. What changed is **what the frontend needs to be ready for**, because the backend's actual current shape (and its near-term plan) is different from what v1 of this document assumed:

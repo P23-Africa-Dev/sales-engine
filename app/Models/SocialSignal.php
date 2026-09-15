@@ -10,6 +10,12 @@ class SocialSignal extends Model
 {
     public const STATUSES = ['new', 'reviewed', 'outreached', 'synced', 'dismissed'];
 
+    public const ENRICHMENT_NOT_ATTEMPTED = 'not_attempted';
+
+    public const ENRICHMENT_ATTEMPTED_FOUND = 'attempted_found';
+
+    public const ENRICHMENT_ATTEMPTED_NOT_FOUND = 'attempted_not_found';
+
     protected $fillable = [
         'organization_id',
         'icp_profile_id',
@@ -53,6 +59,13 @@ class SocialSignal extends Model
         'status',
         'f23_lead_id',
         'meta',
+        'icp_filter_passed',
+        'icp_filter_reasons',
+        'signal_type_key',
+        'named_people',
+        'territory',
+        'enrichment_status',
+        'enrichment_attempted_at',
     ];
 
     protected function casts(): array
@@ -65,6 +78,10 @@ class SocialSignal extends Model
             'competitors' => 'array',
             'benefits' => 'array',
             'meta' => 'array',
+            'icp_filter_passed' => 'boolean',
+            'icp_filter_reasons' => 'array',
+            'named_people' => 'array',
+            'enrichment_attempted_at' => 'datetime',
         ];
     }
 
@@ -86,5 +103,10 @@ class SocialSignal extends Model
     public function reminders(): HasMany
     {
         return $this->hasMany(SignalReminder::class);
+    }
+
+    public function enrichmentLogs(): HasMany
+    {
+        return $this->hasMany(EnrichmentLog::class, 'social_signal_id');
     }
 }

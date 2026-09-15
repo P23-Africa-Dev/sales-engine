@@ -27,6 +27,12 @@ class LeadResource extends JsonResource
         $contactReady = array_key_exists('contact_ready', $meta)
             ? (bool) $meta['contact_ready']
             : ($email !== '' || $phone !== '' || $linkedinUrl !== '' || $profileUrls !== [] || ($title !== '' && $company !== ''));
+        // Tri-state (not_attempted|found|not_found) — additive alongside contact_ready,
+        // which stays for backward compatibility. Null (not a 4th state) on leads
+        // created before this field existed — never guessed for those.
+        $contactStatus = in_array($meta['contact_status'] ?? null, ['not_attempted', 'found', 'not_found'], true)
+            ? $meta['contact_status']
+            : null;
 
         return [
             'id' => $this->id,
@@ -48,6 +54,7 @@ class LeadResource extends JsonResource
             'linkedin_url' => $linkedinUrl !== '' ? $linkedinUrl : null,
             'profile_urls' => $profileUrls,
             'contact_ready' => $contactReady,
+            'contact_status' => $contactStatus,
             'contact_enrichment_tier' => isset($meta['contact_enrichment_tier']) && trim((string) $meta['contact_enrichment_tier']) !== ''
                 ? trim((string) $meta['contact_enrichment_tier'])
                 : null,

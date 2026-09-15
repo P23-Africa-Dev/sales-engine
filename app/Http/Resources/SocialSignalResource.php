@@ -50,6 +50,31 @@ class SocialSignalResource extends JsonResource
             'post_url' => $this->post_url,
             'lead_id' => $this->lead_id,
             'f23_lead_id' => $this->f23_lead_id,
+            // Stage 1 (ICP Filter) / Stage 2 (Signal Detection) audit trail —
+            // see docs/backend_implementation_plan.md. Null on signals created
+            // before this landed; the frontend must tolerate that.
+            'icpFilter' => [
+                'passed' => $this->icp_filter_passed,
+                'reasons' => $this->icp_filter_reasons ?? [],
+            ],
+            'discreteSignalType' => $this->signal_type_key,
+            'territory' => $this->territory,
+            'namedPeople' => $this->named_people ?? [],
+            'enrichment' => [
+                'status' => $this->enrichment_status,
+                'attemptedAt' => $this->enrichment_attempted_at?->toIso8601String(),
+                // Per-attempt detail (which person, which provider/tier, found or not).
+                // Only present when the caller eager-loaded enrichmentLogs (list/show
+                // endpoints both do) — omitted entirely otherwise rather than firing
+                // an N+1 query per signal.
+                'contacts' => $this->whenLoaded('enrichmentLogs', fn () => $this->enrichmentLogs->map(fn ($log) => [
+                    'personName' => $log->person_name,
+                    'foundEmail' => $log->found_email,
+                    'foundPhone' => $log->found_phone,
+                    'provider' => $log->provider,
+                    'tier' => $log->tier,
+                ])->values()),
+            ],
         ];
     }
 

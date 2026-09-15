@@ -8,6 +8,7 @@ use App\Models\Organization;
 use App\Models\SocialListeningSetting;
 use App\Models\SocialSignal;
 use App\Services\Enrichment\ContactEnrichmentOrchestrator;
+use App\Services\Enrichment\RoleBasedContactSearch;
 use App\Services\Integrations\Factory23\CrmSyncService;
 
 class SignalToLeadService
@@ -15,6 +16,7 @@ class SignalToLeadService
     public function __construct(
         private readonly CrmSyncService $crmSync,
         private readonly ContactEnrichmentOrchestrator $contactOrchestrator,
+        private readonly RoleBasedContactSearch $roleBasedSearch,
     ) {}
 
     /**
@@ -188,6 +190,13 @@ class SignalToLeadService
     }
 
     /**
+     * Stage 3 (new_plan.md): every named person on this signal gets an
+     * enrichment attempt logged (via ContactEnrichmentOrchestrator ->
+     * EnrichmentLog); a signal naming no person at all falls back to a
+     * role-based search against the ICP's target roles. Either way,
+     * `$signal->enrichment_status` always ends up in a defined state —
+     * never left blank/undetermined.
+     *
      * @param  array<string, mixed>  $leadMeta
      * @return array<string, mixed>
      */
@@ -198,11 +207,6 @@ class SignalToLeadService
         array $leadMeta,
         bool $isIndividual,
     ): array {
-        $personName = trim((string) ($signal->profile_name ?? $lead->name));
-        if ($personName === '' || mb_strtolower($personName) === 'unknown') {
-            return $leadMeta;
-        }
-
         $company = ! $isIndividual
             ? trim((string) ($signal->company_name ?? ''))
             : trim((string) ($leadMeta['company'] ?? ''));
@@ -210,22 +214,123 @@ class SignalToLeadService
             $company = '';
         }
 
-        try {
-            $enriched = $this->contactOrchestrator->enrichContacts(
+        $namedPeople = $this->resolveNamedPeople($signal, $lead);
+        $attempted = false;
+        $found = false;
+
+        if ($namedPeople !== []) {
+            foreach ($namedPeople as $index => $personName) {
+                $attempted = true;
+
+                try {
+                    $enriched = $this->contactOrchestrator->enrichContacts(
+                        $organization,
+                        $personName,
+                        array_filter([
+                            'company' => $company !== '' ? $company : null,
+                            // Seed data (existing profile URL/company) only makes sense
+                            // for the primary (first) named person on the signal.
+                            'linkedin_url' => $index === 0 ? ($leadMeta['linkedin_url'] ?? null) : null,
+                            'profile_urls' => $index === 0 ? ($leadMeta['profile_urls'] ?? []) : [],
+                        ]),
+                        [],
+                        $lead->id,
+                        $signal->id,
+                        $index,
+                    );
+                } catch (\Throwable) {
+                    continue;
+                }
+
+                if (($enriched['email'] ?? '') !== '' || ($enriched['phone'] ?? '') !== '') {
+                    $found = true;
+                }
+
+                // Lead.meta only has room for one contact's shape; the primary
+                // (first) named person populates it. Every person's attempt is
+                // still fully recorded in EnrichmentLog regardless.
+                if ($index === 0) {
+                    $leadMeta = $this->mergeEnrichedIntoLeadMeta($leadMeta, $enriched);
+                }
+            }
+        } elseif ($company !== '') {
+            $attempted = true;
+            $result = $this->roleBasedSearch->findContact(
                 $organization,
-                $personName,
-                array_filter([
-                    'company' => $company !== '' ? $company : null,
-                    'linkedin_url' => $leadMeta['linkedin_url'] ?? null,
-                    'profile_urls' => $leadMeta['profile_urls'] ?? [],
-                ]),
-                [],
+                $company,
+                $this->targetRolesForSignal($signal),
                 $lead->id,
+                $signal->id,
             );
-        } catch (\Throwable) {
-            return $leadMeta;
+
+            if (($result['email'] ?? '') !== '' || ($result['phone'] ?? '') !== '') {
+                $found = true;
+                $leadMeta = $this->mergeEnrichedIntoLeadMeta($leadMeta, $result + ['tier' => 'tier3', 'provider' => 'role_based_search']);
+            }
         }
 
+        if ($attempted) {
+            $signal->update([
+                'enrichment_status' => $found ? SocialSignal::ENRICHMENT_ATTEMPTED_FOUND : SocialSignal::ENRICHMENT_ATTEMPTED_NOT_FOUND,
+                'enrichment_attempted_at' => now(),
+            ]);
+        }
+
+        return $leadMeta;
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function resolveNamedPeople(SocialSignal $signal, Lead $lead): array
+    {
+        $named = is_array($signal->named_people) ? $signal->named_people : [];
+        $named = array_values(array_filter(
+            array_map(static fn ($n) => trim((string) $n), $named),
+            fn ($n) => $this->looksLikeARealName($n),
+        ));
+
+        if ($named !== []) {
+            return $named;
+        }
+
+        // Deliberately NOT falling back to $lead->name here: when neither the
+        // signal nor the company has a real name, resolveLeadName() itself
+        // falls back to the placeholder "Social prospect" — using that as a
+        // "named person" would enrich a literal placeholder string as if it
+        // were someone's name.
+        $fallback = trim((string) $signal->profile_name);
+
+        return $this->looksLikeARealName($fallback) ? [$fallback] : [];
+    }
+
+    private function looksLikeARealName(string $name): bool
+    {
+        $normalized = mb_strtolower(trim($name));
+
+        return $normalized !== '' && ! in_array($normalized, ['unknown', 'social prospect'], true);
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function targetRolesForSignal(SocialSignal $signal): array
+    {
+        $config = is_array($signal->icpProfile?->config) ? $signal->icpProfile->config : [];
+
+        return array_values(array_filter(
+            array_map('strval', $config['decisionMakers'] ?? []),
+            static fn ($role) => trim($role) !== '',
+        ));
+    }
+
+    /**
+     * @param  array<string, mixed>  $leadMeta
+     * @param  array<string, mixed>  $enriched
+     * @return array<string, mixed>
+     */
+    private function mergeEnrichedIntoLeadMeta(array $leadMeta, array $enriched): array
+    {
         if (($enriched['email'] ?? '') !== '') {
             $leadMeta['email'] = $enriched['email'];
         }

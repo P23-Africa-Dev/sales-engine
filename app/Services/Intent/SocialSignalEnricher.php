@@ -4,6 +4,7 @@ namespace App\Services\Intent;
 
 use App\Models\IcpProfile;
 use App\Models\Organization;
+use App\Models\SignalTypeDefinition;
 use App\Services\Discovery\DTO\IcpBrief;
 use App\Services\Intent\DTO\RawSocialHit;
 use App\Services\Llm\GlmClient;
@@ -38,33 +39,55 @@ class SocialSignalEnricher
     ) {}
 
     /**
+     * @param  ?SignalTypeDefinition  $signalType  When the hit was found via a dedicated Stage 2
+     *                                              signal-type query (see SocialListeningOrchestrator::
+     *                                              buildSignalTypeQueries), the matched definition —
+     *                                              sharpens extraction toward that type's own trigger
+     *                                              pattern and, for types that name a person
+     *                                              (feeds_enrichment), toward pulling out named_people
+     *                                              precisely so Stage 3 has something real to enrich.
+     *                                              Null for the default/general query path — behavior
+     *                                              there is unchanged except for the new named_people key.
      * @return array<string, mixed>
      */
     public function enrich(
         Organization $organization,
         IcpProfile $icp,
         RawSocialHit $hit,
+        ?SignalTypeDefinition $signalType = null,
     ): array {
         $brief = IcpBrief::fromIcpProfile($icp);
 
         if ($this->glm->isConfigured()) {
             try {
+                $systemPrompt = 'Extract a structured opportunity from a social post for a specific viewing user, grounded in their ICP / stated interests. '
+                    . 'Return JSON only with keys: profile_name, persona, company_name, location_text, entity_type, industry, key_topics, competitors, '
+                    . 'signal_type, buying_stage, intent_label, intent_description, problem, urgency, buying_intent_score (0-100 integer for overall relevance/opportunity strength for this user), '
+                    . 'reasons (array of strings citing ICP/interest match when applicable), suggested_message, recommended_action_title, recommended_action_detail, follow_up_strategy, '
+                    . 'summary (concise neutral summary of the signal), why_this_matters_to_you (2nd person, cite the user\'s ICP/interest fields explicitly), '
+                    . 'benefits (array of concrete personal/user gains), personal_recommended_action_title, personal_recommended_action_detail (the single best next step for THIS user), '
+                    . 'named_people (array of full names of real people explicitly named in the post as taking an action — being hired, appointed, quoted, founding, leading; empty array if none are named). '
+                    . 'signal_type MUST be exactly one of: recommendation, switching, pricing, hiring_expansion, investment_opportunity, market_signal, partnership_opportunity, competitive_move, funding_event, regulatory_change, other. '
+                    . 'Use investment_opportunity/funding_event for funding rounds, capital raises, or investable openings. Use market_signal for market shifts, expansions, or trend news relevant to the user\'s interests. '
+                    . 'Use partnership_opportunity for potential collaborations. Use competitive_move for competitor actions worth knowing about. Use regulatory_change for policy/regulatory news. '
+                    . 'Use hiring_expansion for hiring/recruiting/expansion posts. Use recommendation/switching/pricing when the author is asking for vendors, alternatives, costs, or tools. '
+                    . 'Use other only for content with no plausible relevance to the user\'s ICP/interests, or spam. Do not force unrelated content into a sales bucket — pick the type that best matches WHY this matters to the user. '
+                    . 'Prefer timely angles: if the post is recent or time-sensitive, say so in why_this_matters_to_you and urgency. '
+                    . 'Every field must be populated (use empty string/array rather than omitting a key).';
+
+                if ($signalType !== null) {
+                    $systemPrompt .= " This post was found via a dedicated search for the \"{$signalType->label}\" signal type: {$signalType->trigger_description} "
+                        . 'If the post genuinely does not match that trigger pattern on closer reading, say so honestly — set signal_type to the best-fitting type anyway (or "other") and explain the mismatch in intent_description. Do not force a fit.';
+
+                    if ($signalType->feeds_enrichment) {
+                        $systemPrompt .= ' This signal type is expected to name a real person (e.g. a new hire or appointee) — extract every such name into named_people as precisely as possible; this is used to look up their contact details next.';
+                    }
+                }
+
                 $json = $this->glm->chatJson([
                     [
                         'role' => 'system',
-                        'content' => 'Extract a structured opportunity from a social post for a specific viewing user, grounded in their ICP / stated interests. '
-                            . 'Return JSON only with keys: profile_name, persona, company_name, location_text, entity_type, industry, key_topics, competitors, '
-                            . 'signal_type, buying_stage, intent_label, intent_description, problem, urgency, buying_intent_score (0-100 integer for overall relevance/opportunity strength for this user), '
-                            . 'reasons (array of strings citing ICP/interest match when applicable), suggested_message, recommended_action_title, recommended_action_detail, follow_up_strategy, '
-                            . 'summary (concise neutral summary of the signal), why_this_matters_to_you (2nd person, cite the user\'s ICP/interest fields explicitly), '
-                            . 'benefits (array of concrete personal/user gains), personal_recommended_action_title, personal_recommended_action_detail (the single best next step for THIS user). '
-                            . 'signal_type MUST be exactly one of: recommendation, switching, pricing, hiring_expansion, investment_opportunity, market_signal, partnership_opportunity, competitive_move, funding_event, regulatory_change, other. '
-                            . 'Use investment_opportunity/funding_event for funding rounds, capital raises, or investable openings. Use market_signal for market shifts, expansions, or trend news relevant to the user\'s interests. '
-                            . 'Use partnership_opportunity for potential collaborations. Use competitive_move for competitor actions worth knowing about. Use regulatory_change for policy/regulatory news. '
-                            . 'Use hiring_expansion for hiring/recruiting/expansion posts. Use recommendation/switching/pricing when the author is asking for vendors, alternatives, costs, or tools. '
-                            . 'Use other only for content with no plausible relevance to the user\'s ICP/interests, or spam. Do not force unrelated content into a sales bucket — pick the type that best matches WHY this matters to the user. '
-                            . 'Prefer timely angles: if the post is recent or time-sensitive, say so in why_this_matters_to_you and urgency. '
-                            . 'Every field must be populated (use empty string/array rather than omitting a key).',
+                        'content' => $systemPrompt,
                     ],
                     [
                         'role' => 'user',
@@ -125,6 +148,7 @@ class SocialSignalEnricher
                     'key_topics' => $this->stringList($json['key_topics'] ?? [], 4),
                     'competitors' => $this->stringList($json['competitors'] ?? [], 3),
                     'benefits' => $this->stringList($json['benefits'] ?? [], 5),
+                    'named_people' => $this->stringList($json['named_people'] ?? [], 5),
                     'recommended_action_title' => $actionTitle,
                     'recommended_action_detail' => $actionDetail,
                     'recommended_action' => $this->joinAction($actionTitle, $actionDetail),
@@ -183,6 +207,7 @@ class SocialSignalEnricher
             'summary' => mb_substr($hit->postText, 0, 240),
             'why_this_matters_to_you' => $this->fallbackWhyThisMatters($brief, $signalType),
             'benefits' => [],
+            'named_people' => [],
             'personal_recommended_action_title' => $actionTitle,
             'personal_recommended_action_detail' => $actionDetail,
             'score' => $score,

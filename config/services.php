@@ -121,6 +121,15 @@ return [
 
     'social_listening' => [
         'daily_api_cap' => (int) env('SOCIAL_LISTENING_DAILY_API_CAP', 200),
+        // Stage 2 discrete signal-type detection: how many active signal types (from
+        // SignalTypeRegistry) get their own dedicated search query per run. Each one
+        // is searched across every enabled source, so this directly multiplies API
+        // call volume for the run — keep conservative.
+        'max_signal_type_queries_per_run' => (int) env('SOCIAL_LISTENING_MAX_SIGNAL_TYPE_QUERIES', 4),
+        // Global default for new SocialListeningSetting rows' icp_filter_enabled kill
+        // switch (Stage 1 hard filter). Per-org/per-ICP override lives on the setting
+        // row itself; this only controls what NEW settings rows default to.
+        'icp_filter_enabled_default' => (bool) env('SOCIAL_LISTENING_ICP_FILTER_ENABLED_DEFAULT', true),
     ],
 
     'chat' => [

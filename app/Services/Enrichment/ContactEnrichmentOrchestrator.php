@@ -29,6 +29,8 @@ class ContactEnrichmentOrchestrator
         array $seed = [],
         array $snippets = [],
         ?int $leadId = null,
+        ?int $socialSignalId = null,
+        int $personIndex = 0,
     ): array {
         $contacts = [
             'email' => trim((string) ($seed['email'] ?? '')),
@@ -68,6 +70,9 @@ class ContactEnrichmentOrchestrator
                 0,
                 $personName,
                 $leadId,
+                [],
+                $socialSignalId,
+                $personIndex,
             );
 
             if ($this->hasCompleteContacts($contacts)) {
@@ -95,6 +100,9 @@ class ContactEnrichmentOrchestrator
                 (int) ($result['credits_used'] ?? 0),
                 $personName,
                 $leadId,
+                [],
+                $socialSignalId,
+                $personIndex,
             );
             if ($this->hasCompleteContacts($contacts)) {
                 return $contacts;
@@ -123,6 +131,9 @@ class ContactEnrichmentOrchestrator
                 (int) ($result['credits_used'] ?? 0),
                 $personName,
                 $leadId,
+                [],
+                $socialSignalId,
+                $personIndex,
             );
             if ($this->hasCompleteContacts($contacts)) {
                 return $contacts;
@@ -142,6 +153,9 @@ class ContactEnrichmentOrchestrator
                 ($result['email'] ?? '') !== '' || ($result['phone'] ?? '') !== '' ? 1 : 0,
                 $personName,
                 $leadId,
+                [],
+                $socialSignalId,
+                $personIndex,
             );
             if ($this->hasCompleteContacts($contacts)) {
                 return $contacts;
@@ -169,6 +183,9 @@ class ContactEnrichmentOrchestrator
                     1,
                     $personName,
                     $leadId,
+                    [],
+                    $socialSignalId,
+                    $personIndex,
                 );
             } else {
                 $this->usageTracker->logEnrichment(
@@ -180,6 +197,9 @@ class ContactEnrichmentOrchestrator
                     0,
                     $personName,
                     $leadId,
+                    [],
+                    $socialSignalId,
+                    $personIndex,
                 );
             }
         }
