@@ -13,6 +13,9 @@ class SignalTypeDefinition extends Model
 
     public const PACK_LAGOS_CORPORATE_TRANSPORT = 'lagos_corporate_transport';
 
+    /** Explicit opt-out: Social Listening skips discrete type queries. */
+    public const PACK_NONE = 'none';
+
     protected $fillable = [
         'organization_id',
         'key',

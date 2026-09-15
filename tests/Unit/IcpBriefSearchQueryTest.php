@@ -47,7 +47,7 @@ class IcpBriefSearchQueryTest extends TestCase
         $this->assertNotEmpty($linkedinVariants, 'Fan-out should still include LinkedIn profile variants');
     }
 
-    public function test_generic_icp_request_falls_back_to_icp_industries_and_territories(): void
+    public function test_generic_icp_request_does_not_use_firmographic_fields_as_query_text(): void
     {
         $profile = new IcpProfile([
             'name' => 'My Tech ICP',
@@ -66,10 +66,18 @@ class IcpBriefSearchQueryTest extends TestCase
         $this->assertFalse($brief->hasUserQuery());
         $query = $brief->searchQuery();
 
-        $this->assertStringContainsString('FinTech', $query);
-        $this->assertStringContainsString('Lagos', $query);
+        $this->assertStringNotContainsString('FinTech', $query);
+        $this->assertStringNotContainsString('Lagos', $query);
+        $this->assertStringNotContainsString('Head of Sales', $query);
         $this->assertStringNotContainsString('Find 100 prospects', $query);
         $this->assertStringNotContainsString('relevant to my ICP', $query);
+
+        $variations = app(\App\Services\Discovery\QueryVariationGenerator::class)->generate($brief, 20);
+        foreach ($variations as $variation) {
+            $this->assertStringNotContainsString('FinTech', $variation);
+            $this->assertStringNotContainsString('Lagos', $variation);
+            $this->assertStringNotContainsString('Head of Sales', $variation);
+        }
     }
 
     public function test_strips_find_n_wrapper_but_keeps_substantive_query(): void

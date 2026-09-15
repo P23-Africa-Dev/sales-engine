@@ -143,6 +143,7 @@ class SocialListeningTest extends TestCase
             'config' => array_merge(IcpProfile::defaultConfig(), [
                 'industries' => ['FMCG & Retail'],
                 'territories' => ['Lagos, NG'],
+                'signalTypePacks' => [\App\Models\SignalTypeDefinition::PACK_NONE],
             ]),
         ]);
 
@@ -174,6 +175,7 @@ class SocialListeningTest extends TestCase
             'config' => array_merge(IcpProfile::defaultConfig(), [
                 'industries' => ['FMCG & Retail'],
                 'territories' => ['Lagos, NG'],
+                'signalTypePacks' => [\App\Models\SignalTypeDefinition::PACK_NONE],
             ]),
         ]);
 
@@ -382,6 +384,7 @@ class SocialListeningTest extends TestCase
                 'customPrompt' => 'I want high-conviction tech investment opportunities outside my home market.',
                 'industries' => [],
                 'territories' => [],
+                'signalTypePacks' => [\App\Models\SignalTypeDefinition::PACK_NONE],
             ]),
         ]);
 
@@ -508,6 +511,7 @@ class SocialListeningTest extends TestCase
             'config' => array_merge(IcpProfile::defaultConfig(), [
                 'industries' => ['FMCG & Retail'],
                 'territories' => ['Lagos, NG'],
+                'signalTypePacks' => [\App\Models\SignalTypeDefinition::PACK_NONE],
             ]),
         ]);
 
@@ -564,6 +568,7 @@ class SocialListeningTest extends TestCase
             'config' => array_merge(IcpProfile::defaultConfig(), [
                 'industries' => ['FMCG & Retail'],
                 'territories' => ['Lagos, NG'],
+                'signalTypePacks' => [\App\Models\SignalTypeDefinition::PACK_NONE],
             ]),
         ]);
 
@@ -658,7 +663,7 @@ class SocialListeningTest extends TestCase
         $this->withHeaders($this->orgHeaders($org))
             ->getJson('/api/v1/social-listening/settings')
             ->assertOk()
-            ->assertJsonPath('data.freshness_window_days', 14);
+            ->assertJsonPath('data.freshness_window_days', 180);
 
         $this->withHeaders($this->orgHeaders($org))
             ->putJson('/api/v1/social-listening/settings', [
@@ -666,6 +671,13 @@ class SocialListeningTest extends TestCase
             ])
             ->assertOk()
             ->assertJsonPath('data.freshness_window_days', 7);
+
+        $this->withHeaders($this->orgHeaders($org))
+            ->putJson('/api/v1/social-listening/settings', [
+                'freshness_window_days' => 90,
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.freshness_window_days', 90);
     }
 
     public function test_settings_persist_meta_page_ids(): void
@@ -721,6 +733,7 @@ class SocialListeningTest extends TestCase
             'config' => array_merge(IcpProfile::defaultConfig(), [
                 'industries' => ['FMCG & Retail'],
                 'territories' => ['Lagos, NG'],
+                'signalTypePacks' => [\App\Models\SignalTypeDefinition::PACK_NONE],
             ]),
         ]);
 
@@ -805,6 +818,7 @@ class SocialListeningTest extends TestCase
             'config' => array_merge(IcpProfile::defaultConfig(), [
                 'industries' => ['FMCG & Retail'],
                 'territories' => ['Lagos, NG'],
+                'signalTypePacks' => [\App\Models\SignalTypeDefinition::PACK_NONE],
             ]),
         ]);
 
@@ -851,6 +865,7 @@ class SocialListeningTest extends TestCase
                 'territories' => ['QqwertTerritoryTerm'],
                 'decisionMakers' => ['UniqueDecisionMakerTitle'],
                 'customPrompt' => '',
+                'signalTypePacks' => [\App\Models\SignalTypeDefinition::PACK_NONE],
             ]),
         ]);
 
@@ -899,6 +914,7 @@ class SocialListeningTest extends TestCase
             'config' => array_merge(IcpProfile::defaultConfig(), [
                 'industries' => ['FMCG & Retail'],
                 'territories' => ['Lagos, NG'],
+                'signalTypePacks' => [\App\Models\SignalTypeDefinition::PACK_NONE],
             ]),
         ]);
 
@@ -942,20 +958,65 @@ class SocialListeningTest extends TestCase
         $this->assertSame(['industry' => true, 'companySize' => true, 'revenue' => true, 'territory' => true], $signal->icp_filter_reasons);
     }
 
-    public function test_signal_type_queries_are_opt_in_and_do_not_run_for_a_default_icp(): void
+    public function test_empty_signal_type_packs_default_to_core_buyer_signals(): void
     {
-        // An ICP that never set signalTypePacks must see zero behavior change:
-        // no extra Serper calls, no signal_type_key ever populated. This locks
-        // in that Stage 2's discrete-detection queries cost nothing extra unless
-        // an org deliberately opts in (see SocialListeningOrchestrator::buildSignalTypeQueries).
-        config(['services.glm.api_key' => '', 'services.serper.api_key' => 'test-serper-key']);
+        config([
+            'services.glm.api_key' => '',
+            'services.serper.api_key' => 'test-serper-key',
+            'services.social_listening.max_signal_type_queries_per_run' => 1,
+        ]);
+
+        $this->seed(\Database\Seeders\SignalTypeDefinitionSeeder::class);
 
         [$user, $org] = $this->actingAsOrgMember();
         $icp = IcpProfile::query()->create([
             'organization_id' => $org->id,
             'name' => 'Default ICP',
             'is_active' => true,
-            'config' => IcpProfile::defaultConfig(), // no signalTypePacks key at all
+            'config' => array_merge(IcpProfile::defaultConfig(), [
+                'signalTypePacks' => [],
+                'industries' => [],
+                'territories' => [],
+            ]),
+        ]);
+
+        $settings = SocialListeningSetting::query()->create(array_merge(
+            SocialListeningSetting::defaultsForOrg($org->id, $icp->id),
+            ['enabled_sources' => ['linkedin_public'], 'min_score' => 30, 'intent_filters' => []],
+        ));
+
+        Http::fake([
+            'google.serper.dev/*' => Http::response([
+                'organic' => [[
+                    'title' => 'Company X registers Kenyan subsidiary to begin local distribution',
+                    'snippet' => 'Company X registers a new Kenyan subsidiary.',
+                    'link' => 'https://linkedin.com/posts/market-entry-default',
+                    'date' => '1 day ago',
+                ]],
+            ], 200),
+        ]);
+
+        $run = app(SocialListeningOrchestrator::class)->run($org, $icp, $settings, $user);
+
+        $this->assertSame('completed', $run->status);
+        $signal = SocialSignal::query()->where('organization_id', $org->id)->first();
+        $this->assertNotNull($signal);
+        $this->assertSame('new_market_entry', $signal->signal_type_key);
+    }
+
+    public function test_none_pack_disables_discrete_signal_type_queries(): void
+    {
+        config(['services.glm.api_key' => '', 'services.serper.api_key' => 'test-serper-key']);
+        $this->seed(\Database\Seeders\SignalTypeDefinitionSeeder::class);
+
+        [$user, $org] = $this->actingAsOrgMember();
+        $icp = IcpProfile::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'Opt out ICP',
+            'is_active' => true,
+            'config' => array_merge(IcpProfile::defaultConfig(), [
+                'signalTypePacks' => [\App\Models\SignalTypeDefinition::PACK_NONE],
+            ]),
         ]);
 
         $settings = SocialListeningSetting::query()->create(array_merge(
@@ -982,8 +1043,6 @@ class SocialListeningTest extends TestCase
         $run = app(SocialListeningOrchestrator::class)->run($org, $icp, $settings, $user);
 
         $this->assertSame('completed', $run->status);
-        // Heuristic (no GLM) query generation returns exactly one general query;
-        // one enabled source means exactly one Serper call — no signal-type fan-out.
         $this->assertSame(1, $callCount);
 
         $signal = SocialSignal::query()->where('organization_id', $org->id)->first();
@@ -1046,15 +1105,13 @@ class SocialListeningTest extends TestCase
             ->where('organization_id', $org->id)
             ->where('post_url', 'https://linkedin.com/posts/market-entry-1')
             ->first();
-        $untagged = SocialSignal::query()
-            ->where('organization_id', $org->id)
-            ->where('post_url', 'https://linkedin.com/posts/generic-2')
-            ->first();
 
         $this->assertNotNull($tagged);
         $this->assertSame('new_market_entry', $tagged->signal_type_key);
-        $this->assertNotNull($untagged);
-        $this->assertNull($untagged->signal_type_key);
+        $this->assertSame(0, SocialSignal::query()
+            ->where('organization_id', $org->id)
+            ->where('post_url', 'https://linkedin.com/posts/generic-2')
+            ->count());
     }
 
     public function test_leadership_hire_signal_captures_named_people_end_to_end(): void
@@ -1091,6 +1148,18 @@ class SocialListeningTest extends TestCase
                 // First GLM call is buildQueries(); subsequent calls are per-hit enrich().
                 if (str_contains($body, 'Generate 3-5 short Google search queries')) {
                     return Http::response(['choices' => [['message' => ['content' => json_encode(['queries' => ['fallback query']])]]]], 200);
+                }
+
+                if (str_contains($body, 'Decide whether a post is a genuine match')) {
+                    return Http::response(['choices' => [['message' => ['content' => json_encode([
+                        'matched' => true,
+                        'company' => 'Acme Corp',
+                        'description' => 'Jane Doe appointed Country Manager for Kenya, replacing John Smith.',
+                        'source_url' => 'https://linkedin.com/posts/leadership-hire-1',
+                        'source_date' => now()->subDay()->toDateString(),
+                        'territory' => 'Kenya',
+                        'named_people' => ['Jane Doe', 'John Smith'],
+                    ])]]]], 200);
                 }
 
                 return Http::response([

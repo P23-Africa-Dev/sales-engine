@@ -2,6 +2,7 @@
 
 namespace App\Services\Discovery\DTO;
 
+use App\Models\SignalTypeDefinition;
 use App\Services\Discovery\QueryIntentService;
 
 readonly class IcpBrief
@@ -55,7 +56,10 @@ readonly class IcpBrief
             target: $target,
             requestedLimit: $intent['limit'],
             revenueRanges: array_values($config['revenueRanges'] ?? []),
-            signalTypePacks: array_values($config['signalTypePacks'] ?? []),
+            signalTypePacks: array_values(array_filter(
+                array_map('strval', $config['signalTypePacks'] ?? []),
+                static fn (string $pack) => $pack !== '',
+            )),
         );
     }
 
@@ -140,6 +144,31 @@ readonly class IcpBrief
         return app(QueryIntentService::class)->isAuthoritativePeopleQuery($this->query);
     }
 
+    /**
+     * Packs that should actually run. Empty / missing → Core Buyer Signals.
+     * Explicit `none` disables discrete detection.
+     *
+     * @return list<string>
+     */
+    public function resolvedSignalTypePacks(): array
+    {
+        $packs = array_values(array_filter(
+            $this->signalTypePacks,
+            static fn ($pack) => is_string($pack) && trim($pack) !== '',
+        ));
+
+        if (in_array(SignalTypeDefinition::PACK_NONE, $packs, true)) {
+            return [];
+        }
+
+        return $packs === [] ? [SignalTypeDefinition::PACK_DEFAULT] : $packs;
+    }
+
+    public function signalTypeDetectionEnabled(): bool
+    {
+        return $this->resolvedSignalTypePacks() !== [];
+    }
+
     public function searchQuery(): string
     {
         if (filled($this->searchQueryOverride)) {
@@ -171,21 +200,25 @@ readonly class IcpBrief
             return $cleaned;
         }
 
-        return $this->icpFallbackSearchQuery();
+        return $this->interestSearchSeed();
     }
 
-    private function icpFallbackSearchQuery(): string
+    /**
+     * Interest language for search — customPrompt / description only.
+     * Firmographic ICP fields are never part of this string.
+     */
+    public function interestSearchSeed(): string
     {
-        $decisionMakerHint = implode(' ', array_slice($this->decisionMakers, 0, 2));
+        $interest = trim($this->customPrompt) !== ''
+            ? trim($this->customPrompt)
+            : trim($this->description);
 
-        $parts = array_filter([
-            implode(' ', array_slice($this->industries, 0, 2)),
-            implode(' ', array_slice($this->territories, 0, 2)),
-            $this->isPeopleSearch()
-                ? ($decisionMakerHint !== '' ? $decisionMakerHint : 'executives founders')
-                : ($decisionMakerHint !== '' ? $decisionMakerHint . ' companies' : 'companies distributors'),
-        ]);
+        if ($interest !== '') {
+            return $interest;
+        }
 
-        return trim(implode(' ', $parts));
+        return $this->isPeopleSearch()
+            ? 'executives founders companies announcements'
+            : 'companies announcements partnerships market entry';
     }
 }
