@@ -148,7 +148,9 @@ Fix: implement assertion → exchange; store SE token separately (e.g. `sales_en
 
 Shapes match UI `IcpProfile` / `IcpConfig` (camelCase in `config`).
 
-**Config fields:** `profileName`, `description`, `industries[]`, `companySizes[]`, `revenueRanges[]`, `territories[]`, `decisionMakers[]`, `minMatchScore`, `autoSyncCrm`, `enrichContactDetails`, `customPrompt`
+**Config fields:** `profileName`, `description`, `industries[]`, `companySizes[]`, `revenueRanges[]`, `territories[]`, `decisionMakers[]`, `minMatchScore`, `autoSyncCrm`, `enrichContactDetails`, `customPrompt`, `signalTypePacks[]`
+
+`signalTypePacks` (added in the Stage 1/2/3 signal-detection rebuild — see §8 below) is **optional and opt-in**: `[]` or absent means zero change to Social Listening's scan behavior or API cost. Known values: `"default"` (New Market Entry, Distribution/Partnership Announcement, Leadership Hire in Territory, Export/Trade Activity Mention), `"software_dev_vertical"`, `"lagos_corporate_transport"`. `industries`/`territories`/`companySizes`/`revenueRanges`/`decisionMakers` are strict, deterministic filter fields — they are never sent as free-text search queries; `customPrompt`/`description` are the only fields used as interest context for query generation.
 
 | Method | Path                           | Behavior                                  |
 | ------ | ------------------------------ | ----------------------------------------- |
@@ -377,7 +379,12 @@ Signals list response:
             "recommendedAction": { "title": "Reach out soon", "detail": "..." },
             "whyThisMattersToYou": "This matches your interest in high-conviction tech investments outside your home market.",
             "benefits": ["Early access to a funding round", "Direct founder contact"],
-            "personalRecommendedAction": { "title": "Review the raise", "detail": "..." }
+            "personalRecommendedAction": { "title": "Review the raise", "detail": "..." },
+            "icpFilter": { "passed": true, "reasons": { "industry": true, "territory": true } },
+            "discreteSignalType": "new_market_entry",
+            "territory": "Kenya",
+            "namedPeople": ["Jane Doe"],
+            "enrichment": { "status": "attempted_found", "attemptedAt": "2026-09-15T10:00:00+00:00" }
         }
     ],
     "meta": { "current_page": 1, "last_page": 1, "per_page": 20, "total": 1 }
@@ -387,6 +394,16 @@ Signals list response:
 **Default `intent_filters` is now `[]`** (was the 4 sales types) — an org that never touches Listen Settings gets every opportunity type, gated only by `min_score`; narrowing to a sales-only feed is still available in Listen Settings.
 
 `recommendedAction` and `personalRecommendedAction` are always objects (`{ title, detail }`). Legacy rows created before this change populate them by splitting the old flat `recommended_action` string on an em-dash (or first sentence) — frontends should still tolerate a plain string for defensive compatibility with cached/older responses. New nullable columns (`summary`, `entityType`, `industry`, `keyTopics`, `competitors`, `followUpStrategy`, `whyThisMattersToYou`, `benefits`, `personalRecommendedAction`) may be empty/null on signals created before this change — no backfill is planned for v1.
+
+**Stage 1/2/3 fields (signal-detection rebuild — see `docs/backend_implementation_plan.md`):**
+
+- `icpFilter: { passed: bool, reasons: Record<string, bool> }` — Stage 1's hard-filter audit trail (industry/territory only today; companySize/revenue always report `true` since neither pipeline can populate that data yet — see `IcpFilterService`'s docblock). `passed: false` never appears in practice: a signal failing this check is discarded before it's ever persisted.
+- `discreteSignalType: string | null` — one of the seeded `signal_type_definitions` keys (e.g. `new_market_entry`, `leadership_hire_in_territory`) when the signal was found via a dedicated Stage 2 signal-type query. **Null on most signals today**: this only populates when the owning ICP opted into a `signalTypePacks` value (see §4) — it is never guessed from the legacy `signalType` taxonomy.
+- `territory: string | null` — more precise than `location` for Stage 2 detection; currently mirrors the enricher's `location_text`.
+- `namedPeople: string[]` — people named in the signal (Stage 3 enriches each one separately). Empty today for nearly all signals since nothing yet writes multiple names; the single-name case still falls back to `profile_name`.
+- `enrichment: { status: "not_attempted" | "attempted_found" | "attempted_not_found", attemptedAt: string | null }` — Stage 3's outcome. `not_attempted` means nothing enrichable was found on the signal (no named person, no real company); it is **not** the same as "not tried yet" being a bug — it's a legitimate terminal state. Enrichment currently fires when a signal converts to a lead (`POST .../sync-to-crm`), not automatically at scan time.
+
+All five fields are `null`/absent/default on signals created before this rebuild shipped — never assume presence.
 
 Metrics:
 
@@ -400,6 +417,29 @@ Metrics:
     }
 }
 ```
+
+**Run status / `result_summary` (structured since the rebuild):**
+
+```json
+{
+    "id": 42,
+    "status": "completed",
+    "signals_created": 4,
+    "result_summary": {
+        "totalChecked": 10,
+        "qualified": 4,
+        "rejected": {
+            "icpMismatch": 3,
+            "missingSourceUrl": 0,
+            "missingSourceDate": 2,
+            "stale": 1,
+            "total": 6
+        }
+    }
+}
+```
+
+`result_summary` is a **plain human-readable string** on runs created before this rebuild — always check `typeof result_summary === "object"` (or use the frontend's `isStructuredRunSummary()` guard) before reading nested fields.
 
 Manual runs are async (Redis queue). Rate limit: 10 requests/hour per user on `POST /social-listening/runs`.
 
@@ -461,6 +501,7 @@ Do not call Factory23 CRM for discovery data — discovery lives on this API.
 
 | Date       | Change                                                                         |
 | ---------- | ------------------------------------------------------------------------------ |
+| 2026-09-15 | Signal-detection rebuild (Stage 1/2/3, see `docs/backend_implementation_plan.md`): ICP config gains opt-in `signalTypePacks[]`; signals gain `icpFilter`, `discreteSignalType`, `territory`, `namedPeople`, `enrichment.{status,attemptedAt}`; a signal missing a source URL or publish date is now discarded outright rather than surfaced with a lower score; `SocialListeningRun.result_summary` is now structured JSON (`totalChecked`/`qualified`/`rejected` breakdown) on new runs, still a plain string on legacy runs |
 | 2026-09-08 | Social Listening freshness: Serper `tbs`, real `posted_at`, `freshness_window_days`, score blend, list sort by score then `posted_at`, optional `max_age_days` |
 | 2026-09-08 | Social Listening: personal opportunity assistant framing — expanded `signalType` taxonomy, `recommendedAction`/`personalRecommendedAction` objects, `whyThisMattersToYou`/`benefits`, `summary`/`entityType`/`industry`/`keyTopics`/`competitors`/`followUpStrategy` |
 | 2026-09-02 | Chat async discovery (202 + poll), ICP-scoped sessions, clear chat history     |

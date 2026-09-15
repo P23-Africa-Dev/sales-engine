@@ -1,5 +1,7 @@
 # Social Listening: Frontend Mock vs Backend API — Field Gap
 
+> **Status (2026-09-16): the gap this document describes has been closed** — the 6 missing fields below were implemented (see `implementation.md`), and a further rebuild since then (Stage 1 ICP filter, Stage 2 mandatory source/date grounding + discrete signal types, Stage 3 multi-person/role-based enrichment) added a second generation of fields on top: `icpFilter`, `discreteSignalType`, `territory`, `namedPeople`, `enrichment.{status,attemptedAt,contacts}`. For the **current** field contract, see `docs/FRONTEND_INTEGRATION.md` §8 (kept up to date) and `docs/backend_implementation_plan.md` (the rebuild's design rationale and status). This document is kept as the historical record of the original gap and root-cause analysis — the field tables below describe a state that no longer exists in the code.
+
 Detailed comparison between the `SocialSignal` shape the Social Listening tab was originally designed and built against (hardcoded mock data on the `dev-work` branch of `the-factory`) and what the `sales-engine` API actually returns today (verified against the `space` branch integration). Includes exact code references, concrete example values, and a ready-to-use implementation prompt for the backend.
 
 ## Sources checked

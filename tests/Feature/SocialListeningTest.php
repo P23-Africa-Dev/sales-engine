@@ -435,6 +435,7 @@ class SocialListeningTest extends TestCase
                     'title' => 'Voltify raises $8M Series A to expand fintech platform',
                     'snippet' => 'Voltify just closed a Series A funding round led by top investors to expand into new markets.',
                     'link' => 'https://linkedin.com/posts/voltify-raise',
+                    'date' => '2 days ago',
                 ]],
             ], 200),
         ]);
@@ -444,6 +445,9 @@ class SocialListeningTest extends TestCase
 
         $this->assertSame('completed', $run->status);
         $this->assertSame(1, $run->signals_created);
+        $this->assertSame(1, $run->result_summary['totalChecked']);
+        $this->assertSame(1, $run->result_summary['qualified']);
+        $this->assertSame(0, $run->result_summary['rejected']['total']);
 
         Http::assertSent(function ($request) {
             if (! str_contains($request->url(), 'bigmodel.cn')) {
@@ -696,5 +700,443 @@ class SocialListeningTest extends TestCase
             ->getJson('/api/v1/social-listening/settings')
             ->assertOk()
             ->assertJsonPath('data.meta_page_ids', ['AcmeCorp', '123456789', 'competitor-page']);
+    }
+
+    public function test_run_discards_a_high_scoring_signal_that_fails_the_icp_filter(): void
+    {
+        // Stage 1 (new_plan.md): "a company can have a strong signal but not match
+        // ICP, in which case it's discarded." Social Listening is always ICP-driven
+        // (no live chat query behind an automatic scan), so the hard gate must apply
+        // even when the enriched signal itself scores well above min_score.
+        config([
+            'services.glm.api_key' => 'test-glm-key',
+            'services.serper.api_key' => 'test-serper-key',
+        ]);
+
+        [$user, $org] = $this->actingAsOrgMember();
+        $icp = IcpProfile::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'FMCG Lagos ICP',
+            'is_active' => true,
+            'config' => array_merge(IcpProfile::defaultConfig(), [
+                'industries' => ['FMCG & Retail'],
+                'territories' => ['Lagos, NG'],
+            ]),
+        ]);
+
+        $settings = SocialListeningSetting::query()->create(array_merge(
+            SocialListeningSetting::defaultsForOrg($org->id, $icp->id),
+            ['enabled_sources' => ['linkedin_public'], 'min_score' => 55, 'intent_filters' => []],
+        ));
+
+        Http::fake([
+            'open.bigmodel.cn/*' => Http::sequence()
+                ->push(['choices' => [['message' => ['content' => json_encode(['queries' => ['fintech startup raises Series A']])]]]])
+                ->push([
+                    'choices' => [[
+                        'message' => ['content' => json_encode([
+                            'profile_name' => 'Jane Founder',
+                            'persona' => 'Founder',
+                            'company_name' => 'Voltify',
+                            // Neither the industry nor the territory overlaps the ICP's
+                            // FMCG & Retail / Lagos, NG filter — this must be discarded.
+                            'location_text' => 'Nairobi, KE',
+                            'entity_type' => 'company',
+                            'industry' => 'Fintech',
+                            'key_topics' => ['funding'],
+                            'competitors' => [],
+                            'signal_type' => 'funding_event',
+                            'buying_stage' => 'N/A',
+                            'intent_label' => 'Funding Event',
+                            'intent_description' => 'Company raised a Series A round.',
+                            'problem' => 'N/A',
+                            'urgency' => 'Medium',
+                            'buying_intent_score' => 90,
+                            'reasons' => ['Strong funding signal.'],
+                            'suggested_message' => 'Congrats on the raise.',
+                            'recommended_action_title' => 'Review the raise',
+                            'recommended_action_detail' => 'Check the term sheet.',
+                            'follow_up_strategy' => 'Follow up later.',
+                            'summary' => 'Voltify closed a Series A round.',
+                            'why_this_matters_to_you' => 'Investment opportunity.',
+                            'benefits' => ['Early visibility'],
+                            'personal_recommended_action_title' => 'Request an intro',
+                            'personal_recommended_action_detail' => 'Ask for a warm intro.',
+                        ])],
+                    ]],
+                ]),
+            'google.serper.dev/*' => Http::response([
+                'organic' => [[
+                    'title' => 'Voltify raises $8M Series A to expand fintech platform',
+                    'snippet' => 'Voltify just closed a Series A funding round.',
+                    'link' => 'https://linkedin.com/posts/voltify-raise',
+                    'date' => '2 days ago',
+                ]],
+            ], 200),
+        ]);
+
+        $orchestrator = app(SocialListeningOrchestrator::class);
+        $run = $orchestrator->run($org, $icp, $settings, $user);
+
+        $this->assertSame('completed', $run->status);
+        $this->assertSame(0, $run->signals_created);
+        $this->assertSame(1, $run->result_summary['rejected']['icpMismatch']);
+        $this->assertSame(1, $run->result_summary['rejected']['total']);
+        $this->assertSame(0, SocialSignal::query()->where('organization_id', $org->id)->count());
+    }
+
+    public function test_run_discards_a_matching_signal_with_no_source_date(): void
+    {
+        // Stage 2 mandatory-grounding gate (new_plan.md): "If source_url or
+        // source_date is missing, the signal is discarded — not surfaced with
+        // lower confidence, discarded." This hit matches the ICP perfectly and
+        // would score well, but Serper returned no 'date' field and the URL
+        // itself carries no extractable timestamp — it must still be dropped.
+        config([
+            'services.glm.api_key' => '',
+            'services.serper.api_key' => 'test-serper-key',
+        ]);
+
+        [$user, $org] = $this->actingAsOrgMember();
+        $icp = IcpProfile::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'FMCG Lagos ICP',
+            'is_active' => true,
+            'config' => array_merge(IcpProfile::defaultConfig(), [
+                'industries' => ['FMCG & Retail'],
+                'territories' => ['Lagos, NG'],
+            ]),
+        ]);
+
+        $settings = SocialListeningSetting::query()->create(array_merge(
+            SocialListeningSetting::defaultsForOrg($org->id, $icp->id),
+            ['enabled_sources' => ['linkedin_public'], 'min_score' => 40, 'intent_filters' => []],
+        ));
+
+        Http::fake([
+            'google.serper.dev/*' => Http::response([
+                'organic' => [[
+                    'title' => 'Anyone recommend FMCG logistics software in Lagos?',
+                    'snippet' => 'Looking for recommendations on FMCG distribution tools in Lagos.',
+                    'link' => 'https://linkedin.com/posts/no-date-1',
+                    // deliberately no 'date' field, and the URL has no extractable timestamp.
+                ]],
+            ], 200),
+        ]);
+
+        $orchestrator = app(SocialListeningOrchestrator::class);
+        $run = $orchestrator->run($org, $icp, $settings, $user);
+
+        $this->assertSame('completed', $run->status);
+        $this->assertSame(0, $run->signals_created);
+        $this->assertSame(1, $run->result_summary['rejected']['missingSourceDate']);
+        $this->assertSame(1, $run->result_summary['rejected']['total']);
+        $this->assertSame(0, SocialSignal::query()->where('organization_id', $org->id)->count());
+    }
+
+    public function test_general_query_generation_never_sends_structured_icp_fields_to_the_llm(): void
+    {
+        // new_plan.md's core rule: "ICP fields never get sent as free-text
+        // search queries." industries/territories/decisionMakers are Stage 1
+        // filter fields — only customPrompt/description may seed query text.
+        config(['services.glm.api_key' => 'test-glm-key', 'services.serper.api_key' => 'test-serper-key']);
+
+        [$user, $org] = $this->actingAsOrgMember();
+        $icp = IcpProfile::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'Distinctive Industry ICP',
+            'is_active' => true,
+            'config' => array_merge(IcpProfile::defaultConfig(), [
+                'industries' => ['ZzyxxUniqueIndustryTerm'],
+                'territories' => ['QqwertTerritoryTerm'],
+                'decisionMakers' => ['UniqueDecisionMakerTitle'],
+                'customPrompt' => '',
+            ]),
+        ]);
+
+        $settings = SocialListeningSetting::query()->create(array_merge(
+            SocialListeningSetting::defaultsForOrg($org->id, $icp->id),
+            ['enabled_sources' => ['linkedin_public'], 'min_score' => 30, 'intent_filters' => []],
+        ));
+
+        Http::fake([
+            'open.bigmodel.cn/*' => Http::response([
+                'choices' => [['message' => ['content' => json_encode(['queries' => ['new opportunities this week']])]]],
+            ], 200),
+            'google.serper.dev/*' => Http::response(['organic' => []], 200),
+        ]);
+
+        app(SocialListeningOrchestrator::class)->run($org, $icp, $settings, $user);
+
+        Http::assertSent(function ($request) {
+            if (! str_contains($request->url(), 'bigmodel.cn')) {
+                return true;
+            }
+            $body = $request->body();
+
+            return ! str_contains($body, 'ZzyxxUniqueIndustryTerm')
+                && ! str_contains($body, 'QqwertTerritoryTerm')
+                && ! str_contains($body, 'UniqueDecisionMakerTitle');
+        });
+    }
+
+    public function test_icp_filter_enabled_false_bypasses_the_stage_1_gate(): void
+    {
+        // Operational kill switch (Phase 8): with icp_filter_enabled off, a signal
+        // that would normally be discarded for not matching the ICP must still be
+        // created — but icp_filter_reasons must honestly show nothing was evaluated,
+        // never fabricate a real pass.
+        config([
+            'services.glm.api_key' => 'test-glm-key',
+            'services.serper.api_key' => 'test-serper-key',
+        ]);
+
+        [$user, $org] = $this->actingAsOrgMember();
+        $icp = IcpProfile::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'FMCG Lagos ICP',
+            'is_active' => true,
+            'config' => array_merge(IcpProfile::defaultConfig(), [
+                'industries' => ['FMCG & Retail'],
+                'territories' => ['Lagos, NG'],
+            ]),
+        ]);
+
+        $settings = SocialListeningSetting::query()->create(array_merge(
+            SocialListeningSetting::defaultsForOrg($org->id, $icp->id),
+            ['enabled_sources' => ['linkedin_public'], 'min_score' => 30, 'intent_filters' => [], 'icp_filter_enabled' => false],
+        ));
+
+        Http::fake([
+            'open.bigmodel.cn/*' => Http::sequence()
+                ->push(['choices' => [['message' => ['content' => json_encode(['queries' => ['fintech startup raises Series A']])]]]])
+                ->push([
+                    'choices' => [[
+                        'message' => ['content' => json_encode([
+                            'company_name' => 'Voltify',
+                            'location_text' => 'Nairobi, KE', // mismatched territory
+                            'entity_type' => 'company',
+                            'industry' => 'Fintech', // mismatched industry
+                            'signal_type' => 'funding_event',
+                            'summary' => 'Voltify closed a Series A round.',
+                        ])],
+                    ]],
+                ]),
+            'google.serper.dev/*' => Http::response([
+                'organic' => [[
+                    'title' => 'Voltify raises $8M Series A',
+                    'snippet' => 'Voltify just closed a Series A funding round.',
+                    'link' => 'https://linkedin.com/posts/kill-switch-1',
+                    'date' => '1 day ago',
+                ]],
+            ], 200),
+        ]);
+
+        $run = app(SocialListeningOrchestrator::class)->run($org, $icp, $settings, $user);
+
+        $this->assertSame('completed', $run->status);
+        $this->assertSame(1, $run->signals_created);
+
+        $signal = SocialSignal::query()->where('organization_id', $org->id)->firstOrFail();
+        $this->assertTrue($signal->icp_filter_passed);
+        $this->assertSame(['industry' => true, 'companySize' => true, 'revenue' => true, 'territory' => true], $signal->icp_filter_reasons);
+    }
+
+    public function test_signal_type_queries_are_opt_in_and_do_not_run_for_a_default_icp(): void
+    {
+        // An ICP that never set signalTypePacks must see zero behavior change:
+        // no extra Serper calls, no signal_type_key ever populated. This locks
+        // in that Stage 2's discrete-detection queries cost nothing extra unless
+        // an org deliberately opts in (see SocialListeningOrchestrator::buildSignalTypeQueries).
+        config(['services.glm.api_key' => '', 'services.serper.api_key' => 'test-serper-key']);
+
+        [$user, $org] = $this->actingAsOrgMember();
+        $icp = IcpProfile::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'Default ICP',
+            'is_active' => true,
+            'config' => IcpProfile::defaultConfig(), // no signalTypePacks key at all
+        ]);
+
+        $settings = SocialListeningSetting::query()->create(array_merge(
+            SocialListeningSetting::defaultsForOrg($org->id, $icp->id),
+            ['enabled_sources' => ['linkedin_public'], 'min_score' => 30, 'intent_filters' => []],
+        ));
+
+        $callCount = 0;
+        Http::fake([
+            'google.serper.dev/*' => function () use (&$callCount) {
+                $callCount++;
+
+                return Http::response([
+                    'organic' => [[
+                        'title' => 'Looking for FMCG distribution software',
+                        'snippet' => 'Looking for FMCG distribution software recommendations.',
+                        'link' => 'https://linkedin.com/posts/generic-1',
+                        'date' => '1 day ago',
+                    ]],
+                ], 200);
+            },
+        ]);
+
+        $run = app(SocialListeningOrchestrator::class)->run($org, $icp, $settings, $user);
+
+        $this->assertSame('completed', $run->status);
+        // Heuristic (no GLM) query generation returns exactly one general query;
+        // one enabled source means exactly one Serper call — no signal-type fan-out.
+        $this->assertSame(1, $callCount);
+
+        $signal = SocialSignal::query()->where('organization_id', $org->id)->first();
+        $this->assertNotNull($signal);
+        $this->assertNull($signal->signal_type_key);
+    }
+
+    public function test_signal_type_queries_tag_signals_when_an_icp_opts_into_a_pack(): void
+    {
+        config([
+            'services.glm.api_key' => '',
+            'services.serper.api_key' => 'test-serper-key',
+            'services.social_listening.max_signal_type_queries_per_run' => 1,
+        ]);
+
+        $this->seed(\Database\Seeders\SignalTypeDefinitionSeeder::class);
+
+        [$user, $org] = $this->actingAsOrgMember();
+        $icp = IcpProfile::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'Market Entry ICP',
+            'is_active' => true,
+            'config' => array_merge(IcpProfile::defaultConfig(), [
+                'industries' => [],
+                'territories' => [],
+                'signalTypePacks' => [\App\Models\SignalTypeDefinition::PACK_DEFAULT],
+            ]),
+        ]);
+
+        $settings = SocialListeningSetting::query()->create(array_merge(
+            SocialListeningSetting::defaultsForOrg($org->id, $icp->id),
+            ['enabled_sources' => ['linkedin_public'], 'min_score' => 30, 'intent_filters' => []],
+        ));
+
+        Http::fake([
+            'google.serper.dev/*' => function ($request) {
+                $body = $request->data();
+                $isSignalTypeQuery = str_contains((string) ($body['q'] ?? ''), 'New Market Entry');
+
+                return Http::response([
+                    'organic' => [[
+                        'title' => $isSignalTypeQuery ? 'Company X opens Kenyan subsidiary' : 'Looking for recommendations',
+                        'snippet' => $isSignalTypeQuery
+                            ? 'Company X registers a new Kenyan subsidiary to begin local distribution.'
+                            : 'Looking for FMCG distribution software recommendations.',
+                        'link' => $isSignalTypeQuery
+                            ? 'https://linkedin.com/posts/market-entry-1'
+                            : 'https://linkedin.com/posts/generic-2',
+                        'date' => '1 day ago',
+                    ]],
+                ], 200);
+            },
+        ]);
+
+        $run = app(SocialListeningOrchestrator::class)->run($org, $icp, $settings, $user);
+
+        $this->assertSame('completed', $run->status);
+
+        $tagged = SocialSignal::query()
+            ->where('organization_id', $org->id)
+            ->where('post_url', 'https://linkedin.com/posts/market-entry-1')
+            ->first();
+        $untagged = SocialSignal::query()
+            ->where('organization_id', $org->id)
+            ->where('post_url', 'https://linkedin.com/posts/generic-2')
+            ->first();
+
+        $this->assertNotNull($tagged);
+        $this->assertSame('new_market_entry', $tagged->signal_type_key);
+        $this->assertNotNull($untagged);
+        $this->assertNull($untagged->signal_type_key);
+    }
+
+    public function test_leadership_hire_signal_captures_named_people_end_to_end(): void
+    {
+        config([
+            'services.glm.api_key' => 'test-glm-key',
+            'services.serper.api_key' => 'test-serper-key',
+            'services.social_listening.max_signal_type_queries_per_run' => 4,
+        ]);
+
+        $this->seed(\Database\Seeders\SignalTypeDefinitionSeeder::class);
+
+        [$user, $org] = $this->actingAsOrgMember();
+        $icp = IcpProfile::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'Leadership Hire ICP',
+            'is_active' => true,
+            'config' => array_merge(IcpProfile::defaultConfig(), [
+                'industries' => [],
+                'territories' => [],
+                'signalTypePacks' => [\App\Models\SignalTypeDefinition::PACK_DEFAULT],
+            ]),
+        ]);
+
+        $settings = SocialListeningSetting::query()->create(array_merge(
+            SocialListeningSetting::defaultsForOrg($org->id, $icp->id),
+            ['enabled_sources' => ['linkedin_public'], 'min_score' => 30, 'intent_filters' => []],
+        ));
+
+        Http::fake([
+            'open.bigmodel.cn/*' => function ($request) {
+                $body = $request->body();
+
+                // First GLM call is buildQueries(); subsequent calls are per-hit enrich().
+                if (str_contains($body, 'Generate 3-5 short Google search queries')) {
+                    return Http::response(['choices' => [['message' => ['content' => json_encode(['queries' => ['fallback query']])]]]], 200);
+                }
+
+                return Http::response([
+                    'choices' => [[
+                        'message' => ['content' => json_encode([
+                            'profile_name' => 'Jane Doe',
+                            'company_name' => 'Acme Corp',
+                            'entity_type' => 'company',
+                            'location_text' => 'Kenya',
+                            'signal_type' => 'hiring_expansion',
+                            'named_people' => ['Jane Doe', 'John Smith'],
+                            'summary' => 'Jane Doe appointed Country Manager for Kenya, replacing John Smith.',
+                        ])],
+                    ]],
+                ], 200);
+            },
+            'google.serper.dev/*' => function ($request) {
+                $body = $request->data();
+                $isLeadershipHireQuery = str_contains((string) ($body['q'] ?? ''), 'Leadership Hire in Territory');
+
+                if (! $isLeadershipHireQuery) {
+                    return Http::response(['organic' => []], 200);
+                }
+
+                return Http::response([
+                    'organic' => [[
+                        'title' => 'Jane Doe appointed Country Manager for Kenya',
+                        'snippet' => 'Jane Doe appointed Country Manager for Kenya, replacing John Smith.',
+                        'link' => 'https://linkedin.com/posts/leadership-hire-1',
+                        'date' => '1 day ago',
+                    ]],
+                ], 200);
+            },
+        ]);
+
+        $run = app(SocialListeningOrchestrator::class)->run($org, $icp, $settings, $user);
+
+        $this->assertSame('completed', $run->status);
+
+        $signal = SocialSignal::query()
+            ->where('organization_id', $org->id)
+            ->where('post_url', 'https://linkedin.com/posts/leadership-hire-1')
+            ->first();
+
+        $this->assertNotNull($signal);
+        $this->assertSame('leadership_hire_in_territory', $signal->signal_type_key);
+        $this->assertSame(['Jane Doe', 'John Smith'], $signal->named_people);
     }
 }

@@ -27,6 +27,13 @@ class SocialListeningRun extends Model
     {
         return [
             'stages' => 'array',
+            // Structured since the Stage 1/2 pipeline rebuild (see
+            // docs/backend_implementation_plan.md Phase 6). Runs created before
+            // that ship a plain human-readable string in this column; json_decode
+            // of a non-JSON string returns null, so old runs simply read back as
+            // `result_summary: null` here — consistent with how every other
+            // legacy field in this rebuild degrades gracefully.
+            'result_summary' => 'array',
             'started_at' => 'datetime',
             'finished_at' => 'datetime',
         ];

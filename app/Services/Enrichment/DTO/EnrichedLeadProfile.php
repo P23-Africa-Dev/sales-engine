@@ -22,7 +22,35 @@ readonly class EnrichedLeadProfile
         public float $confidence = 0.0,
         public string $contactEnrichmentTier = '',
         public string $contactEnrichmentProvider = '',
+        /**
+         * True only when a real contact lookup actually ran this call (the
+         * ContactEnrichmentOrchestrator waterfall, or a decision-maker search) —
+         * false when enrichment was skipped (ICP's enrichContactDetails is off)
+         * or deferred to a later backfill pass. Feeds LeadResource's
+         * contact_status tri-state; see docs/backend_implementation_plan.md.
+         */
+        public bool $enrichmentAttempted = false,
     ) {}
+
+    public function withEnrichmentAttempted(bool $attempted): self
+    {
+        return new self(
+            title: $this->title,
+            companyName: $this->companyName,
+            location: $this->location,
+            website: $this->website,
+            email: $this->email,
+            phone: $this->phone,
+            profileUrls: $this->profileUrls,
+            summary: $this->summary,
+            nextAction: $this->nextAction,
+            sourceUrls: $this->sourceUrls,
+            confidence: $this->confidence,
+            contactEnrichmentTier: $this->contactEnrichmentTier,
+            contactEnrichmentProvider: $this->contactEnrichmentProvider,
+            enrichmentAttempted: $attempted,
+        );
+    }
 
     /**
      * @return array<string, mixed>
@@ -82,6 +110,7 @@ readonly class EnrichedLeadProfile
 
         $extracted['enrichment_confidence'] = $this->confidence;
         $extracted['low_confidence'] = $this->confidence < 40 && ($extracted['low_confidence'] ?? false);
+        $extracted['enrichment_attempted'] = $this->enrichmentAttempted;
 
         return $extracted;
     }
@@ -105,6 +134,7 @@ readonly class EnrichedLeadProfile
             'enrichment_confidence' => $this->confidence,
             'contact_enrichment_tier' => $this->contactEnrichmentTier,
             'contact_enrichment_provider' => $this->contactEnrichmentProvider,
+            'enrichment_attempted' => $this->enrichmentAttempted,
         ];
     }
 
@@ -130,6 +160,11 @@ readonly class EnrichedLeadProfile
             confidence: (float) ($data['enrichment_confidence'] ?? 0),
             contactEnrichmentTier: trim((string) ($data['contact_enrichment_tier'] ?? '')),
             contactEnrichmentProvider: trim((string) ($data['contact_enrichment_provider'] ?? '')),
+            // A cached profile was necessarily produced by a real attempt (see
+            // enrich()'s early-return paths, which never reach the Cache::put
+            // call) — default true here, not false, so a cache hit doesn't
+            // masquerade as "never attempted."
+            enrichmentAttempted: (bool) ($data['enrichment_attempted'] ?? true),
         );
     }
 }

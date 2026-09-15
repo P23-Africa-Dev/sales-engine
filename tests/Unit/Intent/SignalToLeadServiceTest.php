@@ -6,7 +6,9 @@ use App\Models\IcpProfile;
 use App\Models\Lead;
 use App\Models\SocialListeningSetting;
 use App\Models\SocialSignal;
+use App\Services\Enrichment\ApolloPersonEnricher;
 use App\Services\Enrichment\ContactEnrichmentOrchestrator;
+use App\Services\Enrichment\RoleBasedContactSearch;
 use App\Services\Integrations\Factory23\CrmSyncService;
 use App\Services\Intent\Adapters\SerperLinkedInAdapter;
 use App\Services\Intent\DTO\RawSocialHit;
@@ -73,7 +75,7 @@ class SignalToLeadServiceTest extends TestCase
             'provider' => 'hunter',
         ]);
 
-        $service = new SignalToLeadService($crm, $contacts);
+        $service = new SignalToLeadService($crm, $contacts, new RoleBasedContactSearch(new ApolloPersonEnricher));
         $result = $service->convert($signal, $org, true);
 
         $lead = $result['lead']->fresh();
@@ -141,7 +143,7 @@ class SignalToLeadServiceTest extends TestCase
             'provider' => null,
         ]);
 
-        $service = new SignalToLeadService($crm, $contacts);
+        $service = new SignalToLeadService($crm, $contacts, new RoleBasedContactSearch(new ApolloPersonEnricher));
         $result = $service->convert($signal, $org, false);
 
         $this->assertSame('Acme Corp', $result['lead']->name);
@@ -195,11 +197,167 @@ class SignalToLeadServiceTest extends TestCase
         $contacts = Mockery::mock(ContactEnrichmentOrchestrator::class);
         $contacts->shouldReceive('enrichContacts')->never();
 
-        $service = new SignalToLeadService($crm, $contacts);
+        $service = new SignalToLeadService($crm, $contacts, new RoleBasedContactSearch(new ApolloPersonEnricher));
         $result = $service->convert($signal, $org, true);
 
         $this->assertSame($existingLead->id, $result['lead']->id);
         $this->assertSame(1, Lead::query()->where('organization_id', $org->id)->count());
+    }
+
+    public function test_logs_an_enrichment_attempt_per_named_person_on_the_signal(): void
+    {
+        [, $org] = $this->actingAsOrgMember();
+        $icp = IcpProfile::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'ICP',
+            'is_active' => true,
+            'config' => IcpProfile::defaultConfig(),
+        ]);
+
+        $signal = SocialSignal::query()->create([
+            'organization_id' => $org->id,
+            'icp_profile_id' => $icp->id,
+            'post_url' => 'https://example.com/leadership-hire',
+            'content_hash' => 'hash-multi-person',
+            'platform' => 'linkedin',
+            'source_label' => 'LinkedIn Post',
+            'source_icon' => 'in',
+            'post_text' => 'Jane Doe appointed Country Manager, replacing John Smith.',
+            'company_name' => 'Acme Corp',
+            'entity_type' => 'company',
+            'signal_type' => 'hiring_expansion',
+            'signal_type_key' => 'leadership_hire_in_territory',
+            'named_people' => ['Jane Doe', 'John Smith'],
+            'score' => 80,
+            'status' => 'new',
+        ]);
+
+        $crm = Mockery::mock(CrmSyncService::class);
+        $crm->shouldReceive('canSync')->andReturn(false);
+
+        $contacts = Mockery::mock(ContactEnrichmentOrchestrator::class);
+        $contacts->shouldReceive('enrichContacts')
+            ->twice()
+            ->andReturnUsing(function ($org, $personName) {
+                if ($personName === 'Jane Doe') {
+                    return [
+                        'email' => 'jane@acme.com', 'phone' => '', 'linkedin_url' => '',
+                        'title' => 'Country Manager', 'company_name' => 'Acme Corp',
+                        'tier' => 'tier3', 'provider' => 'apollo',
+                    ];
+                }
+
+                return ['email' => '', 'phone' => '', 'linkedin_url' => '', 'title' => '', 'company_name' => '', 'tier' => null, 'provider' => null];
+            });
+
+        $roleBased = Mockery::mock(RoleBasedContactSearch::class);
+        $roleBased->shouldReceive('findContact')->never();
+
+        $service = new SignalToLeadService($crm, $contacts, $roleBased);
+        $result = $service->convert($signal, $org, true);
+
+        $lead = $result['lead']->fresh();
+        $this->assertSame('jane@acme.com', $lead->meta['email']); // primary (first) named person
+        $this->assertSame('apollo', $lead->meta['contact_enrichment_provider']);
+
+        $signal->refresh();
+        $this->assertSame(SocialSignal::ENRICHMENT_ATTEMPTED_FOUND, $signal->enrichment_status);
+        $this->assertNotNull($signal->enrichment_attempted_at);
+    }
+
+    public function test_falls_back_to_role_based_search_when_no_person_is_named(): void
+    {
+        [, $org] = $this->actingAsOrgMember();
+        $icp = IcpProfile::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'ICP',
+            'is_active' => true,
+            'config' => array_merge(IcpProfile::defaultConfig(), ['decisionMakers' => ['Head of Sales']]),
+        ]);
+
+        $signal = SocialSignal::query()->create([
+            'organization_id' => $org->id,
+            'icp_profile_id' => $icp->id,
+            'post_url' => 'https://example.com/market-entry',
+            'content_hash' => 'hash-role-based',
+            'platform' => 'linkedin',
+            'source_label' => 'LinkedIn Post',
+            'source_icon' => 'in',
+            'post_text' => 'Acme Corp opens a new Kenyan subsidiary.',
+            'company_name' => 'Acme Corp',
+            'entity_type' => 'company',
+            'signal_type' => 'market_signal',
+            'signal_type_key' => 'new_market_entry',
+            'score' => 75,
+            'status' => 'new',
+            // no profile_name, no named_people — nobody named in this signal.
+        ]);
+
+        $crm = Mockery::mock(CrmSyncService::class);
+        $crm->shouldReceive('canSync')->andReturn(false);
+
+        $contacts = Mockery::mock(ContactEnrichmentOrchestrator::class);
+        $contacts->shouldReceive('enrichContacts')->never();
+
+        $roleBased = Mockery::mock(RoleBasedContactSearch::class);
+        $roleBased->shouldReceive('findContact')
+            ->once()
+            ->with($org, 'Acme Corp', ['Head of Sales'], Mockery::type('int'), $signal->id)
+            ->andReturn(['email' => 'hos@acme.com', 'matched_role' => 'Head of Sales']);
+
+        $service = new SignalToLeadService($crm, $contacts, $roleBased);
+        $result = $service->convert($signal, $org, true);
+
+        $lead = $result['lead']->fresh();
+        $this->assertSame('hos@acme.com', $lead->meta['email']);
+        $this->assertSame('role_based_search', $lead->meta['contact_enrichment_provider']);
+
+        $signal->refresh();
+        $this->assertSame(SocialSignal::ENRICHMENT_ATTEMPTED_FOUND, $signal->enrichment_status);
+    }
+
+    public function test_enrichment_status_stays_not_attempted_when_nothing_can_be_enriched(): void
+    {
+        [, $org] = $this->actingAsOrgMember();
+        $icp = IcpProfile::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'ICP',
+            'is_active' => true,
+            'config' => IcpProfile::defaultConfig(),
+        ]);
+
+        $signal = SocialSignal::query()->create([
+            'organization_id' => $org->id,
+            'icp_profile_id' => $icp->id,
+            'post_url' => 'https://example.com/no-target',
+            'content_hash' => 'hash-no-target',
+            'platform' => 'linkedin',
+            'source_label' => 'LinkedIn Post',
+            'source_icon' => 'in',
+            'post_text' => 'A post with no identifiable person or company.',
+            'company_name' => 'Individual',
+            'entity_type' => 'individual',
+            'signal_type' => 'other',
+            'score' => 50,
+            'status' => 'new',
+            // profile_name blank, no named_people, no real company — nothing to enrich.
+        ]);
+
+        $crm = Mockery::mock(CrmSyncService::class);
+        $crm->shouldReceive('canSync')->andReturn(false);
+
+        $contacts = Mockery::mock(ContactEnrichmentOrchestrator::class);
+        $contacts->shouldReceive('enrichContacts')->never();
+
+        $roleBased = Mockery::mock(RoleBasedContactSearch::class);
+        $roleBased->shouldReceive('findContact')->never();
+
+        $service = new SignalToLeadService($crm, $contacts, $roleBased);
+        $service->convert($signal, $org, true);
+
+        $signal->refresh();
+        $this->assertSame(SocialSignal::ENRICHMENT_NOT_ATTEMPTED, $signal->enrichment_status);
+        $this->assertNull($signal->enrichment_attempted_at);
     }
 }
 

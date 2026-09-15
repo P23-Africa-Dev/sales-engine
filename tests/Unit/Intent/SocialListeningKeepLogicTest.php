@@ -29,6 +29,7 @@ class SocialListeningKeepLogicTest extends TestCase
                         'title' => 'Anyone recommend FMCG logistics software in Lagos?',
                         'link' => 'https://linkedin.com/posts/rec-1',
                         'snippet' => 'Looking for recommendations on FMCG distribution tools in Lagos.',
+                        'date' => '1 day ago',
                     ]],
                 ], 200)
                 ->push([
@@ -36,6 +37,7 @@ class SocialListeningKeepLogicTest extends TestCase
                         'title' => 'Hiring Head of Sales FMCG Lagos',
                         'link' => 'https://x.com/job-1',
                         'snippet' => 'We are hiring a Head of Sales for our FMCG team in Lagos.',
+                        'date' => '1 day ago',
                     ]],
                 ], 200)
                 ->whenEmpty(Http::response(['organic' => []], 200)),

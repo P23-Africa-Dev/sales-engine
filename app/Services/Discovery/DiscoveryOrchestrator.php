@@ -1221,6 +1221,14 @@ class DiscoveryOrchestrator
             array_merge($extracted, ['linkedin_url' => $linkedinUrl !== '' ? $linkedinUrl : null]),
             $profileUrls,
         );
+        // Tri-state mirror of SocialSignal.enrichment_status (see
+        // docs/backend_implementation_plan.md) — 'contact_ready' above stays for
+        // backward compatibility; this additionally distinguishes "we tried and
+        // found nothing" from "we never tried" (e.g. enrichContactDetails is off
+        // on this ICP), which contact_ready alone cannot express.
+        $contactStatus = ! ($extracted['enrichment_attempted'] ?? false)
+            ? 'not_attempted'
+            : ($contactReady ? 'found' : 'not_found');
 
         $metaCompany = $entityType === 'company'
             ? $displayName
@@ -1253,6 +1261,7 @@ class DiscoveryOrchestrator
                 'next_action' => $nextAction,
                 'enrichment_confidence' => $extracted['enrichment_confidence'] ?? null,
                 'contact_ready' => $contactReady,
+                'contact_status' => $contactStatus,
                 'contact_enrichment_tier' => $extracted['contact_enrichment_tier'] ?? null,
                 'contact_enrichment_provider' => $extracted['contact_enrichment_provider'] ?? null,
                 'icp_recommended' => $icpRecommended,
@@ -1283,6 +1292,7 @@ class DiscoveryOrchestrator
                 'linkedin_url' => $linkedinUrl !== '' ? $linkedinUrl : null,
                 'profile_urls' => $profileUrls,
                 'contact_ready' => $contactReady,
+                'contact_status' => $contactStatus,
                 'contact_enrichment_tier' => $extracted['contact_enrichment_tier'] ?? null,
                 'contact_enrichment_provider' => $extracted['contact_enrichment_provider'] ?? null,
                 'next_action' => $nextAction,

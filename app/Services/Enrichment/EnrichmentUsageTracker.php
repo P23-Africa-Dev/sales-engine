@@ -21,12 +21,16 @@ class EnrichmentUsageTracker
         ?string $personName = null,
         ?int $leadId = null,
         array $meta = [],
+        ?int $socialSignalId = null,
+        int $personIndex = 0,
     ): void {
         try {
             EnrichmentLog::query()->create([
                 'organization_id' => $organization->id,
                 'lead_id' => $leadId,
+                'social_signal_id' => $socialSignalId,
                 'person_name' => $personName !== null ? mb_substr($personName, 0, 255) : null,
+                'person_index' => max(0, $personIndex),
                 'tier' => $tier,
                 'provider' => $provider,
                 'found_email' => $foundEmail,

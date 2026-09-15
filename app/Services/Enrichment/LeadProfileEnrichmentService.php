@@ -103,6 +103,8 @@ class LeadProfileEnrichmentService
             $profile = $this->applyContactWaterfall($organization, $personName, $profile, $searchResults);
         }
 
+        $profile = $profile->withEnrichmentAttempted(true);
+
         Cache::put($cacheKey, $profile->toArray(), self::CACHE_TTL_SECONDS);
 
         return $profile;
@@ -122,6 +124,8 @@ class LeadProfileEnrichmentService
         array $extracted,
     ): array {
         if (! $this->shouldEnrich($icp)) {
+            $extracted['enrichment_attempted'] = false;
+
             return $extracted;
         }
 
@@ -132,6 +136,10 @@ class LeadProfileEnrichmentService
 
         $searchResults = $this->searchDecisionMaker($organization, $companyName, $titleQuery);
         if ($searchResults === []) {
+            // A real lookup ran and found nothing usable — this is a genuine
+            // attempt, not "never tried."
+            $extracted['enrichment_attempted'] = true;
+
             return $extracted;
         }
 
@@ -145,7 +153,7 @@ class LeadProfileEnrichmentService
                 $searchResults,
                 trim((string) ($titleHints[0] ?? '')),
                 $companyName,
-            );
+            )->withEnrichmentAttempted(true);
 
             if ($profile->title !== '' || $profile->profileUrls !== []) {
                 $merged = $profile->mergeIntoExtraction($extracted);
@@ -155,6 +163,8 @@ class LeadProfileEnrichmentService
 
                 return $merged;
             }
+
+            $extracted['enrichment_attempted'] = true;
 
             return $extracted;
         }

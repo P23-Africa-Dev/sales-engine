@@ -83,6 +83,7 @@ class LeadProfileEnrichmentServiceTest extends TestCase
         $this->assertStringContainsString('linkedin.com/in/', $profile->profileUrls[0]);
         $this->assertSame('Elon Musk leads Tesla and SpaceX as CEO.', $profile->summary);
         $this->assertSame('Review profile and draft outreach', $profile->nextAction);
+        $this->assertTrue($profile->enrichmentAttempted);
     }
 
     public function test_skips_enrichment_when_icp_flag_disabled(): void
@@ -103,6 +104,7 @@ class LeadProfileEnrichmentServiceTest extends TestCase
 
         $this->assertSame('', $profile->title);
         $this->assertSame('', $profile->companyName);
+        $this->assertFalse($profile->enrichmentAttempted);
         Http::assertNothingSent();
     }
 
@@ -126,5 +128,24 @@ class LeadProfileEnrichmentServiceTest extends TestCase
         $this->assertSame('Acme', $merged['company']);
         $this->assertSame('Jane founded Acme.', $merged['summary']);
         $this->assertSame(['https://linkedin.com/in/jane'], $merged['profile_urls']);
+    }
+
+    public function test_merge_into_extraction_carries_enrichment_attempted_flag(): void
+    {
+        $attempted = new \App\Services\Enrichment\DTO\EnrichedLeadProfile(title: 'Founder', enrichmentAttempted: true);
+        $notAttempted = new \App\Services\Enrichment\DTO\EnrichedLeadProfile(enrichmentAttempted: false);
+
+        $this->assertTrue($attempted->mergeIntoExtraction([])['enrichment_attempted']);
+        $this->assertFalse($notAttempted->mergeIntoExtraction([])['enrichment_attempted']);
+    }
+
+    public function test_with_enrichment_attempted_returns_an_immutable_copy(): void
+    {
+        $original = new \App\Services\Enrichment\DTO\EnrichedLeadProfile(title: 'Founder', enrichmentAttempted: false);
+        $updated = $original->withEnrichmentAttempted(true);
+
+        $this->assertFalse($original->enrichmentAttempted);
+        $this->assertTrue($updated->enrichmentAttempted);
+        $this->assertSame('Founder', $updated->title);
     }
 }

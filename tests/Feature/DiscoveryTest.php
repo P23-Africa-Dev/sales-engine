@@ -323,6 +323,12 @@ class DiscoveryTest extends TestCase
         $this->assertArrayHasKey('email', $response->json('data.leads.0'));
         $this->assertArrayHasKey('phone', $response->json('data.leads.0'));
         $this->assertArrayHasKey('linkedin_url', $response->json('data.leads.0'));
+
+        // enrichContactDetails is off on this ICP — must read as "never attempted",
+        // not "attempted and found nothing" (contact_ready alone can't tell the two apart).
+        $lead = \App\Models\Lead::query()->where('organization_id', $org->id)->firstOrFail();
+        $this->assertSame('not_attempted', $lead->meta['contact_status'] ?? null);
+        $this->assertSame('not_attempted', (new \App\Http\Resources\LeadResource($lead))->toArray(request())['contact_status']);
     }
 
     public function test_lead_resource_exposes_contact_fields(): void

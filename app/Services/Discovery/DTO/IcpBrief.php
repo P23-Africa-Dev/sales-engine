@@ -11,6 +11,7 @@ readonly class IcpBrief
      * @param  list<string>  $territories
      * @param  list<string>  $companySizes
      * @param  list<string>  $decisionMakers
+     * @param  list<string>  $revenueRanges
      */
     public function __construct(
         public string $name,
@@ -26,6 +27,9 @@ readonly class IcpBrief
         public string $target = 'companies',
         public int $requestedLimit = 20,
         public ?string $searchQueryOverride = null,
+        public array $revenueRanges = [],
+        /** @var list<string> which signal-type packs (SignalTypeRegistry) this ICP opts into */
+        public array $signalTypePacks = [],
     ) {}
 
     public static function fromIcpProfile(\App\Models\IcpProfile $profile, string $query = ''): self
@@ -50,6 +54,8 @@ readonly class IcpBrief
             query: $cleanedQuery,
             target: $target,
             requestedLimit: $intent['limit'],
+            revenueRanges: array_values($config['revenueRanges'] ?? []),
+            signalTypePacks: array_values($config['signalTypePacks'] ?? []),
         );
     }
 
@@ -72,6 +78,8 @@ readonly class IcpBrief
             target: $target,
             requestedLimit: $this->requestedLimit,
             searchQueryOverride: $this->searchQueryOverride,
+            revenueRanges: $this->revenueRanges,
+            signalTypePacks: $this->signalTypePacks,
         );
     }
 
@@ -94,6 +102,8 @@ readonly class IcpBrief
             target: $this->target,
             requestedLimit: $this->requestedLimit,
             searchQueryOverride: $searchQuery,
+            revenueRanges: $this->revenueRanges,
+            signalTypePacks: $this->signalTypePacks,
         );
     }
 

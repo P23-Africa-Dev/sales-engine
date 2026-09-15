@@ -10,7 +10,9 @@ class EnrichmentLog extends Model
     protected $fillable = [
         'organization_id',
         'lead_id',
+        'social_signal_id',
         'person_name',
+        'person_index',
         'tier',
         'provider',
         'found_email',
@@ -25,6 +27,7 @@ class EnrichmentLog extends Model
             'found_email' => 'boolean',
             'found_phone' => 'boolean',
             'credits_used' => 'integer',
+            'person_index' => 'integer',
             'meta' => 'array',
         ];
     }
@@ -37,5 +40,10 @@ class EnrichmentLog extends Model
     public function lead(): BelongsTo
     {
         return $this->belongsTo(Lead::class);
+    }
+
+    public function socialSignal(): BelongsTo
+    {
+        return $this->belongsTo(SocialSignal::class);
     }
 }
