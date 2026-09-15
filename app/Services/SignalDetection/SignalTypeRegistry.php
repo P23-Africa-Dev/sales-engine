@@ -15,6 +15,19 @@ use Illuminate\Support\Collection;
 class SignalTypeRegistry
 {
     /**
+     * Seed global detector rows when the registry table is empty so default
+     * packs never silently fall back to untagged generic search.
+     */
+    public function ensureDefaults(): void
+    {
+        if (SignalTypeDefinition::query()->whereNull('organization_id')->exists()) {
+            return;
+        }
+
+        (new \Database\Seeders\SignalTypeDefinitionSeeder)->run();
+    }
+
+    /**
      * @param  list<string>  $packs  e.g. ['default', 'software_dev_vertical']
      * @return Collection<int, SignalTypeDefinition>  keyed by signal type `key`, one row per key
      */
@@ -23,6 +36,8 @@ class SignalTypeRegistry
         if ($packs === []) {
             $packs = [SignalTypeDefinition::PACK_DEFAULT];
         }
+
+        $this->ensureDefaults();
 
         $global = SignalTypeDefinition::query()
             ->whereNull('organization_id')

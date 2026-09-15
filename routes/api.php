@@ -46,6 +46,7 @@ Route::middleware(['auth:sanctum', 'org.resolve'])->group(function () {
     Route::post('/organizations', [OrganizationController::class, 'store']);
     Route::get('/organizations/current', [OrganizationController::class, 'current']);
 
+    Route::get('/signal-types', [\App\Http\Controllers\Api\V1\SignalTypeController::class, 'index']);
     Route::get('/icp-profiles/active', [IcpProfileController::class, 'active']);
     Route::get('/icp-profiles', [IcpProfileController::class, 'index']);
     Route::post('/icp-profiles', [IcpProfileController::class, 'store']);

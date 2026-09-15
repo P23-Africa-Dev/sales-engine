@@ -70,7 +70,7 @@ class SocialListeningSetting extends Model
             'meta_page_ids' => [],
             'cadence_days' => 14,
             'min_score' => 55,
-            'freshness_window_days' => 14,
+            'freshness_window_days' => 180,
             'intent_filters' => self::DEFAULT_INTENT_FILTERS,
             'icp_filter_enabled' => (bool) config('services.social_listening.icp_filter_enabled_default', true),
             'crm_destination' => 'qualified_pipeline',

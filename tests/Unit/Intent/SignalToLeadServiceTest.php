@@ -359,6 +359,56 @@ class SignalToLeadServiceTest extends TestCase
         $this->assertSame(SocialSignal::ENRICHMENT_NOT_ATTEMPTED, $signal->enrichment_status);
         $this->assertNull($signal->enrichment_attempted_at);
     }
+
+    public function test_failed_named_person_lookup_still_writes_an_enrichment_log(): void
+    {
+        [, $org] = $this->actingAsOrgMember();
+        $icp = IcpProfile::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'ICP',
+            'is_active' => true,
+            'config' => IcpProfile::defaultConfig(),
+        ]);
+
+        $signal = SocialSignal::query()->create([
+            'organization_id' => $org->id,
+            'icp_profile_id' => $icp->id,
+            'post_url' => 'https://example.com/throw-enrich',
+            'content_hash' => 'hash-throw-enrich',
+            'platform' => 'linkedin',
+            'source_label' => 'LinkedIn Post',
+            'source_icon' => 'in',
+            'post_text' => 'Jane Doe appointed Country Manager.',
+            'company_name' => 'Acme Corp',
+            'entity_type' => 'company',
+            'profile_name' => 'Jane Doe',
+            'named_people' => ['Jane Doe'],
+            'score' => 80,
+            'status' => 'new',
+        ]);
+
+        $crm = Mockery::mock(CrmSyncService::class);
+        $crm->shouldReceive('canSync')->andReturn(false);
+
+        $contacts = Mockery::mock(ContactEnrichmentOrchestrator::class);
+        $contacts->shouldReceive('enrichContacts')->once()->andThrow(new \RuntimeException('provider down'));
+
+        $roleBased = Mockery::mock(RoleBasedContactSearch::class);
+        $roleBased->shouldReceive('findContact')->never();
+
+        $service = new SignalToLeadService($crm, $contacts, $roleBased);
+        $service->convert($signal, $org, true);
+
+        $this->assertDatabaseHas('enrichment_logs', [
+            'social_signal_id' => $signal->id,
+            'person_name' => 'Jane Doe',
+            'provider' => 'contact_enrichment',
+            'found_email' => 0,
+        ]);
+
+        $signal->refresh();
+        $this->assertSame(SocialSignal::ENRICHMENT_ATTEMPTED_NOT_FOUND, $signal->enrichment_status);
+    }
 }
 
 class AuthorProfileExtractionTest extends TestCase

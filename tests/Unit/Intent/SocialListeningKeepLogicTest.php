@@ -52,6 +52,7 @@ class SocialListeningKeepLogicTest extends TestCase
                 'industries' => ['FMCG & Retail'],
                 'territories' => ['Lagos, NG'],
                 'decisionMakers' => ['Head of Sales'],
+                'signalTypePacks' => [\App\Models\SignalTypeDefinition::PACK_NONE],
             ]),
         ]);
 

@@ -20,6 +20,8 @@ use App\Services\Discovery\FactualListSynthesizer;
 use App\Services\Extraction\ExtractionService;
 use App\Services\Enrichment\LeadProfileEnrichmentService;
 use App\Services\Enrichment\ProfileUrlValidator;
+use App\Services\IcpFiltering\DTO\CandidateCompany;
+use App\Services\IcpFiltering\IcpFilterService;
 use App\Services\Scoring\ScoringService;
 use Illuminate\Support\Collection;
 
@@ -63,6 +65,7 @@ class DiscoveryOrchestrator
         private readonly QueryVariationGenerator $queryVariationGenerator,
         private readonly ProfileUrlValidator $profileUrlValidator,
         private readonly LeadQueryNormalizer $leadQueryNormalizer,
+        private readonly IcpFilterService $icpFilter = new IcpFilterService,
     ) {}
 
     public function setQualityThreshold(string $threshold): self
@@ -919,11 +922,15 @@ class DiscoveryOrchestrator
                 $scores,
             );
 
-            // Below-threshold ICP-only leads go into a secondary pool (shown after qualifying ones)
-            // instead of being hard-dropped — ICP min score stays unchanged as an ordering signal.
+            if (! $hasUserQuery && ! $this->passesIcpHardGate($brief, $extracted)) {
+                continue;
+            }
+
+            // Below-threshold leads go into a secondary pool only in query mode.
+            // ICP-driven runs hard-drop them (new_plan.md Stage 1).
             $minPriority = $this->effectiveMinMatchScore($brief);
             $isSecondary = $intent === 'generate_leads'
-                && ! $hasUserQuery
+                && $hasUserQuery
                 && $scores['priority_score'] < $minPriority;
 
             if ($brief->isPeopleSearch()) {
@@ -987,6 +994,46 @@ class DiscoveryOrchestrator
         $combined = array_merge($leadsPayload, $secondaryPayload);
 
         return [$combined, $companies, $candidatesFound];
+    }
+
+    /**
+     * @param  array<string, mixed>  $extracted
+     */
+    private function passesIcpHardGate(IcpBrief $brief, array $extracted): bool
+    {
+        $industry = trim((string) ($extracted['industry'] ?? '')) ?: null;
+        $territory = trim((string) ($extracted['location'] ?? $extracted['territory'] ?? $extracted['city'] ?? '')) ?: null;
+        $companySize = trim((string) ($extracted['company_size'] ?? $extracted['employee_count'] ?? '')) ?: null;
+        $revenue = trim((string) ($extracted['revenue'] ?? '')) ?: null;
+
+        $available = [];
+        if ($industry !== null) {
+            $available[] = 'industry';
+        }
+        if ($territory !== null) {
+            $available[] = 'territory';
+        }
+        if ($companySize !== null) {
+            $available[] = 'companySize';
+        }
+        if ($revenue !== null) {
+            $available[] = 'revenue';
+        }
+
+        if ($available === []) {
+            return true;
+        }
+
+        return $this->icpFilter->passes(
+            $brief,
+            new CandidateCompany(
+                industry: $industry,
+                companySize: $companySize,
+                revenue: $revenue,
+                territory: $territory,
+            ),
+            $available,
+        )->passed;
     }
 
     /**

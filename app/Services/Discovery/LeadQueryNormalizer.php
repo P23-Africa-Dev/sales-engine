@@ -3,6 +3,7 @@
 namespace App\Services\Discovery;
 
 use App\Models\IcpProfile;
+use App\Services\Discovery\DTO\IcpBrief;
 
 /**
  * Turns meta / vague generate-leads prompts into actionable Serper search queries.
@@ -96,72 +97,32 @@ class LeadQueryNormalizer
 
     private function composeActionableQuery(IcpProfile $icp, string $theme): string
     {
-        $config = is_array($icp->config) ? $icp->config : [];
-        $industries = array_values(array_filter(array_map('trim', $config['industries'] ?? [])));
-        $territories = array_values(array_filter(array_map('trim', $config['territories'] ?? [])));
+        $theme = trim(preg_replace('/\s+/u', ' ', $theme) ?? $theme);
+        if ($theme !== '') {
+            return $theme.' companies';
+        }
 
-        $territory = $territories[0] ?? '';
-        $territory = trim(preg_replace('/\s*,.*$/u', '', $territory) ?? $territory);
-
-        $parts = array_filter([
-            $theme,
-            $industries[0] ?? null,
-            $territory !== '' ? $territory : null,
-            'companies',
-        ]);
-
-        $query = trim(preg_replace('/\s+/u', ' ', implode(' ', $parts)) ?? '');
-
-        return $query !== '' ? $query : $this->icpSeededQuery($icp);
+        return $this->icpSeededQuery($icp);
     }
 
     private function icpSeededQuery(IcpProfile $icp): string
     {
-        $config = is_array($icp->config) ? $icp->config : [];
-        $industries = array_values(array_filter(array_map('trim', $config['industries'] ?? [])));
-        $territories = array_values(array_filter(array_map('trim', $config['territories'] ?? [])));
-
-        $territory = $territories[0] ?? '';
-        $territory = trim(preg_replace('/\s*,.*$/u', '', $territory) ?? $territory);
-
-        $parts = array_filter([
-            $industries[0] ?? null,
-            'companies',
-            $territory !== '' ? $territory : null,
-        ]);
-
-        return trim(implode(' ', $parts)) ?: 'B2B companies';
+        return IcpBrief::fromIcpProfile($icp)->interestSearchSeed();
     }
 
     /**
      * Short LinkedIn-friendly queries for high-yield first batches.
+     * Uses interest language only — never ICP industry / territory / role fields.
      *
      * @return list<string>
      */
     public function firstBatchPeopleQueries(IcpProfile $icp): array
     {
-        $config = is_array($icp->config) ? $icp->config : [];
-        $industries = array_values(array_filter(array_map('trim', $config['industries'] ?? [])));
-        $territories = array_values(array_filter(array_map('trim', $config['territories'] ?? [])));
-        $decisionMakers = array_values(array_filter(array_map('trim', $config['decisionMakers'] ?? [])));
-        if ($decisionMakers === []) {
-            $decisionMakers = ['CEO', 'Founder', 'Head of Sales'];
-        }
+        $seed = IcpBrief::fromIcpProfile($icp)->interestSearchSeed();
 
-        $industry = $industries[0] ?? 'B2B';
-        $territory = $territories[0] ?? '';
-        $territory = trim(preg_replace('/\s*,.*$/u', '', $territory) ?? $territory);
-
-        $queries = [];
-        foreach (array_slice($decisionMakers, 0, 3) as $i => $rawTitle) {
-            $title = trim(preg_replace('/\s*\/\s*/u', ' ', $rawTitle) ?? $rawTitle);
-            if ($title === '') {
-                continue;
-            }
-            $base = trim('"'.$title.'" '.$industry.($territory !== '' ? ' '.$territory : ''));
-            $queries[] = $i % 2 === 0 ? $base.' site:linkedin.com/in' : $base;
-        }
-
-        return array_values(array_unique(array_filter($queries)));
+        return array_values(array_unique(array_filter([
+            trim($seed.' site:linkedin.com/in'),
+            trim($seed.' executives founders'),
+        ])));
     }
 }

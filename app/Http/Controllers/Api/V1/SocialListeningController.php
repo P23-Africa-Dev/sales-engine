@@ -84,7 +84,12 @@ class SocialListeningController extends Controller
         }
 
         if (! empty($data['signal_type']) && $data['signal_type'] !== 'all') {
-            $query->where('signal_type', $data['signal_type']);
+            $type = $data['signal_type'];
+            $query->where(function ($q) use ($type) {
+                $q->where('signal_type_key', $type)
+                    ->orWhere('signal_type', $type)
+                    ->orWhere('intent_label', $type);
+            });
         }
 
         if (! empty($data['buying_stage']) && $data['buying_stage'] !== 'all') {
@@ -185,7 +190,7 @@ class SocialListeningController extends Controller
             'meta_page_ids.*' => ['nullable', 'string', 'max:255'],
             'cadence_days' => ['nullable', 'integer', 'in:14,30'],
             'min_score' => ['nullable', 'integer', 'min:40', 'max:90'],
-            'freshness_window_days' => ['nullable', 'integer', 'in:7,14,30'],
+            'freshness_window_days' => ['nullable', 'integer', 'in:7,14,30,90,180'],
             'intent_filters' => ['nullable', 'array'],
             'crm_destination' => ['nullable', 'string', 'in:qualified_pipeline,human_review'],
             'outreach_channel_default' => ['nullable', 'string', 'in:email,human_follow_up'],

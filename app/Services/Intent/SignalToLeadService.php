@@ -8,6 +8,7 @@ use App\Models\Organization;
 use App\Models\SocialListeningSetting;
 use App\Models\SocialSignal;
 use App\Services\Enrichment\ContactEnrichmentOrchestrator;
+use App\Services\Enrichment\EnrichmentUsageTracker;
 use App\Services\Enrichment\RoleBasedContactSearch;
 use App\Services\Integrations\Factory23\CrmSyncService;
 
@@ -17,6 +18,7 @@ class SignalToLeadService
         private readonly CrmSyncService $crmSync,
         private readonly ContactEnrichmentOrchestrator $contactOrchestrator,
         private readonly RoleBasedContactSearch $roleBasedSearch,
+        private readonly EnrichmentUsageTracker $usageTracker = new EnrichmentUsageTracker,
     ) {}
 
     /**
@@ -108,7 +110,12 @@ class SignalToLeadService
             'meta' => $leadMeta,
         ]);
 
-        if ($pushCrm) {
+        $alreadyEnriched = in_array($signal->enrichment_status, [
+            SocialSignal::ENRICHMENT_ATTEMPTED_FOUND,
+            SocialSignal::ENRICHMENT_ATTEMPTED_NOT_FOUND,
+        ], true);
+
+        if ($pushCrm && ! $alreadyEnriched) {
             $leadMeta = $this->enrichContactsIntoMeta($organization, $signal, $lead, $leadMeta, $isIndividual);
             $lead->update(['meta' => $leadMeta]);
             $lead->refresh();
@@ -135,6 +142,25 @@ class SignalToLeadService
         ]);
 
         return ['lead' => $lead, 'crm' => $crm];
+    }
+
+    /**
+     * Stage 3 without CRM: log a found / not-found attempt on the signal itself.
+     */
+    public function enrichSignalOnly(SocialSignal $signal, Organization $organization): SocialSignal
+    {
+        if (in_array($signal->enrichment_status, [
+            SocialSignal::ENRICHMENT_ATTEMPTED_FOUND,
+            SocialSignal::ENRICHMENT_ATTEMPTED_NOT_FOUND,
+        ], true)) {
+            return $signal;
+        }
+
+        $signal->loadMissing('icpProfile');
+        $isIndividual = $this->isIndividualPoster($signal);
+        $this->enrichContactsIntoMeta($organization, $signal, null, [], $isIndividual);
+
+        return $signal->fresh() ?? $signal;
     }
 
     private function isIndividualPoster(SocialSignal $signal): bool
@@ -203,7 +229,7 @@ class SignalToLeadService
     private function enrichContactsIntoMeta(
         Organization $organization,
         SocialSignal $signal,
-        Lead $lead,
+        ?Lead $lead,
         array $leadMeta,
         bool $isIndividual,
     ): array {
@@ -214,7 +240,7 @@ class SignalToLeadService
             $company = '';
         }
 
-        $namedPeople = $this->resolveNamedPeople($signal, $lead);
+        $namedPeople = $this->resolveNamedPeople($signal);
         $attempted = false;
         $found = false;
 
@@ -234,11 +260,25 @@ class SignalToLeadService
                             'profile_urls' => $index === 0 ? ($leadMeta['profile_urls'] ?? []) : [],
                         ]),
                         [],
-                        $lead->id,
+                        $lead?->id,
                         $signal->id,
                         $index,
                     );
-                } catch (\Throwable) {
+                } catch (\Throwable $e) {
+                    $this->usageTracker->logEnrichment(
+                        $organization,
+                        'error',
+                        'contact_enrichment',
+                        false,
+                        false,
+                        0,
+                        $personName,
+                        $lead?->id,
+                        ['outcome' => 'not_found', 'error' => $e->getMessage()],
+                        $signal->id,
+                        $index,
+                    );
+
                     continue;
                 }
 
@@ -259,7 +299,7 @@ class SignalToLeadService
                 $organization,
                 $company,
                 $this->targetRolesForSignal($signal),
-                $lead->id,
+                $lead?->id,
                 $signal->id,
             );
 
@@ -269,9 +309,11 @@ class SignalToLeadService
             }
         }
 
-        if ($attempted) {
+        if ($attempted || $lead === null) {
             $signal->update([
-                'enrichment_status' => $found ? SocialSignal::ENRICHMENT_ATTEMPTED_FOUND : SocialSignal::ENRICHMENT_ATTEMPTED_NOT_FOUND,
+                'enrichment_status' => $found
+                    ? SocialSignal::ENRICHMENT_ATTEMPTED_FOUND
+                    : SocialSignal::ENRICHMENT_ATTEMPTED_NOT_FOUND,
                 'enrichment_attempted_at' => now(),
             ]);
         }
@@ -282,7 +324,7 @@ class SignalToLeadService
     /**
      * @return list<string>
      */
-    private function resolveNamedPeople(SocialSignal $signal, Lead $lead): array
+    private function resolveNamedPeople(SocialSignal $signal): array
     {
         $named = is_array($signal->named_people) ? $signal->named_people : [];
         $named = array_values(array_filter(

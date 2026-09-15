@@ -54,6 +54,8 @@ class IcpProfileController extends Controller
             'config.autoSyncCrm' => ['nullable', 'boolean'],
             'config.enrichContactDetails' => ['nullable', 'boolean'],
             'config.customPrompt' => ['nullable', 'string', 'max:5000'],
+            'config.signalTypePacks' => ['nullable', 'array'],
+            'config.signalTypePacks.*' => ['string', 'max:64'],
         ]);
 
         $profile = $this->icps->create(OrgContext::require(), $data);
@@ -95,6 +97,8 @@ class IcpProfileController extends Controller
             'config.autoSyncCrm' => ['nullable', 'boolean'],
             'config.enrichContactDetails' => ['nullable', 'boolean'],
             'config.customPrompt' => ['nullable', 'string', 'max:5000'],
+            'config.signalTypePacks' => ['nullable', 'array'],
+            'config.signalTypePacks.*' => ['string', 'max:64'],
         ]);
 
         $profile = $this->icps->update($profile, $data);

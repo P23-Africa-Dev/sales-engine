@@ -53,4 +53,35 @@ class QueryVariationGeneratorTest extends TestCase
 
         $this->assertNotEmpty($backfill);
     }
+
+    public function test_icp_only_variations_never_include_firmographic_tokens(): void
+    {
+        $generator = new QueryVariationGenerator;
+        $brief = new IcpBrief(
+            name: 'Tech ICP',
+            description: '',
+            industries: ['ZzyxxUniqueIndustry'],
+            territories: ['QqwertTerritory'],
+            companySizes: ['51-200'],
+            decisionMakers: ['UniqueDecisionMakerTitle'],
+            customPrompt: '',
+            minMatchScore: 60,
+            autoSyncCrm: false,
+            query: '',
+            target: QueryIntentService::TARGET_COMPANIES,
+            requestedLimit: 40,
+        );
+
+        $queries = array_merge(
+            $generator->generate($brief, 40),
+            $generator->generateBackfill($brief, 40, []),
+        );
+        $this->assertNotEmpty($queries);
+
+        foreach ($queries as $query) {
+            $this->assertStringNotContainsString('ZzyxxUniqueIndustry', $query);
+            $this->assertStringNotContainsString('QqwertTerritory', $query);
+            $this->assertStringNotContainsString('UniqueDecisionMakerTitle', $query);
+        }
+    }
 }

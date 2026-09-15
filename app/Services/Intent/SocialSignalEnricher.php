@@ -92,15 +92,9 @@ class SocialSignalEnricher
                     [
                         'role' => 'user',
                         'content' => json_encode([
-                            'icp' => [
-                                'name' => $brief->name,
+                            'interest' => [
                                 'description' => $brief->description,
-                                'industries' => $brief->industries,
-                                'territories' => $brief->territories,
-                                'company_sizes' => $brief->companySizes,
-                                'decision_makers' => $brief->decisionMakers,
                                 'custom_prompt' => $brief->customPrompt,
-                                'min_match_score' => $brief->minMatchScore,
                             ],
                             'post' => $hit->postText,
                             'title' => $hit->title,
@@ -169,6 +163,26 @@ class SocialSignalEnricher
         return $this->heuristicEnrich($hit, $brief);
     }
 
+    private function extractIndustryFromHit(RawSocialHit $hit): string
+    {
+        $text = $hit->postText.' '.$hit->title.' '.$hit->snippet;
+        if (preg_match('/\b(FMCG|FinTech|fintech|SaaS|textile|logistics|pharma|healthcare|manufacturing)\b/u', $text, $match)) {
+            return $match[1];
+        }
+
+        return '';
+    }
+
+    private function extractLocationFromHit(RawSocialHit $hit): string
+    {
+        $text = $hit->postText.' '.$hit->title.' '.$hit->snippet;
+        if (preg_match('/\b(Lagos|Nairobi|Kenya|Nigeria|Africa|London|Accra|Cairo)\b/u', $text, $match)) {
+            return $match[1];
+        }
+
+        return '';
+    }
+
     /**
      * @return array<string, mixed>
      */
@@ -182,13 +196,13 @@ class SocialSignalEnricher
         return [
             'profile_name' => $hit->authorName ?? 'Unknown',
             'author_profile_url' => $hit->authorProfileUrl,
-            'persona' => $brief->decisionMakers[0] ?? 'Decision maker',
+            'persona' => $hit->authorName !== null && trim($hit->authorName) !== '' ? 'Poster' : 'Unknown',
             'company_name' => 'Individual',
             'entity_type' => 'individual',
-            'industry' => $brief->industries[0] ?? '',
+            'industry' => $this->extractIndustryFromHit($hit),
             'key_topics' => [],
             'competitors' => [],
-            'location_text' => $brief->territories[0] ?? '',
+            'location_text' => $this->extractLocationFromHit($hit),
             'signal_type' => $signalType,
             'buying_stage' => 'Consideration',
             'intent_label' => $this->intentLabelForType($signalType, ''),
@@ -197,7 +211,6 @@ class SocialSignalEnricher
             'urgency' => 'Medium',
             'reasons' => [
                 'Public post indicates active research or need',
-                'Matches ICP context (industry / territory / interests when present)',
             ],
             'suggested_message' => "Hi,\n\nI came across your post and thought we might be able to help. Would you be open to a brief conversation?",
             'recommended_action_title' => $actionTitle,

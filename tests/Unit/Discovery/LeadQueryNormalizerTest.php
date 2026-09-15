@@ -27,7 +27,9 @@ class LeadQueryNormalizerTest extends TestCase
 
         $this->assertFalse($normalizer->isMetaPromptRequest($out));
         $this->assertStringNotContainsString('prompt', mb_strtolower($out));
-        $this->assertMatchesRegularExpression('/ajo|fintech|companies|nigeria|africa/i', $out);
+        $this->assertMatchesRegularExpression('/ajo|fintech|companies/i', $out);
+        $this->assertStringNotContainsString('Nigeria', $out);
+        $this->assertStringNotContainsString('Africa', $out);
     }
 
     public function test_specific_ceo_query_is_preserved(): void
@@ -58,10 +60,10 @@ class LeadQueryNormalizerTest extends TestCase
 
         $out = $normalizer->normalize('generate leads', $icp);
 
-        $this->assertStringContainsString('FinTech', $out);
-        $this->assertStringContainsString('Lagos', $out);
-        $this->assertStringContainsString('companies', $out);
+        $this->assertStringNotContainsString('FinTech', $out);
+        $this->assertStringNotContainsString('Lagos', $out);
         $this->assertStringNotContainsString('CEO', $out);
+        $this->assertMatchesRegularExpression('/companies|announcements|partnerships/i', $out);
     }
 
     public function test_ideal_prospect_for_brand_seeds_from_icp(): void
@@ -79,7 +81,9 @@ class LeadQueryNormalizerTest extends TestCase
         $out = $normalizer->normalize('kind generate ideal prospect for my brand', $icp);
 
         $this->assertStringNotContainsString('kind generate ideal', mb_strtolower($out));
-        $this->assertMatchesRegularExpression('/fmcg|textile|lagos|sales/i', $out);
+        $this->assertStringNotContainsString('FMCG', $out);
+        $this->assertStringNotContainsString('Lagos', $out);
+        $this->assertStringNotContainsString('Head of Sales', $out);
         $this->assertLessThanOrEqual(80, mb_strlen($out), 'Seed query should stay short for Serper yield');
     }
 
@@ -98,6 +102,8 @@ class LeadQueryNormalizerTest extends TestCase
         $queries = $normalizer->firstBatchPeopleQueries($icp);
         $this->assertNotEmpty($queries);
         $this->assertTrue(collect($queries)->contains(fn ($q) => str_contains($q, 'site:linkedin.com/in')));
-        $this->assertTrue(collect($queries)->contains(fn ($q) => str_contains($q, 'Head of Sales')));
+        $this->assertTrue(collect($queries)->every(fn ($q) => ! str_contains($q, 'Head of Sales')));
+        $this->assertTrue(collect($queries)->every(fn ($q) => ! str_contains($q, 'textile')));
+        $this->assertTrue(collect($queries)->every(fn ($q) => ! str_contains($q, 'Lagos')));
     }
 }

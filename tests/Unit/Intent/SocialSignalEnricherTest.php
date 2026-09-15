@@ -52,6 +52,41 @@ class SocialSignalEnricherTest extends TestCase
         $this->assertGreaterThanOrEqual(55, $enriched['score']);
     }
 
+    public function test_heuristic_enrich_does_not_copy_icp_firmographics_onto_the_hit(): void
+    {
+        config(['services.glm.api_key' => '']);
+
+        [, $org] = $this->actingAsOrgMember();
+        $icp = \App\Models\IcpProfile::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'FMCG',
+            'is_active' => true,
+            'config' => array_merge(\App\Models\IcpProfile::defaultConfig(), [
+                'industries' => ['ZzyxxUniqueIndustry'],
+                'territories' => ['QqwertTerritory'],
+                'decisionMakers' => ['UniqueDecisionMakerTitle'],
+            ]),
+        ]);
+
+        $hit = new RawSocialHit(
+            platform: 'linkedin',
+            sourceLabel: 'LinkedIn',
+            sourceIcon: 'linkedin',
+            postText: 'Looking for recommendations on logistics software.',
+            postUrl: 'https://linkedin.com/posts/example-no-icp',
+            snippet: 'Looking for recommendations on logistics software.',
+            title: 'Logistics tools?',
+        );
+
+        $enriched = app(SocialSignalEnricher::class)->enrich($org, $icp, $hit);
+
+        $this->assertSame('logistics', $enriched['industry']);
+        $this->assertSame('', $enriched['location_text']);
+        $this->assertNotSame('UniqueDecisionMakerTitle', $enriched['persona']);
+        $this->assertStringNotContainsString('ZzyxxUniqueIndustry', json_encode($enriched));
+        $this->assertStringNotContainsString('QqwertTerritory', json_encode($enriched));
+    }
+
     public function test_normalizes_new_opportunity_signal_types(): void
     {
         $enricher = app(SocialSignalEnricher::class);

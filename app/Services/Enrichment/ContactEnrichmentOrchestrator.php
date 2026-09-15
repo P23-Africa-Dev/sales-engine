@@ -45,9 +45,24 @@ class ContactEnrichmentOrchestrator
         if ($this->hasCompleteContacts($contacts)) {
             $contacts['tier'] = 'seed';
             $contacts['provider'] = 'existing';
+            $this->usageTracker->logEnrichment(
+                $organization,
+                'seed',
+                'existing',
+                $contacts['email'] !== '',
+                $contacts['phone'] !== '',
+                0,
+                $personName,
+                $leadId,
+                ['outcome' => 'found'],
+                $socialSignalId,
+                $personIndex,
+            );
 
             return $contacts;
         }
+
+        $loggedAttempt = false;
 
         $company = $contacts['company_name'] !== '' ? $contacts['company_name'] : null;
         $domain = $this->resolveDomain($seed['website'] ?? null, $company);
@@ -74,6 +89,7 @@ class ContactEnrichmentOrchestrator
                 $socialSignalId,
                 $personIndex,
             );
+            $loggedAttempt = true;
 
             if ($this->hasCompleteContacts($contacts)) {
                 return $contacts;
@@ -104,6 +120,7 @@ class ContactEnrichmentOrchestrator
                 $socialSignalId,
                 $personIndex,
             );
+            $loggedAttempt = true;
             if ($this->hasCompleteContacts($contacts)) {
                 return $contacts;
             }
@@ -135,6 +152,7 @@ class ContactEnrichmentOrchestrator
                 $socialSignalId,
                 $personIndex,
             );
+            $loggedAttempt = true;
             if ($this->hasCompleteContacts($contacts)) {
                 return $contacts;
             }
@@ -157,6 +175,7 @@ class ContactEnrichmentOrchestrator
                 $socialSignalId,
                 $personIndex,
             );
+            $loggedAttempt = true;
             if ($this->hasCompleteContacts($contacts)) {
                 return $contacts;
             }
@@ -187,6 +206,7 @@ class ContactEnrichmentOrchestrator
                     $socialSignalId,
                     $personIndex,
                 );
+                $loggedAttempt = true;
             } else {
                 $this->usageTracker->logEnrichment(
                     $organization,
@@ -201,7 +221,24 @@ class ContactEnrichmentOrchestrator
                     $socialSignalId,
                     $personIndex,
                 );
+                $loggedAttempt = true;
             }
+        }
+
+        if (! $loggedAttempt) {
+            $this->usageTracker->logEnrichment(
+                $organization,
+                'none',
+                'unavailable',
+                false,
+                false,
+                0,
+                $personName,
+                $leadId,
+                ['outcome' => 'not_found'],
+                $socialSignalId,
+                $personIndex,
+            );
         }
 
         return $contacts;

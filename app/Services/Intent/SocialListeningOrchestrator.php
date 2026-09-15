@@ -2,6 +2,7 @@
 
 namespace App\Services\Intent;
 
+use App\Jobs\EnrichSocialSignalJob;
 use App\Models\IcpProfile;
 use App\Models\Organization;
 use App\Models\SocialListeningRun;
@@ -14,20 +15,21 @@ use App\Services\IcpFiltering\IcpFilterService;
 use App\Services\Intent\Contracts\SocialSourceInterface;
 use App\Services\Intent\DTO\RawSocialHit;
 use App\Services\Llm\GlmClient;
+use App\Services\SignalDetection\DTO\DetectedSignal;
+use App\Services\SignalDetection\SignalExtractor;
 use App\Services\SignalDetection\SignalGroundingGate;
+use App\Services\SignalDetection\SignalQueryBuilder;
 use App\Services\SignalDetection\SignalTypeRegistry;
 use Illuminate\Support\Collection;
 
 class SocialListeningOrchestrator
 {
     /**
-     * Social Listening's extraction (SocialSignalEnricher) only ever produces
-     * industry/location data — there is no firmographic provider wired in that
-     * could supply company size or revenue. Constraining the Stage 1 gate to
-     * these fields avoids hard-failing every signal on data this pipeline
-     * structurally cannot populate. See IcpFilterService's own docblock.
+     * Social Listening extraction only reliably produces industry/location.
+     * Size/revenue are evaluated per-candidate when the extractor actually
+     * populated them — never fail-closed on fields the pipeline cannot fill.
      */
-    private const ICP_FILTER_AVAILABLE_FIELDS = ['industry', 'territory'];
+    private const ICP_FILTER_BASE_FIELDS = ['industry', 'territory'];
 
     /** @param  list<SocialSourceInterface>  $sources */
     public function __construct(
@@ -38,6 +40,8 @@ class SocialListeningOrchestrator
         private readonly IcpFilterService $icpFilter = new IcpFilterService,
         private readonly SignalGroundingGate $groundingGate = new SignalGroundingGate,
         private readonly SignalTypeRegistry $signalTypeRegistry = new SignalTypeRegistry,
+        private readonly SignalQueryBuilder $signalQueryBuilder = new SignalQueryBuilder,
+        private readonly SignalExtractor $signalExtractor = new SignalExtractor,
     ) {}
 
     public function run(
@@ -49,7 +53,6 @@ class SocialListeningOrchestrator
     ): SocialListeningRun {
         $dailyCap = (int) config('services.social_listening.daily_api_cap', 200);
         if ($dailyCap > 0) {
-            // Count social-listening Serper + Meta Graph calls — not discovery/chat/enrichment usage.
             $usageToday = \App\Models\ApiUsage::query()
                 ->where('organization_id', $organization->id)
                 ->where(function ($q) {
@@ -80,79 +83,94 @@ class SocialListeningOrchestrator
         try {
             $brief = IcpBrief::fromIcpProfile($icp);
             $enabled = $settings->enabled_sources ?? SocialListeningSetting::DEFAULT_SOURCES;
-            $windowDays = max(1, (int) ($settings->freshness_window_days ?? 14));
-            $tbs = $this->freshness->serperTbs($windowDays);
-            $queries = $this->buildQueries($organization, $icp, $brief);
+            $settingsWindow = max(1, (int) ($settings->freshness_window_days ?? 180));
+            $definitions = $brief->signalTypeDetectionEnabled()
+                ? $this->activeDefinitions($organization->id, $brief)
+                : collect();
+            $searchWindow = $definitions->isNotEmpty()
+                ? max($settingsWindow, (int) $definitions->max('default_recency_window_days'))
+                : $settingsWindow;
+            $tbs = $this->freshness->serperTbs($searchWindow);
 
             $run->update(['stages' => ['analyzing_icp', 'searching_sources']]);
 
             $context = [
                 'meta_page_ids' => array_values(array_filter(
                     array_map('strval', $settings->meta_page_ids ?? []),
-                    fn(string $id) => trim($id) !== ''
+                    fn (string $id) => trim($id) !== ''
                 )),
             ];
 
-            // Tagged as [hit, signalTypeKey]. General queries (untagged, signalTypeKey null)
-            // preserve today's existing behavior for ICPs that haven't opted into any
-            // signal-type pack. Signal-type queries (Stage 2) are additional, dedicated
-            // searches — one per active discrete signal type, up to the configured cap —
-            // so a hit found via one is honestly attributable to that type, with no extra
-            // classification LLM call needed.
-            $taggedHits = [];
-            foreach ($queries as $query) {
-                foreach ($this->sources as $source) {
-                    if (! $source->isEnabled($brief, $enabled)) {
-                        continue;
-                    }
-                    foreach ($source->search($brief, $query, $organization->id, 6, $tbs, $context) as $hit) {
-                        $taggedHits[] = ['hit' => $hit, 'signalTypeKey' => null];
-                    }
-                }
-            }
-
-            $signalTypeQueries = $this->buildSignalTypeQueries($organization->id, $brief);
-            foreach ($signalTypeQueries as $signalTypeKey => $query) {
-                foreach ($this->sources as $source) {
-                    if (! $source->isEnabled($brief, $enabled)) {
-                        continue;
-                    }
-                    foreach ($source->search($brief, $query, $organization->id, 6, $tbs, $context) as $hit) {
-                        $taggedHits[] = ['hit' => $hit, 'signalTypeKey' => $signalTypeKey];
-                    }
-                }
-            }
-
-            // Dedupe by hit identity, preferring a signal-type-tagged occurrence over an
-            // untagged one when the same post surfaces from both query sets.
-            $byHash = [];
-            foreach ($taggedHits as $entry) {
-                $hash = md5(mb_strtolower($entry['hit']->postUrl ?? $entry['hit']->postText));
-                if (! isset($byHash[$hash]) || ($byHash[$hash]['signalTypeKey'] === null && $entry['signalTypeKey'] !== null)) {
-                    $byHash[$hash] = $entry;
-                }
-            }
-
-            $uniqueHits = collect(array_values($byHash))->take(24);
+            $taggedHits = $this->collectHits(
+                $organization,
+                $icp,
+                $brief,
+                $enabled,
+                $tbs,
+                $context,
+                $definitions,
+            );
 
             $run->update(['stages' => ['analyzing_icp', 'searching_sources', 'enriching']]);
 
             $created = 0;
             $icpRejected = 0;
+            $typeMismatch = 0;
             $groundingRejected = ['missing_source_url' => 0, 'missing_source_date' => 0, 'stale' => 0];
-            foreach ($uniqueHits as $entry) {
+
+            foreach ($taggedHits as $entry) {
                 /** @var RawSocialHit $hit */
                 $hit = $entry['hit'];
                 $signalTypeKey = $entry['signalTypeKey'];
-                $postedAt = $hit->postedAt;
+                $signalTypeDefinition = $signalTypeKey !== null
+                    ? $this->signalTypeRegistry->find($organization->id, $signalTypeKey)
+                    : null;
+
+                $detected = null;
+                if ($signalTypeDefinition !== null) {
+                    $detected = $this->signalExtractor->extract($hit, $signalTypeDefinition, $organization, $brief);
+                    if (! $detected->matched) {
+                        $typeMismatch++;
+
+                        continue;
+                    }
+                    if (filled($detected->sourceUrl)) {
+                        $hit = new RawSocialHit(
+                            platform: $hit->platform,
+                            sourceLabel: $hit->sourceLabel,
+                            sourceIcon: $hit->sourceIcon,
+                            postText: $hit->postText,
+                            postUrl: $detected->sourceUrl,
+                            snippet: $hit->snippet,
+                            title: $hit->title,
+                            authorName: $hit->authorName,
+                            authorProfileUrl: $hit->authorProfileUrl,
+                            postedAt: $detected->sourceDate ?? $hit->postedAt,
+                            dateRaw: $hit->dateRaw,
+                        );
+                    }
+                }
+
+                $postedAt = $hit->postedAt ?? $detected?->sourceDate;
                 if ($postedAt === null && $hit->postUrl) {
                     $postedAt = app(\App\Services\Intent\LinkedInActivityDateExtractor::class)->fromUrl($hit->postUrl);
                 }
 
-                // Stage 2 mandatory-grounding gate (new_plan.md): no source URL or no
-                // publish date means the hit is discarded outright — never surfaced
-                // with a lower score. See SignalGroundingGate's docblock.
-                $gate = $this->groundingGate->admit($hit->postUrl, $postedAt, $windowDays);
+                $typeWindow = max(1, (int) ($signalTypeDefinition?->default_recency_window_days ?? $settingsWindow));
+                $gateWindow = min($settingsWindow, $typeWindow);
+                // Type window is the spec default (often 180). Settings may tighten, never loosen.
+                if ($signalTypeDefinition !== null) {
+                    $gateWindow = min($settingsWindow, $typeWindow);
+                    // Existing rows still defaulted to 14 would hide 6-month events.
+                    // Prefer the type window unless the user set a *longer* cap than 31 days
+                    // (90/180) as an explicit tighten-or-match. 7/14/30 are treated as
+                    // search-ranking hints, not a hard 2-week discard for typed events.
+                    if ($settingsWindow <= 31) {
+                        $gateWindow = $typeWindow;
+                    }
+                }
+
+                $gate = $this->groundingGate->admit($hit->postUrl, $postedAt, $gateWindow);
                 if (! $gate->admitted) {
                     $groundingRejected[$gate->reason] = ($groundingRejected[$gate->reason] ?? 0) + 1;
 
@@ -169,34 +187,38 @@ class SocialListeningOrchestrator
                     continue;
                 }
 
-                $signalTypeDefinition = $signalTypeKey !== null
-                    ? $this->signalTypeRegistry->find($organization->id, $signalTypeKey)
-                    : null;
                 $enriched = $this->enricher->enrich($organization, $icp, $hit, $signalTypeDefinition);
                 $relevance = (float) ($enriched['score'] ?? 0);
-                $score = $this->freshness->apply($relevance, $postedAt, $windowDays);
+                $score = $this->freshness->apply($relevance, $postedAt, $gateWindow);
                 $enriched['score'] = $score;
                 $enriched['urgency'] = $this->freshness->nudgeUrgency(
                     isset($enriched['urgency']) ? (string) $enriched['urgency'] : null,
                     $postedAt,
                 );
 
-                // Stage 1 hard gate: Social Listening is always ICP-driven (there is no
-                // live chat query behind an automatic scan), so a candidate that fails
-                // the structured ICP checklist is discarded here — never surfaced with
-                // a caveat. See IcpFilterService and docs/backend_implementation_plan.md.
-                //
-                // `icp_filter_enabled` is an operational kill switch (Phase 8), not a
-                // product toggle — when off, no field is evaluated (availableFields: [])
-                // so the result always passes, and icp_filter_reasons honestly reflects
-                // "not evaluated" rather than fabricating a real pass.
+                if ($detected !== null) {
+                    $enriched = $this->mergeDetectedIntoEnriched($enriched, $detected);
+                }
+
+                $availableFields = self::ICP_FILTER_BASE_FIELDS;
+                $companySize = trim((string) ($enriched['company_size'] ?? '')) ?: null;
+                $revenue = trim((string) ($enriched['revenue'] ?? '')) ?: null;
+                if ($companySize !== null) {
+                    $availableFields[] = 'companySize';
+                }
+                if ($revenue !== null) {
+                    $availableFields[] = 'revenue';
+                }
+
                 $icpFilterResult = $this->icpFilter->passes(
                     $brief,
                     new CandidateCompany(
                         industry: trim((string) ($enriched['industry'] ?? '')) ?: null,
-                        territory: trim((string) ($enriched['location_text'] ?? '')) ?: null,
+                        companySize: $companySize,
+                        revenue: $revenue,
+                        territory: trim((string) ($enriched['location_text'] ?? $enriched['territory'] ?? '')) ?: null,
                     ),
-                    $settings->icp_filter_enabled ? self::ICP_FILTER_AVAILABLE_FIELDS : [],
+                    $settings->icp_filter_enabled ? $availableFields : [],
                 );
 
                 if (! $icpFilterResult->passed) {
@@ -214,8 +236,11 @@ class SocialListeningOrchestrator
                 }
 
                 $intentLabel = (string) ($enriched['intent_label'] ?? 'Recommendation');
+                if ($signalTypeDefinition !== null) {
+                    $intentLabel = $signalTypeDefinition->label;
+                }
 
-                SocialSignal::query()->create([
+                $signal = SocialSignal::query()->create([
                     'organization_id' => $organization->id,
                     'icp_profile_id' => $icp->id,
                     'social_listening_run_id' => $run->id,
@@ -235,7 +260,7 @@ class SocialListeningOrchestrator
                     'industry' => $this->clip((string) ($enriched['industry'] ?? ''), 255),
                     'icp_filter_passed' => $icpFilterResult->passed,
                     'icp_filter_reasons' => $icpFilterResult->reasons,
-                    'territory' => $this->clip((string) ($enriched['location_text'] ?? ''), 255),
+                    'territory' => $this->clip((string) ($enriched['location_text'] ?? $detected?->territory ?? ''), 255),
                     'signal_type_key' => $signalTypeKey,
                     'named_people' => $enriched['named_people'] ?? [],
                     'key_topics' => $enriched['key_topics'] ?? [],
@@ -260,6 +285,7 @@ class SocialListeningOrchestrator
                     'personal_recommended_action_title' => $this->clip((string) ($enriched['personal_recommended_action_title'] ?? ''), 255),
                     'personal_recommended_action_detail' => $this->clip((string) ($enriched['personal_recommended_action_detail'] ?? ''), 1000),
                     'status' => 'new',
+                    'enrichment_status' => SocialSignal::ENRICHMENT_NOT_ATTEMPTED,
                     'meta' => [
                         'title' => $hit->title,
                         'snippet' => $hit->snippet,
@@ -267,10 +293,11 @@ class SocialListeningOrchestrator
                         'author_name' => $hit->authorName,
                         'author_profile_url' => $hit->authorProfileUrl,
                         'relevance_score' => $relevance,
-                        'freshness_factor' => $this->freshness->factor($postedAt, $windowDays),
+                        'freshness_factor' => $this->freshness->factor($postedAt, $gateWindow),
                     ],
                 ]);
 
+                EnrichSocialSignalJob::dispatch($signal->id);
                 $created++;
             }
 
@@ -278,21 +305,24 @@ class SocialListeningOrchestrator
 
             $groundingRejectedTotal = array_sum($groundingRejected);
 
-            // Structured run summary (Phase 6): lets the frontend show a real
-            // "we checked N, rejected N for X, kept N" breakdown instead of
-            // parsing a sentence. See docs/backend_implementation_plan.md.
             $run->update([
                 'status' => 'completed',
                 'signals_created' => $created,
                 'result_summary' => [
-                    'totalChecked' => $uniqueHits->count(),
+                    'totalChecked' => $taggedHits->count(),
                     'qualified' => $created,
                     'rejected' => [
                         'icpMismatch' => $icpRejected,
                         'missingSourceUrl' => $groundingRejected['missing_source_url'],
                         'missingSourceDate' => $groundingRejected['missing_source_date'],
                         'stale' => $groundingRejected['stale'],
-                        'total' => $icpRejected + $groundingRejectedTotal,
+                        'typeMismatch' => $typeMismatch,
+                        'total' => $icpRejected + $groundingRejectedTotal + $typeMismatch,
+                    ],
+                    'enrichment' => [
+                        'pending' => $created,
+                        'found' => 0,
+                        'notFound' => 0,
                     ],
                 ],
                 'stages' => ['analyzing_icp', 'searching_sources', 'enriching', 'completed'],
@@ -310,61 +340,122 @@ class SocialListeningOrchestrator
     }
 
     /**
-     * Stage 2 discrete signal-type queries (new_plan.md): one dedicated, deterministic
-     * search per active signal type, instead of relying on the general-purpose query
-     * set (buildQueries()) and a generic classifier to sort hits into buckets after
-     * the fact. Deterministic (no LLM call) to avoid adding cost/latency/prompt risk
-     * on top of the existing, separately-tuned general query generation — trigger
-     * wording quality can be improved later without changing this method's contract.
-     *
-     * @return array<string, string>  signal type key => query string
+     * @return Collection<int, \App\Models\SignalTypeDefinition>
      */
-    private function buildSignalTypeQueries(int $organizationId, IcpBrief $brief): array
+    private function activeDefinitions(int $organizationId, IcpBrief $brief): Collection
     {
-        // Strictly opt-in: an ICP that hasn't chosen a signal-type pack gets zero
-        // extra queries and zero extra API cost — SignalTypeRegistry's own
-        // "empty packs falls back to the default pack" behavior is the right
-        // contract for callers that WANT a pack, but this feature must not
-        // silently turn on (and start spending API budget) for every existing
-        // ICP the moment this ships.
-        if ($brief->signalTypePacks === []) {
-            return [];
-        }
-
-        $cap = max(0, (int) config('services.social_listening.max_signal_type_queries_per_run', 4));
+        $cap = max(0, (int) config('services.social_listening.max_signal_type_queries_per_run', 8));
         if ($cap === 0) {
-            return [];
+            return collect();
         }
 
-        $definitions = $this->signalTypeRegistry->activeForPacks($organizationId, $brief->signalTypePacks)->take($cap);
+        $this->signalTypeRegistry->ensureDefaults();
 
-        $recencyPhrase = 'past week OR latest OR just announced OR this month';
-        $territoryHint = implode(' ', array_slice($brief->territories, 0, 2));
-
-        $queries = [];
-        foreach ($definitions as $definition) {
-            $parts = array_filter([$definition->label, $territoryHint, $recencyPhrase]);
-            $queries[$definition->key] = trim(implode(' ', $parts));
-        }
-
-        return $queries;
+        return $this->signalTypeRegistry
+            ->activeForPacks($organizationId, $brief->resolvedSignalTypePacks())
+            ->take($cap)
+            ->values();
     }
 
     /**
-     * @return list<string>
+     * @param  Collection<int, \App\Models\SignalTypeDefinition>  $definitions
+     * @return Collection<int, array{hit: RawSocialHit, signalTypeKey: ?string}>
      */
+    private function collectHits(
+        Organization $organization,
+        IcpProfile $icp,
+        IcpBrief $brief,
+        array $enabled,
+        string $tbs,
+        array $context,
+        Collection $definitions,
+    ): Collection {
+        $taggedHits = [];
+
+        $runGeneral = ! $brief->signalTypeDetectionEnabled();
+        if ($runGeneral) {
+            foreach ($this->buildQueries($organization, $icp, $brief) as $query) {
+                foreach ($this->searchSources($brief, $query, $organization->id, $enabled, $tbs, $context) as $hit) {
+                    $taggedHits[] = ['hit' => $hit, 'signalTypeKey' => null];
+                }
+            }
+        }
+
+        foreach ($definitions as $definition) {
+            foreach ($this->signalQueryBuilder->buildQueriesForType($definition, $brief) as $query) {
+                foreach ($this->searchSources($brief, $query, $organization->id, $enabled, $tbs, $context) as $hit) {
+                    $taggedHits[] = ['hit' => $hit, 'signalTypeKey' => $definition->key];
+                }
+            }
+        }
+
+        $byHash = [];
+        foreach ($taggedHits as $entry) {
+            $hash = md5(mb_strtolower($entry['hit']->postUrl ?? $entry['hit']->postText));
+            if (! isset($byHash[$hash]) || ($byHash[$hash]['signalTypeKey'] === null && $entry['signalTypeKey'] !== null)) {
+                $byHash[$hash] = $entry;
+            }
+        }
+
+        return collect(array_values($byHash))->take(24);
+    }
+
     /**
-     * Stage 1/Stage 2 separation (new_plan.md): industries/territories/decisionMakers
-     * are structured ICP FILTER fields, never search-query fuel — a signal is
-     * detected first (broadly, on interest language), then Stage 1's
-     * IcpFilterService discards it if it doesn't match those structured fields.
-     * Only customPrompt/description (freeform interest statements) seed query
-     * generation here. This intentionally trades some recall for orgs that
-     * haven't written a customPrompt (their fallback query is generic) in
-     * exchange for actually honoring the spec's core rule — see
-     * docs/backend_implementation_plan.md Phase 2.4 and the "Query fix scope"
-     * decision recorded there.
-     *
+     * @return list<RawSocialHit>
+     */
+    private function searchSources(
+        IcpBrief $brief,
+        string $query,
+        int $organizationId,
+        array $enabled,
+        string $tbs,
+        array $context,
+    ): array {
+        $hits = [];
+        foreach ($this->sources as $source) {
+            if (! $source->isEnabled($brief, $enabled)) {
+                continue;
+            }
+            foreach ($source->search($brief, $query, $organizationId, 6, $tbs, $context) as $hit) {
+                $hits[] = $hit;
+            }
+        }
+
+        return $hits;
+    }
+
+    /**
+     * @param  array<string, mixed>  $enriched
+     * @return array<string, mixed>
+     */
+    private function mergeDetectedIntoEnriched(array $enriched, DetectedSignal $detected): array
+    {
+        if ($detected->company) {
+            $enriched['company_name'] = $detected->company;
+        }
+        if ($detected->description) {
+            $enriched['summary'] = $detected->description;
+        }
+        if ($detected->territory) {
+            $enriched['location_text'] = $detected->territory;
+        }
+        if ($detected->industry) {
+            $enriched['industry'] = $detected->industry;
+        }
+        if ($detected->companySize) {
+            $enriched['company_size'] = $detected->companySize;
+        }
+        if ($detected->revenue) {
+            $enriched['revenue'] = $detected->revenue;
+        }
+        if ($detected->namedPeople !== []) {
+            $enriched['named_people'] = $detected->namedPeople;
+        }
+
+        return $enriched;
+    }
+
+    /**
      * @return list<string>
      */
     private function buildQueries(Organization $organization, IcpProfile $icp, IcpBrief $brief): array
@@ -406,12 +497,7 @@ class SocialListeningOrchestrator
             ? $brief->customPrompt
             : (trim($brief->description) !== '' ? $brief->description : 'new opportunities OR announcements OR funding');
 
-        $parts = array_filter([
-            $interestPhrase,
-            'past week OR latest OR just announced',
-        ]);
-
-        return [trim(implode(' ', $parts))];
+        return [trim($interestPhrase.' past week OR latest OR just announced')];
     }
 
     /**
@@ -420,19 +506,17 @@ class SocialListeningOrchestrator
      */
     private function matchesIntentFilters(array $enriched, array $filters): bool
     {
-        // Empty filters = allow all non-spam relevant types; `other` is still gated by min_score
-        // (SocialSignalEnricher caps its score low), so it isn't blindly discarded here.
         if ($filters === []) {
             return true;
         }
 
         $signalType = mb_strtolower(trim((string) ($enriched['signal_type'] ?? '')));
-        if ($signalType === '' || $signalType === 'other') {
+        $discrete = mb_strtolower(trim((string) ($enriched['signal_type_key'] ?? '')));
+        if (($signalType === '' || $signalType === 'other') && $discrete === '') {
             return false;
         }
 
-        // Canonical types from SocialSignalEnricher match filter keys 1:1.
-        if (in_array($signalType, $filters, true)) {
+        if (in_array($signalType, $filters, true) || in_array($discrete, $filters, true)) {
             return true;
         }
 
@@ -452,7 +536,7 @@ class SocialListeningOrchestrator
         foreach ($filters as $filter) {
             $needles = $map[$filter] ?? [mb_strtolower((string) $filter)];
             foreach ($needles as $needle) {
-                if ($needle !== '' && str_contains($signalType, $needle)) {
+                if ($needle !== '' && (str_contains($signalType, $needle) || str_contains($discrete, $needle))) {
                     return true;
                 }
             }
