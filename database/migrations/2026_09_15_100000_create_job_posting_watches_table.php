@@ -15,8 +15,8 @@ return new class extends Migration
             $table->string('source_url', 500);
             $table->string('company_name')->nullable();
             $table->string('role_title')->nullable();
-            $table->timestamp('first_seen_at');
-            $table->timestamp('last_seen_at');
+            $table->timestamp('first_seen_at')->useCurrent();
+            $table->timestamp('last_seen_at')->useCurrent();
             $table->timestamps();
 
             $table->unique(['organization_id', 'posting_key']);

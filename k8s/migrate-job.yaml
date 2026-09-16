@@ -1,5 +1,5 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# Laravel Migration Job — run before rolling the backend Deployment.
+# Laravel migrate + idempotent Stage 2 seed — run before rolling the backend.
 # ─────────────────────────────────────────────────────────────────────────────
 apiVersion: batch/v1
 kind: Job
@@ -40,6 +40,9 @@ spec:
               php artisan config:clear
               php artisan config:cache
               php artisan migrate --force --no-interaction
+              # Idempotent (updateOrCreate). Keeps Core Buyer Signals packs loaded
+              # without waiting for the first social scan's ensureDefaults() fallback.
+              php artisan db:seed --class=SignalTypeDefinitionSeeder --force --no-interaction
           env:
             - name: CACHE_STORE
               value: array

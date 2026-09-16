@@ -47,8 +47,11 @@ data:
 
   # ── Frontend / CORS (fill as frontends go live) ───────────────────────────────
   FRONTEND_URL: "https://salesengine.thefactory23.com"
-  CORS_ALLOWED_ORIGINS: "https://thefactory23.com,https://www.thefactory23.com,http://localhost:3000,http://127.0.0.1:3000"
-  SANCTUM_STATEFUL_DOMAINS: "api.salesengine.thefactory23.com,thefactory23.com,localhost"
+  CORS_ALLOWED_ORIGINS: "https://thefactory23.com,https://www.thefactory23.com,https://salesengine.thefactory23.com,http://localhost:3000,http://127.0.0.1:3000"
+  SANCTUM_STATEFUL_DOMAINS: "api.salesengine.thefactory23.com,salesengine.thefactory23.com,thefactory23.com,localhost"
+
+  # Stage 1 ICP hard filter default for new SocialListeningSetting rows (ops kill switch).
+  SOCIAL_LISTENING_ICP_FILTER_ENABLED_DEFAULT: "true"
 
   # Explicit view compiled path avoids realpath() returning false on fresh containers
   VIEW_COMPILED_PATH: "/var/www/html/storage/framework/views"

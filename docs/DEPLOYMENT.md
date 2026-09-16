@@ -102,6 +102,44 @@ The deploy workflow creates/refreshes `do-registry` in the namespace automatical
 10. [ ] Add `SENDGRID_API_KEY` to `sales-engine-secret` for email outreach send
 11. [ ] Confirm Factory23 `https://api.thefactory23.com` still healthy
 
+## Stage 2 / new_plan production readiness (ongoing deploys)
+
+Every deploy to `main` already:
+
+1. Runs `php artisan migrate --force` (creates/updates `signal_type_definitions`, `job_posting_watches`, Stage 2 social signal columns, `icp_filter_enabled`, etc.)
+2. Runs `php artisan db:seed --class=SignalTypeDefinitionSeeder --force` (idempotent; loads Core Buyer Signals packs)
+
+No separate manual seed is required after this change ships, as long as the migrate Job succeeds.
+
+### Verify after deploy
+
+```bash
+# Job succeeded
+kubectl get job laravel-migrate -n sales-engine
+kubectl logs -n sales-engine -l app=laravel-migrate --tail=100
+
+# Tables exist (from an API/queue pod)
+kubectl exec -n sales-engine deployment/backend -c php-fpm -- \
+  php artisan tinker --execute="echo Schema::hasTable('job_posting_watches') ? 'watches=ok' : 'watches=MISSING'; echo PHP_EOL; echo App\\Models\\SignalTypeDefinition::query()->whereNull('organization_id')->count().' signal types';"
+
+# Workers on new image
+kubectl get pods -n sales-engine -l 'app in (backend,queue-worker,scheduler)' -o wide
+curl -sS https://api.salesengine.thefactory23.com/api/v1/health
+```
+
+### Manual one-shot (only if migrate Job ran before seeder was wired)
+
+```bash
+kubectl exec -n sales-engine deployment/backend -c php-fpm -- \
+  php artisan db:seed --class=SignalTypeDefinitionSeeder --force --no-interaction
+```
+
+### Notes
+
+- Open-role **60+ day** watches start from first sighting after `job_posting_watches` exists; there is no historical backfill.
+- ICP firmographics-as-filters and honest enrichment are code-path changes — active as soon as the new image rolls.
+- Factory23 frontend (Sales Engine UI) is a separate deploy if UI changes are included.
+
 ## Useful kubectl commands
 
 ```bash
@@ -130,7 +168,7 @@ kubectl apply -f k8s/certificate.yaml -n sales-engine
 | `k8s/queue-worker-deployment.yaml` | Redis queue worker (required for async jobs) |
 | `k8s/scheduler-deployment.yaml` | Laravel scheduler (daily social listening) |
 | `k8s/backend-service.yaml`    | ClusterIP            |
-| `k8s/migrate-job.yaml`        | Migrations           |
+| `k8s/migrate-job.yaml`        | Migrations + SignalTypeDefinitionSeeder |
 | `k8s/ingress.yaml`            | Public host          |
 | `k8s/certificate.yaml`        | TLS via cert-manager |
 | `Dockerfile`                  | Production image     |

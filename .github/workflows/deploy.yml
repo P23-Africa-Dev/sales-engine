@@ -104,6 +104,9 @@ jobs:
       - name: Run migrations
         run: php artisan migrate --force --no-interaction
 
+      - name: Seed signal type definitions (Stage 2 registry)
+        run: php artisan db:seed --class=SignalTypeDefinitionSeeder --force --no-interaction
+
       - name: Run PHP syntax check
         run: find app config routes -name "*.php" -print0 | xargs -0 php -l | grep -v "No syntax errors" || true
 
@@ -234,19 +237,19 @@ jobs:
             exit 1
           fi
 
-      - name: Run database migrations
+      - name: Run database migrations and Stage 2 signal registry seed
         run: |
           kubectl delete job laravel-migrate -n ${{ env.K8S_NAMESPACE }} --ignore-not-found=true
           kubectl apply -f k8s/migrate-job.yaml -n ${{ env.K8S_NAMESPACE }}
 
           if ! kubectl wait --for=condition=complete job/laravel-migrate \
             -n ${{ env.K8S_NAMESPACE }} --timeout=600s; then
-            echo "=== Migration job failed or timed out ==="
+            echo "=== Migration/seed job failed or timed out ==="
             kubectl describe job/laravel-migrate -n ${{ env.K8S_NAMESPACE }} || true
             kubectl logs -n ${{ env.K8S_NAMESPACE }} -l app=laravel-migrate --all-containers=true --tail=200 || true
             exit 1
           fi
-          echo "Migrations complete"
+          echo "Migrations + SignalTypeDefinitionSeeder complete"
 
       - name: Deploy backend
         run: |
