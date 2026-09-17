@@ -198,7 +198,7 @@ class LeadGenerationFastPathTest extends TestCase
 
     public function test_orchestrator_soft_deadline_constants_are_under_job_timeout(): void
     {
-        $this->assertSame(50, DiscoveryOrchestrator::FIRST_BATCH_SOFT_SECONDS);
+        $this->assertSame(90, DiscoveryOrchestrator::FIRST_BATCH_SOFT_SECONDS);
         $this->assertSame(150, DiscoveryOrchestrator::HARD_DEADLINE_SECONDS);
         $this->assertLessThan((new ProcessChatIntentJob(1, 1))->timeout, DiscoveryOrchestrator::HARD_DEADLINE_SECONDS);
     }

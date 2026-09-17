@@ -41,8 +41,8 @@ class DiscoveryBackfillAndOrderingTest extends TestCase
             $serperCalls++;
             $organic = [];
 
-            // First pass (~4 queries): only 2 unique companies → under minAcceptableYield for limit 20.
-            if ($serperCalls <= 4) {
+            // Keep first-wave results thin so backfill must run (fan-out can be 6+ queries).
+            if ($serperCalls <= 8) {
                 $organic = [
                     [
                         'title' => 'Alpha Software Inc | Home',
@@ -87,6 +87,99 @@ class DiscoveryBackfillAndOrderingTest extends TestCase
         $this->assertLessThanOrEqual(2, (int) ($summary['backfill_passes'] ?? 0));
         $this->assertGreaterThan(2, count($leads), 'Backfill should increase yield beyond the first-pass 2 leads');
         $this->assertGreaterThan(4, $serperCalls, 'Backfill should issue additional Serper queries');
+    }
+
+    public function test_fylings_and_hunter_are_called_once_per_collect_not_per_variation(): void
+    {
+        config([
+            'services.serper.api_key' => 'test-serper',
+            'services.serper.base_url' => 'https://google.serper.dev',
+            'services.serper.max_results' => 10,
+            'services.glm.api_key' => '',
+            'services.apollo.api_key' => '',
+            'services.hunter.api_key' => 'test-hunter',
+            'services.fylings.api_key' => 'test-fylings',
+            'services.fylings.base_url' => 'https://api.fylings.com',
+            'services.mono.secret_key' => '',
+        ]);
+
+        [, $org] = $this->actingAsOrgMember();
+
+        IcpProfile::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'Finance ICP',
+            'is_active' => true,
+            'config' => array_merge(IcpProfile::defaultConfig(), [
+                'industries' => ['FinTech'],
+                'territories' => ['Lagos, NG'],
+                'minMatchScore' => 1,
+            ]),
+        ]);
+
+        $hunterCalls = 0;
+        $fylingsCalls = 0;
+
+        Http::fake(function ($request) use (&$hunterCalls, &$fylingsCalls) {
+            $url = $request->url();
+            if (str_contains($url, 'api.hunter.io/v2/discover')) {
+                $hunterCalls++;
+
+                return Http::response([
+                    'data' => [
+                        [
+                            'domain' => 'hunter-lender.example',
+                            'organization' => 'Hunter Lender Co',
+                            'country' => 'NG',
+                        ],
+                    ],
+                ], 200);
+            }
+
+            if (str_contains($url, 'api.fylings.com')) {
+                $fylingsCalls++;
+
+                return Http::response([
+                    'data' => [
+                        [
+                            'id' => 'fy-1',
+                            'name' => 'Fylings Lender Ltd',
+                            'country' => 'NG',
+                            'website' => 'https://fylings-lender.example',
+                        ],
+                    ],
+                ], 200);
+            }
+
+            if (str_contains($url, 'google.serper.dev')) {
+                return Http::response([
+                    'organic' => [
+                        [
+                            'title' => 'Serper Lender Ltd | Home',
+                            'link' => 'https://serper-lender.example.com',
+                            'snippet' => 'Working capital lender in Lagos.',
+                        ],
+                    ],
+                ], 200);
+            }
+
+            return Http::response(['error' => 'unexpected ' . $url], 500);
+        });
+
+        $response = $this->withHeaders($this->orgHeaders($org))
+            ->postJson('/api/v1/discovery/runs', [
+                'query' => 'Give me 20 Merchant cash advance lenders in Lagos and Abuja',
+                'intent' => 'generate_leads',
+                'limit' => 20,
+            ]);
+
+        $response->assertCreated()->assertJsonPath('data.status', 'completed');
+
+        // Fan-out runs multiple Serper queries; registry sources must stay once per collectHits
+        // (and cached across backfill with the same primary query).
+        $this->assertLessThanOrEqual(3, $hunterCalls, 'Hunter should not run per Serper variation');
+        $this->assertLessThanOrEqual(3, $fylingsCalls, 'Fylings should not run per Serper variation');
+        $this->assertGreaterThanOrEqual(1, $hunterCalls);
+        $this->assertGreaterThanOrEqual(1, $fylingsCalls);
     }
 
     public function test_leads_ordered_icp_recommended_first(): void

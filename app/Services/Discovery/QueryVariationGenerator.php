@@ -49,6 +49,10 @@ class QueryVariationGenerator
             $variations[] = $primary;
         }
 
+        foreach ($this->geoSplitVariations($primary !== '' ? $primary : $this->searchSeed($brief)) as $geoQuery) {
+            $variations[] = $geoQuery;
+        }
+
         $seed = $this->searchSeed($brief);
         foreach (array_slice(self::SIGNAL_MODIFIERS, 0, 4) as $i => $signal) {
             $variations[] = $this->composePeopleOrCompany($brief, $seed.' '.$signal, $i % 2 === 0);
@@ -61,6 +65,11 @@ class QueryVariationGenerator
             $variations[] = $this->composePeopleOrCompany($brief, $seed, true);
         } else {
             $variations[] = $this->composePeopleOrCompany($brief, $seed.' companies', true);
+            $variations[] = $this->composePeopleOrCompany($brief, $seed, true);
+            $variations[] = trim('list of '.$seed);
+            if (! preg_match('/\bnigeria\b/iu', $seed)) {
+                $variations[] = trim($seed.' Nigeria');
+            }
         }
 
         return $this->dedupeAndCap($variations, $needed);
@@ -69,8 +78,10 @@ class QueryVariationGenerator
     public function queryBudget(int $targetCount): int
     {
         $estimated = (int) ceil(max(1, $targetCount) / 5);
+        // Floor 6 when targeting 20+ so geo/channel variants have room.
+        $floor = $targetCount >= self::FAN_OUT_THRESHOLD ? 6 : 4;
 
-        return min(self::MAX_QUERIES, max(4, $estimated));
+        return min(self::MAX_QUERIES, max($floor, $estimated));
     }
 
     /**
@@ -129,6 +140,76 @@ class QueryVariationGenerator
         }
 
         return $brief->interestSearchSeed();
+    }
+
+    /**
+     * Split multi-city prompts into per-city and country-wide variants (user query only).
+     *
+     * @return list<string>
+     */
+    private function geoSplitVariations(string $query): array
+    {
+        $query = trim(preg_replace('/\s+/u', ' ', $query) ?? $query);
+        if ($query === '') {
+            return [];
+        }
+
+        $cities = ['Lagos', 'Abuja', 'Nairobi', 'Accra', 'Kano', 'Port Harcourt', 'Ibadan', 'Johannesburg', 'Cape Town', 'Cairo'];
+        $found = [];
+        foreach ($cities as $city) {
+            if (preg_match('/\b'.preg_quote($city, '/').'\b/iu', $query)) {
+                $found[mb_strtolower($city)] = $city;
+            }
+        }
+
+        if (count($found) < 2) {
+            return [];
+        }
+
+        $variations = [];
+        $otherCitiesPattern = implode('|', array_map(
+            fn (string $c): string => preg_quote($c, '/'),
+            array_values($found),
+        ));
+
+        foreach ($found as $city) {
+            // Keep this city; drop the other matched cities from the phrase.
+            $single = preg_replace('/\b('.$otherCitiesPattern.')\b/iu', ' ', $query) ?? $query;
+            $single = preg_replace('/\s*(?:and|,|\/|&)\s*/iu', ' ', $single) ?? $single;
+            $single = trim(preg_replace('/\s+/u', ' ', $single) ?? $single);
+            if ($single !== '' && ! preg_match('/\b'.preg_quote($city, '/').'\b/iu', $single)) {
+                $single = trim($single.' '.$city);
+            }
+            if ($single !== '') {
+                $variations[] = $single;
+            }
+        }
+
+        if (! preg_match('/\bnigeria\b/iu', $query) && $this->looksNigerianCities($found)) {
+            $withoutCities = preg_replace('/\b('.$otherCitiesPattern.')\b/iu', ' ', $query) ?? $query;
+            $withoutCities = preg_replace('/\s*(?:and|,|\/|&)\s*/iu', ' ', $withoutCities) ?? $withoutCities;
+            $withoutCities = trim(preg_replace('/\s+/u', ' ', $withoutCities) ?? $withoutCities);
+            if ($withoutCities !== '') {
+                $variations[] = $withoutCities.' Nigeria';
+            }
+        }
+
+        return $variations;
+    }
+
+    /**
+     * @param  array<string, string>  $found
+     */
+    private function looksNigerianCities(array $found): bool
+    {
+        $ng = ['lagos', 'abuja', 'kano', 'port harcourt', 'ibadan'];
+        foreach (array_keys($found) as $key) {
+            if (in_array($key, $ng, true)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function composePeopleOrCompany(IcpBrief $brief, string $seed, bool $preferLinkedIn = true): string

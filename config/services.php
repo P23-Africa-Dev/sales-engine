@@ -47,9 +47,8 @@ return [
     'serper' => [
         'api_key' => env('SERPER_API_KEY'),
         'base_url' => env('SERPER_BASE_URL', 'https://google.serper.dev'),
-        // Free Serper plans reject complex quoted/OR queries when num >= 20.
-        // Keep default at 10; raise via env on paid plans.
-        'max_results' => (int) env('SERPER_MAX_RESULTS', 10),
+        // Raise via env; ConfigMap defaults to 20 for freemium yield.
+        'max_results' => (int) env('SERPER_MAX_RESULTS', 20),
     ],
 
     'mono' => [

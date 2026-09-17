@@ -14,9 +14,39 @@ class QueryVariationGeneratorTest extends TestCase
         $generator = new QueryVariationGenerator;
 
         $this->assertSame(4, $generator->queryBudget(10));
-        $this->assertSame(4, $generator->queryBudget(20));
+        $this->assertSame(6, $generator->queryBudget(20));
         $this->assertSame(10, $generator->queryBudget(50));
         $this->assertSame(15, $generator->queryBudget(150));
+    }
+
+    public function test_geo_split_produces_lagos_abuja_and_nigeria_variants(): void
+    {
+        $generator = new QueryVariationGenerator;
+        $brief = new IcpBrief(
+            name: 'Finance ICP',
+            description: '',
+            industries: ['FinTech'],
+            territories: [],
+            companySizes: [],
+            decisionMakers: [],
+            customPrompt: '',
+            minMatchScore: 60,
+            autoSyncCrm: false,
+            query: 'Give me 20 Merchant cash advance and working capital lenders in Lagos and Abuja',
+            target: QueryIntentService::TARGET_COMPANIES,
+            requestedLimit: 20,
+        );
+
+        $queries = $generator->generate($brief, 20);
+        $joined = mb_strtolower(implode("\n", $queries));
+
+        $this->assertNotEmpty($queries);
+        $this->assertGreaterThanOrEqual(6, count($queries));
+        $this->assertTrue(
+            str_contains($joined, 'lagos') && str_contains($joined, 'abuja'),
+            'Expected geo-split variants covering Lagos and Abuja'
+        );
+        $this->assertStringContainsString('linkedin.com/company', $joined);
     }
 
     public function test_backfill_excludes_already_used_queries(): void

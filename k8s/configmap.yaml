@@ -70,7 +70,7 @@ data:
   GLM_SCORE_MODEL: "glm-4-air"
   GLM_OUTREACH_MODEL: "glm-4-flash"
   SERPER_BASE_URL: "https://google.serper.dev"
-  SERPER_MAX_RESULTS: "10"
+  SERPER_MAX_RESULTS: "20"
   MONO_BASE_URL: "https://api.withmono.com"
   FYLINGS_BASE_URL: "https://api.fylings.com"
 

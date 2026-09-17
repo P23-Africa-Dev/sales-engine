@@ -38,7 +38,7 @@ class DiscoveryOrchestrator
     public const MAX_BACKFILL_PASSES = 2;
 
     /** Soft target for returning a first batch (seconds). */
-    public const FIRST_BATCH_SOFT_SECONDS = 50;
+    public const FIRST_BATCH_SOFT_SECONDS = 90;
 
     /** Stop discovering and complete with whatever we have (seconds). */
     public const HARD_DEADLINE_SECONDS = 150;
@@ -50,6 +50,9 @@ class DiscoveryOrchestrator
     private float $startedAt = 0.0;
 
     private bool $deferContactEnrichment = true;
+
+    /** @var array<string, Collection<int, RawDiscoveryHit>> */
+    private array $registryHitCache = [];
 
     /** @param  list<DiscoverySourceInterface>  $sources */
     public function __construct(
@@ -119,6 +122,7 @@ class DiscoveryOrchestrator
             $this->startedAt = microtime(true);
             $this->deadlineAt = $this->startedAt + self::HARD_DEADLINE_SECONDS;
             $this->deferContactEnrichment = $deferContactEnrichment;
+            $this->registryHitCache = [];
             $this->enrichment->setDeferContactWaterfall($deferContactEnrichment);
 
             $brief = IcpBrief::fromIcpProfile($icp, $query);
@@ -149,7 +153,6 @@ class DiscoveryOrchestrator
                 }
             }
 
-            $minAcceptableYield = max(3, (int) ceil($effectiveLimit / 2));
             $minUsableBatch = max(1, (int) ceil($effectiveLimit / 4));
             $softCompletedEarly = false;
 
@@ -201,9 +204,6 @@ class DiscoveryOrchestrator
 
                 $passStartCount = count($leadsPayload);
                 $multiTarget = count($targetPasses) > 1;
-                $passMinAcceptable = $multiTarget
-                    ? max(1, (int) ceil($passLimit / 2))
-                    : $minAcceptableYield;
                 $passMinUsable = $multiTarget
                     ? max(1, (int) ceil($passLimit / 4))
                     : $minUsableBatch;
@@ -225,12 +225,9 @@ class DiscoveryOrchestrator
 
                     $isBackfill = $pass > 0;
                     if ($isBackfill) {
-                        // Skip deeper search once we have a usable first batch or soft time elapsed.
-                        if (
-                            $passYield >= $passMinAcceptable
-                            || ($passYield >= $passMinUsable && $this->pastSoftDeadline())
-                            || ($passYield >= 1 && $this->pastSoftDeadline())
-                        ) {
+                        // Keep backfilling while under the requested limit until the hard deadline.
+                        // Soft deadline alone must not stop when yield is still below what the user asked for.
+                        if ($passYield >= $passLimit) {
                             break;
                         }
 
@@ -336,12 +333,14 @@ class DiscoveryOrchestrator
                         break;
                     }
 
-                    // First pass: stop when we have enough for a first batch.
-                    if (! $isBackfill && $passYield >= $passMinAcceptable) {
-                        break;
-                    }
-
-                    if ($passYield >= $passMinUsable && $this->pastSoftDeadline()) {
+                    // First pass: prefer continuing into backfill when under the requested limit.
+                    // Only soft-complete early once we have a usable batch AND are past soft deadline
+                    // with little time left before the hard deadline.
+                    if (
+                        $passYield >= $passMinUsable
+                        && $this->pastSoftDeadline()
+                        && $this->remainingSeconds() < 25
+                    ) {
                         $softCompletedEarly = true;
                         break;
                     }
@@ -598,17 +597,32 @@ class DiscoveryOrchestrator
             $hits = $hits->merge($batch);
         }
 
-        foreach ($queriesExecuted as $variationQuery) {
+        // Freemium quota guard: Fylings/Hunter/Mono run once on the primary query,
+        // not once per Serper fan-out variation (would burn monthly caps quickly).
+        $primaryQuery = $brief->searchQuery();
+        if ($primaryQuery === '' && $queriesExecuted !== []) {
+            $primaryQuery = (string) $queriesExecuted[0];
+        }
+        $primaryBrief = $primaryQuery !== ''
+            ? $brief->withSearchQueryOverride($primaryQuery)
+            : $brief;
+
+        foreach ($otherSources as $source) {
             if ($this->pastDeadline()) {
                 break;
             }
-            $variantBrief = $brief->withSearchQueryOverride($variationQuery);
-            foreach ($otherSources as $source) {
-                $batch = $source->search($variantBrief, $ctx);
-                $key = $source->key();
-                $sourcesHitCount[$key] = ($sourcesHitCount[$key] ?? 0) + $batch->count();
-                $hits = $hits->merge($batch);
+
+            $cacheKey = $source->key().'|'.mb_strtolower(trim($primaryBrief->searchQuery()));
+            if (isset($this->registryHitCache[$cacheKey])) {
+                $batch = $this->registryHitCache[$cacheKey];
+            } else {
+                $batch = $source->search($primaryBrief, $ctx);
+                $this->registryHitCache[$cacheKey] = $batch;
             }
+
+            $key = $source->key();
+            $sourcesHitCount[$key] = ($sourcesHitCount[$key] ?? 0) + $batch->count();
+            $hits = $hits->merge($batch);
         }
 
         $hits = $this->dedupeHits($hits);
@@ -942,7 +956,13 @@ class DiscoveryOrchestrator
                     $extracted,
                 );
                 $extracted = $enrichedProfile->mergeIntoExtraction($extracted);
-            } else {
+            } elseif (
+                ! $this->deferContactEnrichment
+                && ! $this->pastSoftDeadline()
+                && $this->remainingSeconds() >= 45
+            ) {
+                // Defer company DM enrichment on first-batch / freemium runs so wall-clock
+                // is spent creating more leads instead of enriching a thin set.
                 $extracted = $this->enrichment->enrichCompanyDecisionMaker(
                     $organization,
                     $icp,

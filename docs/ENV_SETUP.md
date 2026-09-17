@@ -39,12 +39,13 @@ Without `GLM_API_KEY`, discovery still works with heuristic extract/score; freef
 1. Sign up: https://serper.dev
 2. Copy API key.
 3. Set `SERPER_API_KEY` (optional `SERPER_BASE_URL=https://google.serper.dev`).
+4. Set `SERPER_MAX_RESULTS=20` (ConfigMap default). Free Serper accounts may reject `num≥20` on complex queries — the adapter retries with `num≤10` automatically.
 
 Primary live discovery source for v1.
 
 ---
 
-## 4. Registries (optional)
+## 4. Registries + freemium company discovery
 
 ### Mono (Nigeria CAC)
 
@@ -53,10 +54,19 @@ Primary live discovery source for v1.
 
 ### Fylings (multi-country registry)
 
-1. Obtain API key from Fylings.
+1. Obtain API key from Fylings (free plan: 100 requests/month): https://www.fylings.com/api
 2. `FYLINGS_API_KEY`, optional `FYLINGS_BASE_URL`.
 
-If missing, adapters stay disabled; product still runs on Serper + GLM.
+Orchestrator calls Fylings **once per collectHits** (primary query only), not once per Serper fan-out variation, to protect monthly quota.
+
+### Hunter Discover (free company search)
+
+1. Sign up: https://hunter.io — copy API key from Account → API.
+2. Set `HUNTER_API_KEY`.
+3. Discovery uses **Discover only** (`POST /v2/discover`) — does **not** burn Domain Search / Email Finder credits.
+4. Apollo remains enrichment-only for freemium (organization search not wired for discovery).
+
+If Mono/Fylings/Hunter keys are missing, adapters stay disabled; product still runs on Serper + GLM.
 
 ---
 
@@ -110,8 +120,8 @@ Contact enrichment runs as a cost waterfall during lead profile enrichment:
 | ----------------------------------------------------------------- | ------------------------------------- |
 | `BYTEMINE_API_KEY` / `BYTEMINE_BASE_URL`                          | Tier 2 contact enricher (recommended) |
 | `CLEANLIST_API_KEY` / `CLEANLIST_BASE_URL`                        | Tier 2 fallback enricher              |
-| `APOLLO_API_KEY`                                                  | Tier 3 Apollo person enricher         |
-| `HUNTER_API_KEY`                                                  | Tier 3 Hunter email finder            |
+| `APOLLO_API_KEY`                                                  | Tier 3 Apollo person enricher (not used for freemium discovery) |
+| `HUNTER_API_KEY`                                                  | Discovery: Hunter Discover (free). Enrichment: Domain Search / Email Finder (credits) |
 | `YOUTUBE_API_KEY`                                                 | YouTube discovery (stub until keyed)  |
 | `X_BEARER_TOKEN`                                                  | X discovery (stub until keyed)        |
 | `REDDIT_CLIENT_ID` / `REDDIT_CLIENT_SECRET` / `REDDIT_USER_AGENT` | Reddit discovery (stub until keyed)   |

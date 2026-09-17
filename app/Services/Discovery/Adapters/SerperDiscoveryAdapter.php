@@ -167,6 +167,7 @@ class SerperDiscoveryAdapter implements DiscoverySourceInterface
                 $allowListicle = $brief->isPeopleSearch() || $brief->isListiclePeopleQuery() || $brief->isAuthoritativePeopleQuery();
                 $urlLower = mb_strtolower((string) ($h->url ?? ''));
                 $isCompanyLinkedIn = $brief->isCompanySearch() && str_contains($urlLower, 'linkedin.com/company/');
+                $looksLikeCompanyHomepage = $brief->isCompanySearch() && $this->looksLikeCompanyHomepage($urlLower);
 
                 // Company searches should keep account pages, not person profiles.
                 if ($brief->isCompanySearch() && str_contains($urlLower, 'linkedin.com/in/')) {
@@ -178,22 +179,82 @@ class SerperDiscoveryAdapter implements DiscoverySourceInterface
                     return false;
                 }
 
-                // Keep company LinkedIn pages for company searches even when listicle filters are on.
-                if (! $allowListicle && ! $isCompanyLinkedIn && $this->queryIntent->isListicleUrl($h->url)) {
-                    return false;
+                // Company mode: keep LinkedIn company pages and plausible company homepages even
+                // when the URL path looks like a directory/listicle host.
+                if (! $allowListicle && ! $isCompanyLinkedIn && ! $looksLikeCompanyHomepage && $this->queryIntent->isListicleUrl($h->url)) {
+                    // Soften: keep directory hits when the resolved name looks like a real company.
+                    if (
+                        ! $brief->isCompanySearch()
+                        || $this->queryIntent->looksLikeContentOrGenericPhrase($h->name)
+                        || ! $this->looksLikeCompanyName($h->name)
+                    ) {
+                        return false;
+                    }
                 }
 
                 if (! $allowListicle && ! $isCompanyLinkedIn && $this->queryIntent->looksLikeContentOrGenericPhrase($h->name)) {
-                    return false;
+                    // Soften for company search: "list of X" titles still drop, but short
+                    // Title Case company names with a homepage URL survive.
+                    if (! ($brief->isCompanySearch() && $looksLikeCompanyHomepage && $this->looksLikeCompanyName($h->name))) {
+                        return false;
+                    }
                 }
 
                 return true;
             });
     }
 
+    private function looksLikeCompanyHomepage(string $urlLower): bool
+    {
+        if ($urlLower === '' || str_contains($urlLower, 'linkedin.com/')) {
+            return false;
+        }
+
+        $path = parse_url($urlLower, PHP_URL_PATH) ?? '/';
+        $path = rtrim($path, '/') ?: '/';
+
+        // Root or shallow marketing pages — not /blog/top-10-...
+        if ($path === '/' || preg_match('#^/(about|about-us|home|index|company|contact)?$#u', $path)) {
+            return true;
+        }
+
+        return false;
+    }
+
+    private function looksLikeCompanyName(string $name): bool
+    {
+        $trimmed = trim($name);
+        if ($trimmed === '' || mb_strlen($trimmed) < 3 || mb_strlen($trimmed) > 80) {
+            return false;
+        }
+
+        if ($this->queryIntent->looksLikeContentOrGenericPhrase($trimmed)) {
+            return false;
+        }
+
+        // Prefer names that look like brands (Title Case / Ltd / Limited / Capital / Finance).
+        if (preg_match('/\b(ltd|limited|llc|inc|plc|corp|corporation|company|capital|finance|bank|loans?|advances?)\b/iu', $trimmed)) {
+            return true;
+        }
+
+        $words = preg_split('/\s+/u', $trimmed) ?: [];
+        if (count($words) >= 1 && count($words) <= 6) {
+            $titleish = 0;
+            foreach ($words as $word) {
+                if (preg_match('/^[\p{Lu}]/u', $word)) {
+                    $titleish++;
+                }
+            }
+
+            return $titleish >= max(1, (int) ceil(count($words) / 2));
+        }
+
+        return false;
+    }
+
     private function resolveResultLimit(IcpBrief $brief, SearchContext $ctx): int
     {
-        $configuredMax = max(5, min(100, (int) config('services.serper.max_results', 10)));
+        $configuredMax = max(5, min(100, (int) config('services.serper.max_results', 20)));
 
         $desired = match (true) {
             $brief->isAuthoritativePeopleQuery() => max(10, min(20, $ctx->limit)),
