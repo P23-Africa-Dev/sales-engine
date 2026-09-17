@@ -12,7 +12,7 @@ class LeadResource extends JsonResource
     {
         $meta = is_array($this->meta) ? $this->meta : [];
         $profileUrls = is_array($meta['profile_urls'] ?? null)
-            ? array_values(array_filter($meta['profile_urls'], fn ($u) => is_string($u) && trim($u) !== ''))
+            ? array_values(array_filter($meta['profile_urls'], fn($u) => is_string($u) && trim($u) !== ''))
             : [];
         $email = trim((string) ($meta['email'] ?? ''));
         $phone = trim((string) ($meta['phone'] ?? ''));
@@ -53,6 +53,9 @@ class LeadResource extends JsonResource
             'phone' => $phone !== '' ? $phone : null,
             'linkedin_url' => $linkedinUrl !== '' ? $linkedinUrl : null,
             'profile_urls' => $profileUrls,
+            'source_url' => isset($meta['source_url']) && trim((string) $meta['source_url']) !== ''
+                ? trim((string) $meta['source_url'])
+                : null,
             'contact_ready' => $contactReady,
             'contact_status' => $contactStatus,
             'contact_enrichment_tier' => isset($meta['contact_enrichment_tier']) && trim((string) $meta['contact_enrichment_tier']) !== ''

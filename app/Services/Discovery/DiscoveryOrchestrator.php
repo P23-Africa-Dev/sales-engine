@@ -612,7 +612,7 @@ class DiscoveryOrchestrator
                 break;
             }
 
-            $cacheKey = $source->key().'|'.mb_strtolower(trim($primaryBrief->searchQuery()));
+            $cacheKey = $source->key() . '|' . mb_strtolower(trim($primaryBrief->searchQuery()));
             if (isset($this->registryHitCache[$cacheKey])) {
                 $batch = $this->registryHitCache[$cacheKey];
             } else {
@@ -1284,6 +1284,17 @@ class DiscoveryOrchestrator
 
         $email = trim((string) ($extracted['email'] ?? ''));
         $phone = trim((string) ($extracted['phone'] ?? ''));
+        $website = trim((string) ($extracted['website'] ?? ''));
+        if ($website === '' && filled($hit->website)) {
+            $website = trim((string) $hit->website);
+        }
+        if ($website === '' && filled($hit->url)) {
+            $host = parse_url((string) $hit->url, PHP_URL_HOST);
+            if (is_string($host) && $host !== '' && ! str_contains(mb_strtolower($host), 'linkedin.com')) {
+                $website = $host;
+            }
+        }
+
         $contactReady = $this->isContactReady(
             array_merge($extracted, ['linkedin_url' => $linkedinUrl !== '' ? $linkedinUrl : null]),
             $profileUrls,
@@ -1321,7 +1332,7 @@ class DiscoveryOrchestrator
                 'location' => $extracted['location'] ?? null,
                 'email' => $email !== '' ? $email : null,
                 'phone' => $phone !== '' ? $phone : null,
-                'website' => $extracted['website'] ?? null,
+                'website' => $website !== '' ? $website : null,
                 'profile_urls' => $profileUrls !== [] ? $profileUrls : null,
                 'linkedin_url' => $linkedinUrl !== '' ? $linkedinUrl : null,
                 'source_url' => $sourceUrl !== '' ? $sourceUrl : null,
@@ -1353,7 +1364,7 @@ class DiscoveryOrchestrator
                 'company' => $metaCompany,
                 'contact_person' => $entityType === 'company' && $contactPerson !== '' ? $contactPerson : null,
                 'location' => $extracted['location'] ?? null,
-                'website' => $extracted['website'] ?? null,
+                'website' => $website !== '' ? $website : null,
                 'email' => $email !== '' ? $email : null,
                 'phone' => $phone !== '' ? $phone : null,
                 'linkedin_url' => $linkedinUrl !== '' ? $linkedinUrl : null,
