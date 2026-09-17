@@ -66,6 +66,8 @@ Route::middleware(['auth:sanctum', 'org.resolve'])->group(function () {
     Route::post('/discovery/runs', [DiscoveryController::class, 'store'])
         ->middleware('throttle:20,1');
     Route::get('/discovery/runs/{id}', [DiscoveryController::class, 'show']);
+    Route::post('/discovery/runs/{id}/cancel', [DiscoveryController::class, 'cancel'])
+        ->middleware('throttle:30,1');
 
     Route::get('/companies', [CompanyController::class, 'index']);
     Route::get('/companies/{id}', [CompanyController::class, 'show']);

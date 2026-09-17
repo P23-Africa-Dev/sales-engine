@@ -75,6 +75,90 @@ class DiscoveryController extends Controller
         ]);
     }
 
+    public function cancel(int $id): JsonResponse
+    {
+        $run = DiscoveryRun::query()
+            ->where('organization_id', OrgContext::require()->id)
+            ->where('id', $id)
+            ->firstOrFail();
+
+        if (in_array($run->status, ['completed', 'cancelled'], true)) {
+            return response()->json([
+                'data' => [
+                    'id' => $run->id,
+                    'status' => $run->status,
+                    'cancelled' => false,
+                ],
+            ]);
+        }
+
+        // Soft-failed runs stay pending with awaiting_user_choice — allow stop.
+        if ($run->status === 'failed') {
+            $placeholder = $this->pendingAssistantForRun($run);
+            $awaitingChoice = $placeholder
+                && (bool) ($placeholder->meta['pending'] ?? false)
+                && (bool) ($placeholder->meta['awaiting_user_choice'] ?? false);
+
+            if (! $awaitingChoice) {
+                return response()->json([
+                    'data' => [
+                        'id' => $run->id,
+                        'status' => $run->status,
+                        'cancelled' => false,
+                    ],
+                ]);
+            }
+        }
+
+        $run->update([
+            'status' => 'cancelled',
+            'error' => 'Cancelled by user.',
+            'finished_at' => now(),
+            'result_summary' => array_merge(
+                is_array($run->result_summary) ? $run->result_summary : [],
+                ['cancelled_by_user' => true],
+            ),
+        ]);
+
+        $placeholder = $this->pendingAssistantForRun($run);
+
+        if ($placeholder) {
+            $placeholder->update([
+                'body' => 'Lead search stopped. You can refine your query and try again.',
+                'meta' => array_merge(is_array($placeholder->meta) ? $placeholder->meta : [], [
+                    'pending' => false,
+                    'awaiting_user_choice' => false,
+                    'discovery_run_id' => $run->id,
+                    'cancelled' => true,
+                ]),
+            ]);
+        }
+
+        return response()->json([
+            'data' => [
+                'id' => $run->id,
+                'status' => 'cancelled',
+                'cancelled' => true,
+            ],
+        ]);
+    }
+
+    private function pendingAssistantForRun(\App\Models\DiscoveryRun $run): ?\App\Models\ChatMessage
+    {
+        return \App\Models\ChatMessage::query()
+            ->where('role', 'assistant')
+            ->where('chat_session_id', $run->chat_session_id)
+            ->orderByDesc('id')
+            ->get()
+            ->first(function (\App\Models\ChatMessage $message) use ($run): bool {
+                return (int) ($message->meta['discovery_run_id'] ?? 0) === $run->id
+                    && (
+                        (bool) ($message->meta['pending'] ?? false)
+                        || (bool) ($message->meta['awaiting_user_choice'] ?? false)
+                    );
+            });
+    }
+
     /**
      * @return array{step: int, total_steps: int, sources_checked: int, candidates_found: int}
      */

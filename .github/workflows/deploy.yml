@@ -211,6 +211,7 @@ jobs:
             k8s/backend-deployment.yaml \
             k8s/migrate-job.yaml \
             k8s/queue-worker-deployment.yaml \
+            k8s/discovery-queue-worker-deployment.yaml \
             k8s/scheduler-deployment.yaml
 
       - name: Apply ConfigMap, Redis, Nginx, Certificate, Ingress
@@ -274,14 +275,17 @@ jobs:
             exit 1
           fi
 
-      - name: Deploy queue worker and scheduler
+      - name: Deploy queue worker, discovery worker, and scheduler
         run: |
           kubectl apply -f k8s/queue-worker-deployment.yaml -n ${{ env.K8S_NAMESPACE }}
+          kubectl apply -f k8s/discovery-queue-worker-deployment.yaml -n ${{ env.K8S_NAMESPACE }}
           kubectl apply -f k8s/scheduler-deployment.yaml -n ${{ env.K8S_NAMESPACE }}
 
       - name: Wait for worker and scheduler rollout
         run: |
           kubectl rollout status deployment/queue-worker \
+            -n ${{ env.K8S_NAMESPACE }} --timeout=300s
+          kubectl rollout status deployment/discovery-queue-worker \
             -n ${{ env.K8S_NAMESPACE }} --timeout=300s
           kubectl rollout status deployment/scheduler \
             -n ${{ env.K8S_NAMESPACE }} --timeout=300s

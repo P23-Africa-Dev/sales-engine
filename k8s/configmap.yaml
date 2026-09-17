@@ -40,6 +40,11 @@ data:
   BROADCAST_CONNECTION: "log"
   FILESYSTEM_DISK: "local"
 
+  # Redis must not release reserved jobs before ProcessChatIntentJob can finish
+  # (job timeout 300s, discovery hard deadline ~150s). Default 90s caused
+  # MaxAttemptsExceeded races and false "timed out" chat messages.
+  REDIS_QUEUE_RETRY_AFTER: "360"
+
   # ── Redis (non-sensitive) ─────────────────────────────────────────────────────
   REDIS_CLIENT: "predis"
   REDIS_HOST: "redis-service"

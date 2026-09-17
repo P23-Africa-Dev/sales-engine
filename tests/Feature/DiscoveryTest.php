@@ -520,4 +520,61 @@ class DiscoveryTest extends TestCase
         $this->assertContains('company_pass', $stages);
         $this->assertContains('people_pass', $stages);
     }
+
+    public function test_cancel_soft_failed_run_awaiting_user_choice(): void
+    {
+        [$user, $org] = $this->actingAsOrgMember();
+
+        $icp = IcpProfile::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'Tech',
+            'is_active' => true,
+            'config' => IcpProfile::defaultConfig(),
+        ]);
+
+        $session = \App\Models\ChatSession::query()->create([
+            'organization_id' => $org->id,
+            'user_id' => $user->id,
+            'icp_profile_id' => $icp->id,
+            'title' => 'Generate',
+        ]);
+
+        $run = \App\Models\DiscoveryRun::query()->create([
+            'organization_id' => $org->id,
+            'user_id' => $user->id,
+            'icp_profile_id' => $icp->id,
+            'chat_session_id' => $session->id,
+            'status' => 'failed',
+            'query' => 'fintech CEOs',
+            'intent' => 'generate_leads',
+            'error' => 'ProcessChatIntentJob has timed out.',
+            'finished_at' => now(),
+        ]);
+
+        $placeholder = \App\Models\ChatMessage::query()->create([
+            'chat_session_id' => $session->id,
+            'role' => 'assistant',
+            'body' => 'Lead search is taking longer than usual.',
+            'intent' => 'generate_leads',
+            'meta' => [
+                'pending' => true,
+                'awaiting_user_choice' => true,
+                'discovery_run_id' => $run->id,
+            ],
+        ]);
+
+        $response = $this->withHeaders($this->orgHeaders($org))
+            ->postJson("/api/v1/discovery/runs/{$run->id}/cancel");
+
+        $response->assertOk()
+            ->assertJsonPath('data.status', 'cancelled')
+            ->assertJsonPath('data.cancelled', true);
+
+        $run->refresh();
+        $placeholder->refresh();
+        $this->assertSame('cancelled', $run->status);
+        $this->assertFalse((bool) ($placeholder->meta['pending'] ?? true));
+        $this->assertTrue((bool) ($placeholder->meta['cancelled'] ?? false));
+        $this->assertStringContainsString('stopped', mb_strtolower($placeholder->body));
+    }
 }

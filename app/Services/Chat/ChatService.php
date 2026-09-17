@@ -474,6 +474,11 @@ class ChatService
                 return;
             }
 
+            $run->refresh();
+            if ($run->status === 'cancelled') {
+                return;
+            }
+
             // Prefer the message for this run (even if failRun already cleared pending
             // and wrote a timeout body) so we do not leave duplicate assistant replies.
             $placeholder = $this->assistantMessageForRun($session->id, $userMessage->id, $run->id);

@@ -65,11 +65,35 @@ class ProcessChatIntentJob implements ShouldQueue
             }
 
             $recoveredLeads = [];
+            $errorLower = mb_strtolower($error);
             // Timeouts and "attempted too many times" often fire while leads were already
             // persisted — recover before telling the user the search failed.
+            $isMaxAttempts = str_contains($errorLower, 'attempted too many times');
             $shouldRecover = $wasTimeout
-                || str_contains(mb_strtolower($error), 'timed out')
-                || str_contains(mb_strtolower($error), 'attempted too many times');
+                || str_contains($errorLower, 'timed out')
+                || $isMaxAttempts;
+
+            // Stale Redis release while the original worker is still running: do not
+            // overwrite a live search with a premature timeout message.
+            if (
+                $isMaxAttempts
+                && ! $wasTimeout
+                && in_array($run->status, ['queued', 'running'], true)
+            ) {
+                $started = $run->started_at ?? $run->created_at;
+                $stillWithinWindow = $started !== null
+                    && $started->gt(now()->subSeconds(max(60, $this->timeout)));
+
+                if ($stillWithinWindow) {
+                    Log::warning('Ignoring MaxAttemptsExceeded while discovery run is still active', [
+                        'run_id' => $this->runId,
+                        'status' => $run->status,
+                        'started_at' => $started?->toIso8601String(),
+                    ]);
+
+                    return;
+                }
+            }
 
             if ($shouldRecover && in_array($run->status, ['queued', 'running', 'failed'], true)) {
                 if ((string) $run->intent === 'quick_research') {
@@ -139,10 +163,12 @@ class ProcessChatIntentJob implements ShouldQueue
 
             if (in_array($run->status, ['queued', 'running'], true)) {
                 $run->refresh();
-                if ($run->status === 'completed') {
+                if ($run->status === 'completed' || $run->status === 'cancelled') {
                     return;
                 }
 
+                // Last resort: mark failed but keep the chat pending so the UI can
+                // offer continue-waiting / stop instead of a hard timeout wall.
                 $run->update([
                     'status' => 'failed',
                     'error' => mb_substr($error, 0, 2000),
@@ -151,9 +177,13 @@ class ProcessChatIntentJob implements ShouldQueue
 
                 $this->finalizePlaceholder(
                     $run,
-                    'Lead search timed out or was interrupted. Please try again — results usually appear within a couple of minutes.',
+                    'Lead search is taking longer than usual. You can keep waiting a bit longer, or stop and try a narrower query.',
                     null,
-                    ['timed_out' => true],
+                    [
+                        'timed_out' => true,
+                        'awaiting_user_choice' => true,
+                        'pending' => true,
+                    ],
                 );
             }
         } catch (\Throwable $inner) {

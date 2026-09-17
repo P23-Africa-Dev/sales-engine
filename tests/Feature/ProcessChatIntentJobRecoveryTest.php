@@ -207,4 +207,138 @@ class ProcessChatIntentJobRecoveryTest extends TestCase
         $this->assertSame('completed', $run->status);
         $this->assertNull($run->error);
     }
+
+    public function test_max_attempts_while_run_active_is_ignored(): void
+    {
+        [$user, $org] = $this->createUserWithOrg();
+
+        $icp = IcpProfile::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'My Tech ICP',
+            'is_active' => true,
+            'config' => IcpProfile::defaultConfig(),
+        ]);
+
+        $session = ChatSession::query()->create([
+            'organization_id' => $org->id,
+            'user_id' => $user->id,
+            'icp_profile_id' => $icp->id,
+            'title' => 'Generate',
+        ]);
+
+        $run = DiscoveryRun::query()->create([
+            'organization_id' => $org->id,
+            'user_id' => $user->id,
+            'icp_profile_id' => $icp->id,
+            'chat_session_id' => $session->id,
+            'status' => 'running',
+            'query' => 'fintech CEOs',
+            'intent' => 'generate_leads',
+            'stages' => ['searching_sources'],
+            'started_at' => now()->subSeconds(30),
+        ]);
+
+        $userMessage = ChatMessage::query()->create([
+            'chat_session_id' => $session->id,
+            'role' => 'user',
+            'body' => 'fintech CEOs',
+            'intent' => 'generate_leads',
+            'meta' => ['intent' => 'generate_leads'],
+        ]);
+
+        ChatMessage::query()->create([
+            'chat_session_id' => $session->id,
+            'role' => 'assistant',
+            'body' => 'Searching…',
+            'intent' => 'generate_leads',
+            'meta' => [
+                'pending' => true,
+                'discovery_run_id' => $run->id,
+            ],
+        ]);
+
+        $job = new ProcessChatIntentJob($run->id, $userMessage->id);
+        $job->failed(new \RuntimeException('App\Jobs\ProcessChatIntentJob has been attempted too many times.'));
+
+        $run->refresh();
+        $this->assertSame('running', $run->status);
+        $this->assertNull($run->error);
+
+        $assistant = ChatMessage::query()
+            ->where('chat_session_id', $session->id)
+            ->where('role', 'assistant')
+            ->orderByDesc('id')
+            ->first();
+
+        $this->assertNotNull($assistant);
+        $this->assertTrue((bool) ($assistant->meta['pending'] ?? false));
+        $this->assertSame('Searching…', $assistant->body);
+    }
+
+    public function test_soft_timeout_keeps_pending_awaiting_user_choice(): void
+    {
+        [$user, $org] = $this->createUserWithOrg();
+
+        $icp = IcpProfile::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'My Tech ICP',
+            'is_active' => true,
+            'config' => IcpProfile::defaultConfig(),
+        ]);
+
+        $session = ChatSession::query()->create([
+            'organization_id' => $org->id,
+            'user_id' => $user->id,
+            'icp_profile_id' => $icp->id,
+            'title' => 'Generate',
+        ]);
+
+        $run = DiscoveryRun::query()->create([
+            'organization_id' => $org->id,
+            'user_id' => $user->id,
+            'icp_profile_id' => $icp->id,
+            'chat_session_id' => $session->id,
+            'status' => 'running',
+            'query' => 'fintech CEOs',
+            'intent' => 'generate_leads',
+            'stages' => ['extracting'],
+            'started_at' => now()->subMinutes(12),
+        ]);
+
+        $userMessage = ChatMessage::query()->create([
+            'chat_session_id' => $session->id,
+            'role' => 'user',
+            'body' => 'fintech CEOs',
+            'intent' => 'generate_leads',
+            'meta' => ['intent' => 'generate_leads'],
+        ]);
+
+        ChatMessage::query()->create([
+            'chat_session_id' => $session->id,
+            'role' => 'assistant',
+            'body' => 'Searching…',
+            'intent' => 'generate_leads',
+            'meta' => [
+                'pending' => true,
+                'discovery_run_id' => $run->id,
+            ],
+        ]);
+
+        $job = new ProcessChatIntentJob($run->id, $userMessage->id);
+        $job->failed(new TimeoutExceededException('ProcessChatIntentJob has timed out.'));
+
+        $run->refresh();
+        $this->assertSame('failed', $run->status);
+
+        $assistant = ChatMessage::query()
+            ->where('chat_session_id', $session->id)
+            ->where('role', 'assistant')
+            ->orderByDesc('id')
+            ->first();
+
+        $this->assertNotNull($assistant);
+        $this->assertTrue((bool) ($assistant->meta['pending'] ?? false));
+        $this->assertTrue((bool) ($assistant->meta['awaiting_user_choice'] ?? false));
+        $this->assertStringContainsString('keep waiting', mb_strtolower($assistant->body));
+    }
 }

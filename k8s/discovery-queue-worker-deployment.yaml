@@ -1,3 +1,6 @@
+# Dedicated worker for async chat discovery + quick research (must not share
+# the `discovery` queue with queue-worker — dual consumers + short Redis
+# retry_after caused MaxAttemptsExceeded false timeouts).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -24,7 +27,7 @@ spec:
         - name: do-registry
       containers:
         - name: worker
-          image: registry.digitalocean.com/con-reg/sales-engine-api:00e1eb9
+          image: registry.digitalocean.com/con-reg/sales-engine-api:latest
           imagePullPolicy: IfNotPresent
           command:
             - /bin/sh
@@ -38,7 +41,7 @@ spec:
               php artisan config:clear
               php artisan config:cache
               exec php artisan queue:work redis \
-                --queue=research,discovery \
+                --queue=discovery,research \
                 --sleep=2 \
                 --tries=1 \
                 --timeout=320 \
@@ -51,10 +54,10 @@ spec:
           resources:
             requests:
               cpu: "50m"
-              memory: "128Mi"
+              memory: "256Mi"
             limits:
-              cpu: "500m"
-              memory: "512Mi"
+              cpu: "1000m"
+              memory: "1Gi"
           livenessProbe:
             exec:
               command: ["/bin/sh", "-c", "php -r 'exit(0);'"]
