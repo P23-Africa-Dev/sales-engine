@@ -16,7 +16,7 @@ class ScoringServiceTest extends TestCase
 
         $org = Organization::query()->create([
             'name' => 'Test Org',
-            'slug' => 'test-org-scoring-'.uniqid(),
+            'slug' => 'test-org-scoring-' . uniqid(),
         ]);
 
         $brief = IcpBrief::fromIcpProfile(new IcpProfile([
@@ -33,11 +33,13 @@ class ScoringServiceTest extends TestCase
             'name' => 'Acme Distributors Lagos',
             'summary' => 'Leading FMCG distributor in Lagos.',
             'sector' => 'FMCG',
+            'location' => 'Lagos, NG',
         ], $brief, $org);
 
         $this->assertArrayHasKey('icp_relevance_reason', $scores);
         $this->assertNotSame('', trim($scores['icp_relevance_reason']));
         $this->assertStringContainsString('FinTech', $scores['icp_relevance_reason']);
+        $this->assertStringNotContainsString('Fits your', $scores['icp_relevance_reason']);
     }
 
     public function test_factual_query_reason_differs_when_below_threshold(): void
@@ -46,7 +48,7 @@ class ScoringServiceTest extends TestCase
 
         $org = Organization::query()->create([
             'name' => 'Test Org',
-            'slug' => 'test-org-factual-'.uniqid(),
+            'slug' => 'test-org-factual-' . uniqid(),
         ]);
 
         $brief = IcpBrief::fromIcpProfile(new IcpProfile([
@@ -84,10 +86,34 @@ class ScoringServiceTest extends TestCase
 
         $reason = app(ScoringService::class)->buildIcpRelevanceReason($brief, 80.0, false, [
             'name' => 'Acme SaaS',
+            'industry' => 'SaaS',
+            'location' => 'Nairobi',
         ]);
 
         $this->assertStringContainsString('SaaS', $reason);
         $this->assertStringContainsString('Nairobi', $reason);
         $this->assertStringContainsString('CEO', $reason);
+        $this->assertStringContainsString('Fits your', $reason);
+    }
+
+    public function test_unknown_firmographics_do_not_claim_icp_fit(): void
+    {
+        $brief = IcpBrief::fromIcpProfile(new IcpProfile([
+            'name' => 'My Tech ICP',
+            'config' => array_merge(IcpProfile::defaultConfig(), [
+                'industries' => ['SaaS'],
+                'territories' => ['Nairobi'],
+                'minMatchScore' => 60,
+            ]),
+        ]), 'generate leads');
+
+        $scores = app(ScoringService::class)->heuristicScore([
+            'name' => 'Mystery Co',
+            'summary' => 'A company with no firmographic fields.',
+        ], $brief);
+
+        $this->assertLessThan(60, $scores['icp_fit_score']);
+        $this->assertStringContainsString('not verified', mb_strtolower($scores['icp_relevance_reason']));
+        $this->assertStringNotContainsString('Fits your', $scores['icp_relevance_reason']);
     }
 }

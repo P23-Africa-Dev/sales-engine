@@ -204,21 +204,42 @@ readonly class IcpBrief
     }
 
     /**
-     * Interest language for search — customPrompt / description only.
-     * Firmographic ICP fields are never part of this string.
+     * Deterministic ICP Search Brief for vague generate requests.
+     *
+     * Priority: customPrompt → description → industries (soft) → neutral fallback.
+     * Territory, size, revenue, and personas stay out of this string (gates only).
      */
-    public function interestSearchSeed(): string
+    public function searchBrief(): string
     {
-        $interest = trim($this->customPrompt) !== ''
-            ? trim($this->customPrompt)
-            : trim($this->description);
-
+        $interest = trim($this->customPrompt);
         if ($interest !== '') {
             return $interest;
+        }
+
+        $description = trim($this->description);
+        if ($description !== '') {
+            return $description;
+        }
+
+        $industries = array_values(array_filter(array_map(
+            static fn ($industry) => is_string($industry) ? trim($industry) : '',
+            $this->industries,
+        )));
+        if ($industries !== []) {
+            return implode(' ', $industries).' companies';
         }
 
         return $this->isPeopleSearch()
             ? 'executives founders companies announcements'
             : 'companies announcements partnerships market entry';
+    }
+
+    /**
+     * Interest language for search — delegates to searchBrief().
+     * Firmographic gates (territory / size / revenue / personas) are never part of this string.
+     */
+    public function interestSearchSeed(): string
+    {
+        return $this->searchBrief();
     }
 }

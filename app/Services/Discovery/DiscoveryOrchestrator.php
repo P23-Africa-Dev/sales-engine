@@ -82,6 +82,8 @@ class DiscoveryOrchestrator
 
     /**
      * @param  list<string>  $excludeLeadNames  Names already shown (generate-more).
+     * @param  string|null  $searchQueryOverride  When set (ICP Search Brief), Serper uses this while
+     *                                            `$query` stays the user's ask for hasUserQuery / hard-gate mode.
      * @return array{run: DiscoveryRun, leads: list<array<string, mixed>>, companies: Collection}
      */
     public function run(
@@ -95,14 +97,21 @@ class DiscoveryOrchestrator
         ?DiscoveryRun $existingRun = null,
         array $excludeLeadNames = [],
         bool $deferContactEnrichment = true,
+        ?string $searchQueryOverride = null,
     ): array {
+        $briefSeed = IcpBrief::fromIcpProfile($icp, $query);
+        if ($searchQueryOverride !== null && trim($searchQueryOverride) !== '') {
+            $briefSeed = $briefSeed->withSearchQueryOverride(trim($searchQueryOverride));
+        }
+        $storedQuery = $briefSeed->searchQuery();
+
         $run = $existingRun ?? DiscoveryRun::query()->create([
             'organization_id' => $organization->id,
             'user_id' => $user?->id,
             'icp_profile_id' => $icp->id,
             'chat_session_id' => $chatSessionId,
             'status' => 'running',
-            'query' => $query,
+            'query' => $storedQuery,
             'intent' => $intent,
             'stages' => ['analyzing_brief'],
             'started_at' => now(),
@@ -111,7 +120,7 @@ class DiscoveryOrchestrator
         if ($existingRun) {
             $run->update([
                 'status' => 'running',
-                'query' => $query,
+                'query' => $storedQuery,
                 'intent' => $intent,
                 'stages' => ['analyzing_brief'],
                 'started_at' => now(),
@@ -125,7 +134,7 @@ class DiscoveryOrchestrator
             $this->registryHitCache = [];
             $this->enrichment->setDeferContactWaterfall($deferContactEnrichment);
 
-            $brief = IcpBrief::fromIcpProfile($icp, $query);
+            $brief = $briefSeed;
             $hasUserQuery = $brief->hasUserQuery();
             $effectiveLimit = min(self::MAX_LEAD_LIMIT, max(1, $limit > 0 ? $limit : $brief->requestedLimit));
             $this->qualityThreshold = $this->resolveQualityThreshold($effectiveLimit);

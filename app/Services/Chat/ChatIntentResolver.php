@@ -4,11 +4,13 @@ namespace App\Services\Chat;
 
 use App\Models\ChatSession;
 use App\Models\Organization;
+use App\Services\Discovery\QueryIntentService;
 
 class ChatIntentResolver
 {
     public function __construct(
         private readonly ConversationMemoryService $memory,
+        private readonly QueryIntentService $queryIntent = new QueryIntentService,
     ) {}
 
     /**
@@ -23,9 +25,17 @@ class ChatIntentResolver
         $organization ??= Organization::query()->find($session->organization_id);
         $effectiveBody = $body;
 
+        // Generic generate asks must stay ICP-driven — never let chat history invent a theme.
+        $skipContextualize = in_array($intent, ['generate_leads', 'generate_more_leads'], true)
+            && $this->isGenericLeadBody($body);
+
         // Skip the expensive contextualize GLM call when the prompt is already
         // self-contained — especially important for Quick Research latency.
-        if ($organization && $this->needsConversationContext($session, $body)) {
+        if (
+            ! $skipContextualize
+            && $organization
+            && $this->needsConversationContext($session, $body)
+        ) {
             $contextualized = $this->memory->contextualize($session, $body, $organization);
             $effectiveBody = $contextualized['effective_query'];
         }
@@ -117,5 +127,15 @@ class ChatIntentResolver
         }
 
         return false;
+    }
+
+    /**
+     * Vague generate prompts ("50 leads", "give me prospects") must not pull a theme from chat history.
+     */
+    public function isGenericLeadBody(string $body): bool
+    {
+        $cleaned = $this->queryIntent->stripProspectCountInstruction($body);
+
+        return trim($cleaned) === '' || $this->queryIntent->isGenericLeadRequest($cleaned);
     }
 }

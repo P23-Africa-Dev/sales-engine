@@ -47,7 +47,7 @@ class IcpBriefSearchQueryTest extends TestCase
         $this->assertNotEmpty($linkedinVariants, 'Fan-out should still include LinkedIn profile variants');
     }
 
-    public function test_generic_icp_request_does_not_use_firmographic_fields_as_query_text(): void
+    public function test_generic_icp_request_uses_industries_when_interest_empty_but_not_gates(): void
     {
         $profile = new IcpProfile([
             'name' => 'My Tech ICP',
@@ -66,7 +66,8 @@ class IcpBriefSearchQueryTest extends TestCase
         $this->assertFalse($brief->hasUserQuery());
         $query = $brief->searchQuery();
 
-        $this->assertStringNotContainsString('FinTech', $query);
+        $this->assertStringContainsString('FinTech', $query);
+        $this->assertStringContainsString('SaaS', $query);
         $this->assertStringNotContainsString('Lagos', $query);
         $this->assertStringNotContainsString('Head of Sales', $query);
         $this->assertStringNotContainsString('Find 100 prospects', $query);
@@ -74,10 +75,43 @@ class IcpBriefSearchQueryTest extends TestCase
 
         $variations = app(\App\Services\Discovery\QueryVariationGenerator::class)->generate($brief, 20);
         foreach ($variations as $variation) {
-            $this->assertStringNotContainsString('FinTech', $variation);
             $this->assertStringNotContainsString('Lagos', $variation);
             $this->assertStringNotContainsString('Head of Sales', $variation);
         }
+    }
+
+    public function test_search_brief_prefers_custom_prompt_over_industries(): void
+    {
+        $profile = new IcpProfile([
+            'name' => 'Niche ICP',
+            'description' => 'Profile description fallback',
+            'config' => array_merge(IcpProfile::defaultConfig(), [
+                'industries' => ['Manufacturing'],
+                'territories' => ['england'],
+                'customPrompt' => 'niche equipment buyers expanding abroad',
+            ]),
+        ]);
+
+        $brief = IcpBrief::fromIcpProfile($profile, 'give me prospects');
+        $this->assertSame('niche equipment buyers expanding abroad', $brief->searchBrief());
+        $this->assertSame($brief->searchBrief(), $brief->searchQuery());
+        $this->assertFalse($brief->hasUserQuery());
+    }
+
+    public function test_search_query_override_keeps_has_user_query_false_for_generic_ask(): void
+    {
+        $profile = new IcpProfile([
+            'name' => 'Niche ICP',
+            'config' => array_merge(IcpProfile::defaultConfig(), [
+                'customPrompt' => 'specialty component suppliers',
+            ]),
+        ]);
+
+        $brief = IcpBrief::fromIcpProfile($profile, 'give me prospects')
+            ->withSearchQueryOverride('specialty component suppliers');
+
+        $this->assertFalse($brief->hasUserQuery());
+        $this->assertSame('specialty component suppliers', $brief->searchQuery());
     }
 
     public function test_strips_find_n_wrapper_but_keeps_substantive_query(): void

@@ -10,6 +10,7 @@ use App\Models\Organization;
 use App\Models\User;
 use App\Services\Discovery\DTO\IcpBrief;
 use App\Services\Discovery\DiscoveryOrchestrator;
+use App\Services\Discovery\QueryIntentService;
 use App\Services\Icp\IcpProfileService;
 use App\Services\Llm\GlmClient;
 use App\Services\Outreach\OutreachDraftService;
@@ -38,6 +39,7 @@ class ChatService
         private readonly ChatListNumbering $listNumbering,
         private readonly ConversationMemoryService $memory,
         private readonly \App\Services\Discovery\LeadQueryNormalizer $leadQueryNormalizer,
+        private readonly QueryIntentService $queryIntent = new QueryIntentService,
     ) {}
 
     public function createSession(Organization $organization, User $user, ?string $title = null, ?int $icpProfileId = null): ChatSession
@@ -128,30 +130,58 @@ class ChatService
 
         $queryNormalized = false;
         $originalQuery = $effectiveBody;
-        if (in_array($intent, ['generate_leads', 'generate_more_leads'], true) && $icp) {
-            $normalized = $this->leadQueryNormalizer->normalize($effectiveBody, $icp);
-            if (trim($normalized) !== '' && trim($normalized) !== trim($effectiveBody)) {
-                $originalQuery = $effectiveBody;
-                $effectiveBody = $normalized;
-                $queryNormalized = true;
-            }
-        }
+        $icpSearchBrief = false;
+        $searchQueryOverride = null;
+        $briefUserQuery = $effectiveBody;
 
-        $excludeLeadNames = [];
-        if ($intent === 'generate_more_leads') {
-            $excludeLeadNames = $this->recentLeadNamesFromSession($session);
-            if ($excludeLeadNames === [] || ! $queryNormalized) {
-                // Prefer last successful generate query when user just clicks "Generate more".
-                $seedQuery = $this->recentGenerateQueryFromSession($session);
-                if ($seedQuery !== null && trim($seedQuery) !== '') {
-                    $effectiveBody = $this->leadQueryNormalizer->normalize($seedQuery, $icp);
-                    $queryNormalized = true;
-                    $originalQuery = $body;
-                } elseif ($icp) {
-                    $effectiveBody = $this->leadQueryNormalizer->normalize('generate leads', $icp);
+        if (in_array($intent, ['generate_leads', 'generate_more_leads'], true) && $icp) {
+            $excludeLeadNames = [];
+            if ($intent === 'generate_more_leads') {
+                $excludeLeadNames = $this->recentLeadNamesFromSession($session);
+            }
+
+            $useIcpBrief = $this->intentResolver->isGenericLeadBody($body)
+                || ($intent === 'generate_more_leads' && $this->recentGenerateWasIcpSearchBrief($session));
+
+            if ($useIcpBrief) {
+                $searchBrief = IcpBrief::fromIcpProfile($icp)->searchBrief();
+                $originalQuery = $body;
+                $effectiveBody = $searchBrief;
+                $searchQueryOverride = $searchBrief;
+                $briefUserQuery = $this->intentResolver->isGenericLeadBody($body)
+                    ? $body
+                    : 'generate leads';
+                $icpSearchBrief = true;
+                $queryNormalized = true;
+            } else {
+                $normalized = $this->leadQueryNormalizer->normalize($effectiveBody, $icp);
+                if (trim($normalized) !== '' && trim($normalized) !== trim($effectiveBody)) {
+                    $originalQuery = $effectiveBody;
+                    $effectiveBody = $normalized;
                     $queryNormalized = true;
                 }
+                $briefUserQuery = $effectiveBody;
+
+                if ($intent === 'generate_more_leads' && ($excludeLeadNames === [] || ! $queryNormalized)) {
+                    $seedQuery = $this->recentGenerateQueryFromSession($session);
+                    if ($seedQuery !== null && trim($seedQuery) !== '') {
+                        $effectiveBody = $this->leadQueryNormalizer->normalize($seedQuery, $icp);
+                        $briefUserQuery = $effectiveBody;
+                        $queryNormalized = true;
+                        $originalQuery = $body;
+                    } elseif ($icp) {
+                        $searchBrief = IcpBrief::fromIcpProfile($icp)->searchBrief();
+                        $effectiveBody = $searchBrief;
+                        $searchQueryOverride = $searchBrief;
+                        $briefUserQuery = 'generate leads';
+                        $icpSearchBrief = true;
+                        $queryNormalized = true;
+                        $originalQuery = $body;
+                    }
+                }
             }
+        } else {
+            $excludeLeadNames = [];
         }
 
         $userMeta = ['intent' => $intent];
@@ -162,6 +192,12 @@ class ChatService
         if ($queryNormalized) {
             $userMeta['original_query'] = $originalQuery;
             $userMeta['query_normalized'] = true;
+        }
+        if ($icpSearchBrief) {
+            $userMeta['icp_search_brief'] = true;
+            $userMeta['effective_query'] = $effectiveBody;
+            $userMeta['original_query'] = $originalQuery;
+            $userMeta['brief_user_query'] = $briefUserQuery;
         }
         if ($excludeLeadNames !== []) {
             $userMeta['exclude_lead_names'] = array_values(array_slice($excludeLeadNames, 0, 200));
@@ -275,18 +311,22 @@ class ChatService
             $meta['research'] = $result['research'];
             $assistantBody = $result['narrative'];
         } elseif (in_array($intent, ['generate_leads', 'generate_more_leads'], true) && $icp) {
-            $brief = IcpBrief::fromIcpProfile($icp, $effectiveBody);
+            $brief = IcpBrief::fromIcpProfile($icp, $briefUserQuery);
+            if ($searchQueryOverride !== null) {
+                $brief = $brief->withSearchQueryOverride($searchQueryOverride);
+            }
             $result = $this->discovery->run(
                 $organization,
                 $icp,
                 $user,
-                $effectiveBody,
+                $briefUserQuery,
                 $intent === 'generate_more_leads' ? 'generate_more_leads' : 'generate_leads',
                 $session->id,
                 $brief->requestedLimit,
                 null,
                 $excludeLeadNames,
                 $intent !== 'generate_more_leads',
+                $searchQueryOverride,
             );
             $leads = $result['leads'];
             $discoveryRunId = $result['run']->id;
@@ -422,16 +462,38 @@ class ChatService
                 $meta['research'] = $result['research'];
                 $assistantBody = $result['narrative'];
             } elseif (in_array($intent, ['generate_leads', 'generate_more_leads'], true)) {
-                $normalized = $this->leadQueryNormalizer->normalize($effectiveBody, $icp);
-                if (trim($normalized) !== '' && trim($normalized) !== trim($effectiveBody)) {
-                    $meta['original_query'] = $effectiveBody;
-                    $meta['query_normalized'] = true;
-                    $effectiveBody = $normalized;
+                $icpSearchBrief = (bool) ($userMeta['icp_search_brief'] ?? false);
+                $briefUserQuery = trim((string) ($userMeta['brief_user_query'] ?? ''));
+                $searchQueryOverride = null;
+
+                if ($icpSearchBrief) {
+                    // Re-seed from the current ICP so edits between queue and run take effect.
+                    $searchQueryOverride = IcpBrief::fromIcpProfile($icp)->searchBrief();
+                    $effectiveBody = $searchQueryOverride;
+                    if ($briefUserQuery === '') {
+                        $briefUserQuery = trim((string) ($userMeta['original_query'] ?? $userMessage->body));
+                    }
+                    if (! $this->intentResolver->isGenericLeadBody($briefUserQuery)) {
+                        $briefUserQuery = 'generate leads';
+                    }
                     $run->update(['query' => $effectiveBody]);
                     $userMeta['effective_query'] = $effectiveBody;
-                    $userMeta['original_query'] = $meta['original_query'];
-                    $userMeta['query_normalized'] = true;
+                    $userMeta['icp_search_brief'] = true;
+                    $userMeta['brief_user_query'] = $briefUserQuery;
                     $userMessage->update(['meta' => $userMeta]);
+                } else {
+                    $normalized = $this->leadQueryNormalizer->normalize($effectiveBody, $icp);
+                    if (trim($normalized) !== '' && trim($normalized) !== trim($effectiveBody)) {
+                        $meta['original_query'] = $effectiveBody;
+                        $meta['query_normalized'] = true;
+                        $effectiveBody = $normalized;
+                        $run->update(['query' => $effectiveBody]);
+                        $userMeta['effective_query'] = $effectiveBody;
+                        $userMeta['original_query'] = $meta['original_query'];
+                        $userMeta['query_normalized'] = true;
+                        $userMessage->update(['meta' => $userMeta]);
+                    }
+                    $briefUserQuery = $effectiveBody;
                 }
 
                 $excludeLeadNames = array_values(array_filter(array_map(
@@ -442,22 +504,29 @@ class ChatService
                     $excludeLeadNames = $this->recentLeadNamesFromSession($session);
                 }
 
-                $brief = IcpBrief::fromIcpProfile($icp, $effectiveBody);
+                $brief = IcpBrief::fromIcpProfile($icp, $briefUserQuery);
+                if ($searchQueryOverride !== null) {
+                    $brief = $brief->withSearchQueryOverride($searchQueryOverride);
+                }
                 $result = $this->discovery->run(
                     $organization,
                     $icp,
                     $user,
-                    $effectiveBody,
+                    $briefUserQuery,
                     $intent,
                     $session->id,
                     $brief->requestedLimit,
                     $run,
                     $excludeLeadNames,
                     $intent !== 'generate_more_leads',
+                    $searchQueryOverride,
                 );
                 $leads = $result['leads'];
                 if ($intent === 'generate_more_leads') {
                     $meta['generate_more'] = true;
+                }
+                if ($icpSearchBrief) {
+                    $meta['icp_search_brief'] = true;
                 }
                 $assistantBody = $this->narrateDiscovery(
                     $organization,
@@ -597,6 +666,12 @@ class ChatService
         }
 
         $meta = is_array($message->meta) ? $message->meta : [];
+
+        // Polluted context-derived queries must not seed "generate more".
+        if ((bool) ($meta['icp_search_brief'] ?? false)) {
+            return null;
+        }
+
         $effective = trim((string) ($meta['effective_query'] ?? ''));
         if ($effective !== '') {
             return $effective;
@@ -605,6 +680,24 @@ class ChatService
         $body = trim((string) $message->body);
 
         return $body !== '' ? $body : null;
+    }
+
+    private function recentGenerateWasIcpSearchBrief(ChatSession $session): bool
+    {
+        $message = ChatMessage::query()
+            ->where('chat_session_id', $session->id)
+            ->where('role', 'user')
+            ->whereIn('intent', ['generate_leads', 'generate_more_leads'])
+            ->orderByDesc('id')
+            ->first(['meta']);
+
+        if (! $message) {
+            return false;
+        }
+
+        $meta = is_array($message->meta) ? $message->meta : [];
+
+        return (bool) ($meta['icp_search_brief'] ?? false);
     }
 
     /**

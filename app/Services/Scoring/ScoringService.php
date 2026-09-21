@@ -23,11 +23,20 @@ class ScoringService
         $queryScore = $hasUserQuery
             ? $this->heuristicQueryRelevance($companyPayload, $brief->query)
             : 55.0;
-        $icpBase = 55.0 + (count($brief->industries) > 0 ? 12 : 0) + (count($brief->territories) > 0 ? 8 : 0);
-        if (filled($companyPayload['linkedin_url'] ?? null) || filled($companyPayload['title'] ?? null)) {
-            $icpBase += 8;
+
+        $fit = $this->assessFirmographicFit($companyPayload, $brief);
+        $icpBase = 55.0;
+        if ($fit['verified_match']) {
+            $icpBase += $fit['bonus'];
         }
-        $icpFit = min(92, $icpBase);
+        if (filled($companyPayload['linkedin_url'] ?? null) || filled($companyPayload['title'] ?? null)) {
+            $icpBase += 4;
+        }
+        // Without firmographic evidence, stay below typical minMatchScore so we do not rubber-stamp.
+        $icpFit = $fit['unknown']
+            ? min(58, $icpBase)
+            : min(92, $icpBase);
+
         $priority = $hasUserQuery
             ? min(95, ($queryScore * 0.55) + ($icpFit * 0.45))
             : min(92, $icpFit);
@@ -64,7 +73,7 @@ class ScoringService
             $result = $this->glm->chatJson([
                 [
                     'role' => 'system',
-                    'content' => 'Score lead relevance. Return JSON: icp_fit_score (0-100), intent_score (0-100), query_relevance_score (0-100), priority_score (0-100), rationale (string), icp_relevance_reason (string — one short sentence citing specific ICP industries/territories/decision makers). Score query relevance to the user\'s words first. ICP fit is advisory — results that answer the query but fall outside ICP industries/territories should still have high query_relevance_score. Boost query_relevance_score when authoritative_source is true. When is_factual_query is true and icp_fit_score is below minMatchScore, phrase icp_relevance_reason like: "Answers your search for X; doesn\'t match your {industries} focus in {territories}."',
+                    'content' => 'Score lead relevance. Return JSON: icp_fit_score (0-100), intent_score (0-100), query_relevance_score (0-100), priority_score (0-100), rationale (string), icp_relevance_reason (string — one short sentence citing specific ICP industries/territories/decision makers). Score query relevance to the user\'s words first. ICP fit is advisory — results that answer the query but fall outside ICP industries/territories should still have high query_relevance_score. Boost query_relevance_score when authoritative_source is true. When is_factual_query is true and icp_fit_score is below minMatchScore, phrase icp_relevance_reason like: "Answers your search for X; doesn\'t match your {industries} focus in {territories}." When firmographic fields are missing, do not claim the lead fits ICP industries.',
                 ],
                 [
                     'role' => 'user',
@@ -155,7 +164,8 @@ class ScoringService
         $territoryLabel = $territories !== [] ? implode(' / ', $territories) : 'your target territories';
         $buyerLabel = $buyers !== [] ? implode(' / ', $buyers) : null;
 
-        $matchesIcp = $icpFit >= $brief->minMatchScore;
+        $fit = $this->assessFirmographicFit($companyPayload, $brief);
+        $matchesIcp = $fit['verified_match'] && $icpFit >= $brief->minMatchScore;
         $leadName = trim((string) ($companyPayload['name'] ?? $companyPayload['person_name'] ?? ''));
         $queryHint = trim($brief->query);
         if ($queryHint === '') {
@@ -166,6 +176,10 @@ class ScoringService
             $who = $leadName !== '' ? $leadName : 'This result';
 
             return "{$who} answers your search for {$queryHint}; doesn't match your {$industryLabel} focus in {$territoryLabel}.";
+        }
+
+        if ($fit['unknown']) {
+            return 'Matched search; firmographic fit not verified yet.';
         }
 
         if ($matchesIcp) {
@@ -181,6 +195,99 @@ class ScoringService
         }
 
         return "Limited overlap with your {$industryLabel} focus in {$territoryLabel} — still answers the search request.";
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     * @return array{unknown: bool, verified_match: bool, bonus: float}
+     */
+    public function assessFirmographicFit(array $payload, IcpBrief $brief): array
+    {
+        $industry = trim((string) (
+            $payload['industry'] ?? $payload['sector'] ?? $payload['company_industry'] ?? ''
+        ));
+        $territory = trim((string) (
+            $payload['location'] ?? $payload['territory'] ?? $payload['city'] ?? ''
+        ));
+
+        $needsIndustry = $brief->industries !== [];
+        $needsTerritory = $brief->territories !== [];
+
+        if (! $needsIndustry && ! $needsTerritory) {
+            return ['unknown' => false, 'verified_match' => true, 'bonus' => 0.0];
+        }
+
+        $hasAnySignal = ($needsIndustry && $industry !== '') || ($needsTerritory && $territory !== '');
+        if (! $hasAnySignal) {
+            return ['unknown' => true, 'verified_match' => false, 'bonus' => 0.0];
+        }
+
+        $bonus = 0.0;
+        $matchedAny = false;
+        $failedConstrained = false;
+
+        if ($needsIndustry) {
+            if ($industry === '') {
+                // Industry constrained but missing — do not claim fit from territory alone.
+            } elseif ($this->valueMatchesAllowed($brief->industries, $industry)) {
+                $bonus += 12;
+                $matchedAny = true;
+            } else {
+                $failedConstrained = true;
+            }
+        }
+
+        if ($needsTerritory) {
+            if ($territory === '') {
+                // Territory constrained but missing.
+            } elseif ($this->valueMatchesAllowed($brief->territories, $territory)) {
+                $bonus += 8;
+                $matchedAny = true;
+            } else {
+                $failedConstrained = true;
+            }
+        }
+
+        if ($failedConstrained && ! $matchedAny) {
+            return ['unknown' => false, 'verified_match' => false, 'bonus' => 0.0];
+        }
+
+        if ($matchedAny && ! $failedConstrained) {
+            return ['unknown' => false, 'verified_match' => true, 'bonus' => $bonus];
+        }
+
+        if ($matchedAny) {
+            // Partial evidence — credit bonus but do not claim full ICP fit.
+            return ['unknown' => false, 'verified_match' => false, 'bonus' => $bonus * 0.5];
+        }
+
+        return ['unknown' => true, 'verified_match' => false, 'bonus' => 0.0];
+    }
+
+    /**
+     * @param  list<string>  $allowed
+     */
+    private function valueMatchesAllowed(array $allowed, string $candidateValue): bool
+    {
+        $value = mb_strtolower(trim($candidateValue));
+        if ($value === '') {
+            return false;
+        }
+
+        foreach ($allowed as $option) {
+            if (! is_string($option)) {
+                continue;
+            }
+            $option = mb_strtolower(trim($option));
+            if ($option === '') {
+                continue;
+            }
+            if ($option === $value || str_contains($value, $option) || str_contains($option, $value)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
