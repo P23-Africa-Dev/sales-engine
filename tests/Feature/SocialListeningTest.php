@@ -344,7 +344,7 @@ class SocialListeningTest extends TestCase
             ->getJson("/api/v1/social-listening/signals/{$signal->id}")
             ->assertOk()
             ->assertJsonPath('data.recommendedAction.title', 'Reach out within 24 hours')
-            ->assertJsonPath('data.recommendedAction.detail', 'this prospect may be actively looking for solutions.');
+            ->assertJsonPath('data.recommendedAction.detail', 'This prospect may be actively looking for solutions.');
     }
 
     public function test_filter_no_longer_drops_funding_signal_when_filters_empty_and_score_passes(): void

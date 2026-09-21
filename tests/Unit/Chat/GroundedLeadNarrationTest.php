@@ -53,8 +53,8 @@ class GroundedLeadNarrationTest extends TestCase
         );
 
         $this->assertStringContainsString('Found 2 leads for your search.', $body);
-        $this->assertStringContainsString('1. Lekan Adewoye — Managing Director/CEO at Suntrail Group Ltd', $body);
-        $this->assertStringContainsString('2. Aneesh Bond — Managing Director / CEO at AJO MOBILE APP', $body);
+        $this->assertStringContainsString('1. Lekan Adewoye, Managing Director/CEO at Suntrail Group Ltd', $body);
+        $this->assertStringContainsString('2. Aneesh Bond, Managing Director / CEO at AJO MOBILE APP', $body);
         $this->assertStringContainsString('All 2 score strongly against your ICP "My Tech ICP".', $body);
         $this->assertStringNotContainsString('Interswitch', $body);
         $this->assertStringNotContainsString('Olusegun', $body);

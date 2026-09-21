@@ -67,7 +67,7 @@ class SocialSignalResource extends JsonResource
                 // Only present when the caller eager-loaded enrichmentLogs (list/show
                 // endpoints both do) — omitted entirely otherwise rather than firing
                 // an N+1 query per signal.
-                'contacts' => $this->whenLoaded('enrichmentLogs', fn () => $this->enrichmentLogs->map(fn ($log) => [
+                'contacts' => $this->whenLoaded('enrichmentLogs', fn() => $this->enrichmentLogs->map(fn($log) => [
                     'personName' => $log->person_name,
                     'foundEmail' => $log->found_email,
                     'foundPhone' => $log->found_phone,
@@ -131,7 +131,7 @@ class SocialSignalResource extends JsonResource
         $sentenceEnd = mb_strpos($flat, '. ');
         if ($sentenceEnd !== false) {
             return [
-                'title' => trim(mb_substr($flat, 0, $sentenceEnd + 1)),
+                'title' => trim(mb_substr($flat, 0, $sentenceEnd)),
                 'detail' => trim(mb_substr($flat, $sentenceEnd + 2)),
             ];
         }
