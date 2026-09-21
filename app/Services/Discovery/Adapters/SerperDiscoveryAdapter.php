@@ -69,7 +69,7 @@ class SerperDiscoveryAdapter implements DiscoverySourceInterface
                             'X-API-KEY' => (string) config('services.serper.api_key'),
                             'Content-Type' => 'application/json',
                         ])
-                        ->post($baseUrl.'/search', [
+                        ->post($baseUrl . '/search', [
                             'q' => $query,
                             'num' => $resultLimit,
                         ]);
@@ -124,7 +124,7 @@ class SerperDiscoveryAdapter implements DiscoverySourceInterface
                 }
 
                 $variantBrief = $brief->withSearchQueryOverride($activeQuery);
-                $hits = $hits->merge($this->mapOrganicHits($response->json('organic') ?? [], $variantBrief));
+                $hits = $hits->merge($this->mapOrganicHits($response->json('organic') ?? [], $variantBrief, $ctx));
             }
         }
 
@@ -139,8 +139,10 @@ class SerperDiscoveryAdapter implements DiscoverySourceInterface
      * @param  list<array<string, mixed>>  $organic
      * @return Collection<int, RawDiscoveryHit>
      */
-    private function mapOrganicHits(array $organic, IcpBrief $brief): Collection
+    private function mapOrganicHits(array $organic, IcpBrief $brief, SearchContext $ctx): Collection
     {
+        $isResearch = $ctx->intent === 'quick_research';
+
         return collect($organic)
             ->map(function (array $item) use ($brief) {
                 $title = (string) ($item['title'] ?? 'Unknown');
@@ -159,9 +161,14 @@ class SerperDiscoveryAdapter implements DiscoverySourceInterface
                     meta: ['title' => $title, 'target' => $brief->target],
                 );
             })
-            ->filter(function (RawDiscoveryHit $h) use ($brief) {
+            ->filter(function (RawDiscoveryHit $h) use ($brief, $isResearch) {
                 if ($h->name === '') {
                     return false;
+                }
+
+                // Research briefs need market reports / articles as sources — do not apply lead junk filters.
+                if ($isResearch) {
+                    return true;
                 }
 
                 $allowListicle = $brief->isPeopleSearch() || $brief->isListiclePeopleQuery() || $brief->isAuthoritativePeopleQuery();
@@ -272,7 +279,7 @@ class SerperDiscoveryAdapter implements DiscoverySourceInterface
                 'X-API-KEY' => (string) config('services.serper.api_key'),
                 'Content-Type' => 'application/json',
             ])
-            ->post($baseUrl.'/search', [
+            ->post($baseUrl . '/search', [
                 'q' => $query,
                 'num' => $num,
             ]);
@@ -401,7 +408,7 @@ class SerperDiscoveryAdapter implements DiscoverySourceInterface
                 }
             }
 
-            if (preg_match('/\b(top|richest|wealthiest|billionaires?)\b/u', mb_strtolower($hit->name.' '.($hit->snippet ?? '')))) {
+            if (preg_match('/\b(top|richest|wealthiest|billionaires?)\b/u', mb_strtolower($hit->name . ' ' . ($hit->snippet ?? '')))) {
                 $score += 20;
             }
 

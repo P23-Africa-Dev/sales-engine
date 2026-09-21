@@ -258,7 +258,9 @@ class ResearchOrchestrator
         $hits = collect();
         $sourcesChecked = 0;
         $ctx = new SearchContext($organization->id, $user?->id, 5, 'quick_research');
-        $primaryBrief = IcpBrief::fromIcpProfile($icp, $subQueries[0] ?? '');
+        // Research wants articles/reports as sources — never apply people-lead name gates.
+        $primaryBrief = IcpBrief::fromIcpProfile($icp, $subQueries[0] ?? '')
+            ->withTarget(\App\Services\Discovery\QueryIntentService::TARGET_COMPANIES);
 
         foreach ($this->sources as $source) {
             if (! $source->isEnabled()) {

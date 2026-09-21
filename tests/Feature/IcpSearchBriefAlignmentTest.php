@@ -31,7 +31,7 @@ class IcpSearchBriefAlignmentTest extends TestCase
         IcpProfile::query()->create([
             'organization_id' => $org->id,
             'name' => 'Niche ICP',
-            'description' => 'Profile description unused when customPrompt set',
+            'description' => 'Profile description fallback',
             'is_active' => true,
             'config' => array_merge(IcpProfile::defaultConfig(), [
                 'industries' => ['Manufacturing'],

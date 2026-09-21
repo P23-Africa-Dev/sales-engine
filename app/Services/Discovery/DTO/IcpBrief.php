@@ -58,7 +58,7 @@ readonly class IcpBrief
             revenueRanges: array_values($config['revenueRanges'] ?? []),
             signalTypePacks: array_values(array_filter(
                 array_map('strval', $config['signalTypePacks'] ?? []),
-                static fn (string $pack) => $pack !== '',
+                static fn(string $pack) => $pack !== '',
             )),
         );
     }
@@ -154,7 +154,7 @@ readonly class IcpBrief
     {
         $packs = array_values(array_filter(
             $this->signalTypePacks,
-            static fn ($pack) => is_string($pack) && trim($pack) !== '',
+            static fn($pack) => is_string($pack) && trim($pack) !== '',
         ));
 
         if (in_array(SignalTypeDefinition::PACK_NONE, $packs, true)) {
@@ -194,7 +194,7 @@ readonly class IcpBrief
                     return trim($cleaned);
                 }
 
-                return trim($cleaned).' CEO founder managing director';
+                return trim($cleaned) . ' CEO founder managing director';
             }
 
             return $cleaned;
@@ -214,7 +214,7 @@ readonly class IcpBrief
         $interest = trim($this->customPrompt);
         if ($interest !== '') {
             $extra = $this->concreteNounsFromText(trim($this->description), $interest, 4);
-            return $extra !== '' ? trim($interest.' '.$extra) : $interest;
+            return $extra !== '' ? trim($interest . ' ' . $extra) : $interest;
         }
 
         $description = trim($this->description);
@@ -223,11 +223,11 @@ readonly class IcpBrief
         }
 
         $industries = array_values(array_filter(array_map(
-            static fn ($industry) => is_string($industry) ? trim($industry) : '',
+            static fn($industry) => is_string($industry) ? trim($industry) : '',
             $this->industries,
         )));
         if ($industries !== []) {
-            return implode(' ', $industries).' companies';
+            return implode(' ', $industries) . ' companies';
         }
 
         return $this->isPeopleSearch()
@@ -246,13 +246,70 @@ readonly class IcpBrief
         }
 
         $stop = [
-            'and', 'the', 'for', 'with', 'from', 'into', 'that', 'this', 'your', 'our',
-            'companies', 'company', 'business', 'businesses', 'focus', 'looking', 'signs',
-            'showing', 'any', 'all', 'to', 'of', 'in', 'on', 'or', 'a', 'an',
-            'profile', 'description', 'fallback', 'about', 'their', 'these', 'those',
-            'where', 'when', 'what', 'which', 'whom', 'whose', 'have', 'has', 'been',
-            'will', 'would', 'could', 'should', 'also', 'such', 'than', 'then', 'them',
-            'sell', 'sells', 'sold', 'buy', 'buys', 'buying', 'solutions', 'solution',
+            'and',
+            'the',
+            'for',
+            'with',
+            'from',
+            'into',
+            'that',
+            'this',
+            'your',
+            'our',
+            'companies',
+            'company',
+            'business',
+            'businesses',
+            'focus',
+            'looking',
+            'signs',
+            'showing',
+            'any',
+            'all',
+            'to',
+            'of',
+            'in',
+            'on',
+            'or',
+            'a',
+            'an',
+            'profile',
+            'description',
+            'fallback',
+            'about',
+            'their',
+            'these',
+            'those',
+            'where',
+            'when',
+            'what',
+            'which',
+            'whom',
+            'whose',
+            'have',
+            'has',
+            'been',
+            'will',
+            'would',
+            'could',
+            'should',
+            'also',
+            'such',
+            'than',
+            'then',
+            'them',
+            'sell',
+            'sells',
+            'sold',
+            'buy',
+            'buys',
+            'buying',
+            'solutions',
+            'solution',
+            'unused',
+            'customprompt',
+            'prompt',
+            'set',
         ];
         $present = mb_strtolower($alreadyPresent);
         $tokens = preg_split('/[^\p{L}\p{N}\-&]+/u', mb_strtolower($source)) ?: [];

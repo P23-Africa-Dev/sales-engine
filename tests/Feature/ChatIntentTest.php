@@ -58,22 +58,6 @@ class ChatIntentTest extends TestCase
                     ], 200);
                 }
 
-                // Merged synthesize + relevance tagging in one JSON response.
-                if (str_contains($body, '"narrative"') || str_contains($body, 'Return JSON only')) {
-                    return Http::response([
-                        'choices' => [[
-                            'message' => [
-                                'content' => json_encode([
-                                    'narrative' => "## Executive Summary\nKey FMCG trends in West Africa [1].",
-                                    'reasons' => [
-                                        ['index' => 1, 'icp_relevance_reason' => 'Aligns with FMCG focus in West Africa.'],
-                                    ],
-                                ]),
-                            ],
-                        ]],
-                    ], 200);
-                }
-
                 return Http::response([
                     'choices' => [[
                         'message' => [
