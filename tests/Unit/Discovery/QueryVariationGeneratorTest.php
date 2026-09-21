@@ -84,6 +84,31 @@ class QueryVariationGeneratorTest extends TestCase
         $this->assertNotEmpty($backfill);
     }
 
+    public function test_company_generate_and_backfill_include_linkedin_company_site(): void
+    {
+        $generator = new QueryVariationGenerator;
+        $brief = new IcpBrief(
+            name: 'Tech ICP',
+            description: '',
+            industries: ['FinTech'],
+            territories: [],
+            companySizes: [],
+            decisionMakers: [],
+            customPrompt: 'specialty component suppliers',
+            minMatchScore: 60,
+            autoSyncCrm: false,
+            query: '',
+            target: QueryIntentService::TARGET_COMPANIES,
+            requestedLimit: 20,
+        );
+
+        $joinedGenerate = mb_strtolower(implode("\n", $generator->generate($brief, 20)));
+        $joinedBackfill = mb_strtolower(implode("\n", $generator->generateBackfill($brief, 20, [])));
+
+        $this->assertStringContainsString('linkedin.com/company', $joinedGenerate);
+        $this->assertStringContainsString('linkedin.com/company', $joinedBackfill);
+    }
+
     public function test_icp_only_variations_use_industries_softly_but_never_gate_tokens(): void
     {
         $generator = new QueryVariationGenerator;

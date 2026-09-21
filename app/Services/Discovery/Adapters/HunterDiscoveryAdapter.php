@@ -104,8 +104,8 @@ class HunterDiscoveryAdapter implements DiscoverySourceInterface
                         website: $domain !== '' ? preg_replace('#^https?://#i', '', $domain) : null,
                         location: $locationParts !== []
                             ? implode(', ', $locationParts)
-                            : ($brief->territories[0] ?? null),
-                        sector: isset($row['industry']) ? (string) $row['industry'] : ($brief->industries[0] ?? null),
+                            : null,
+                        sector: isset($row['industry']) ? (string) $row['industry'] : null,
                         snippet: isset($row['description']) ? (string) $row['description'] : null,
                         url: $url,
                         externalId: isset($row['domain']) ? (string) $row['domain'] : null,

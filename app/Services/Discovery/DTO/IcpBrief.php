@@ -213,7 +213,8 @@ readonly class IcpBrief
     {
         $interest = trim($this->customPrompt);
         if ($interest !== '') {
-            return $interest;
+            $extra = $this->concreteNounsFromText(trim($this->description), $interest, 4);
+            return $extra !== '' ? trim($interest.' '.$extra) : $interest;
         }
 
         $description = trim($this->description);
@@ -232,6 +233,45 @@ readonly class IcpBrief
         return $this->isPeopleSearch()
             ? 'executives founders companies announcements'
             : 'companies announcements partnerships market entry';
+    }
+
+    /**
+     * Pull a few concrete nouns from description that are not already in the seed.
+     * Generic — no vertical dictionary.
+     */
+    private function concreteNounsFromText(string $source, string $alreadyPresent, int $limit = 4): string
+    {
+        if ($source === '' || $limit < 1) {
+            return '';
+        }
+
+        $stop = [
+            'and', 'the', 'for', 'with', 'from', 'into', 'that', 'this', 'your', 'our',
+            'companies', 'company', 'business', 'businesses', 'focus', 'looking', 'signs',
+            'showing', 'any', 'all', 'to', 'of', 'in', 'on', 'or', 'a', 'an',
+            'profile', 'description', 'fallback', 'about', 'their', 'these', 'those',
+            'where', 'when', 'what', 'which', 'whom', 'whose', 'have', 'has', 'been',
+            'will', 'would', 'could', 'should', 'also', 'such', 'than', 'then', 'them',
+            'sell', 'sells', 'sold', 'buy', 'buys', 'buying', 'solutions', 'solution',
+        ];
+        $present = mb_strtolower($alreadyPresent);
+        $tokens = preg_split('/[^\p{L}\p{N}\-&]+/u', mb_strtolower($source)) ?: [];
+        $picked = [];
+        foreach ($tokens as $token) {
+            $token = trim($token);
+            if (mb_strlen($token) < 4 || in_array($token, $stop, true)) {
+                continue;
+            }
+            if (str_contains($present, $token) || isset($picked[$token])) {
+                continue;
+            }
+            $picked[$token] = $token;
+            if (count($picked) >= $limit) {
+                break;
+            }
+        }
+
+        return implode(' ', array_values($picked));
     }
 
     /**

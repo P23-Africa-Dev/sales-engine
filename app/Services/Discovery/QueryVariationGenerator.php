@@ -66,6 +66,7 @@ class QueryVariationGenerator
         } else {
             $variations[] = $this->composePeopleOrCompany($brief, $seed.' companies', true);
             $variations[] = $this->composePeopleOrCompany($brief, $seed, true);
+            $variations[] = trim($seed.' site:linkedin.com/company');
             $variations[] = trim('list of '.$seed);
             if (! preg_match('/\bnigeria\b/iu', $seed)) {
                 $variations[] = trim($seed.' Nigeria');
@@ -93,6 +94,13 @@ class QueryVariationGenerator
         $needed = min(self::MAX_QUERIES, max(4, (int) ceil(max(1, $targetCount) / 4)));
         $seed = $this->searchSeed($brief);
         $variations = [];
+
+        // Company backfill: LinkedIn company pages first so fan-out stays account-oriented.
+        if ($brief->isCompanySearch()) {
+            $variations[] = trim($seed.' site:linkedin.com/company');
+            $variations[] = $this->composePeopleOrCompany($brief, $seed.' companies', true);
+            $variations[] = $this->composePeopleOrCompany($brief, $seed, true);
+        }
 
         foreach (['executives', 'founders', 'leadership team', 'decision makers', 'partnerships'] as $hint) {
             $variations[] = $this->composePeopleOrCompany($brief, $seed.' '.$hint, false);

@@ -167,24 +167,25 @@ class DiscoveryOrchestrator
 
             $targetPasses = [];
             if ($brief->isBothSearch() && in_array($intent, ['generate_leads', 'generate_more_leads'], true)) {
-                $companyLimit = max(1, (int) ceil($effectiveLimit * 0.6));
-                $peopleLimit = $effectiveLimit - $companyLimit;
-                if ($peopleLimit < 1 && $effectiveLimit >= 2) {
-                    $peopleLimit = 1;
-                    $companyLimit = $effectiveLimit - 1;
+                // People first so LinkedIn contacts land before Hunter fills company slots.
+                $peopleLimit = max(1, (int) ceil($effectiveLimit * 0.5));
+                $companyLimit = max(0, $effectiveLimit - $peopleLimit);
+                if ($companyLimit < 1 && $effectiveLimit >= 2) {
+                    $companyLimit = 1;
+                    $peopleLimit = $effectiveLimit - 1;
                 }
                 $targetPasses = [
                     [
-                        'stage' => 'company_pass',
-                        'brief' => $brief->withTarget(QueryIntentService::TARGET_COMPANIES),
-                        'limit' => $companyLimit,
-                    ],
-                ];
-                if ($peopleLimit >= 1) {
-                    $targetPasses[] = [
                         'stage' => 'people_pass',
                         'brief' => $brief->withTarget(QueryIntentService::TARGET_PEOPLE),
                         'limit' => $peopleLimit,
+                    ],
+                ];
+                if ($companyLimit >= 1) {
+                    $targetPasses[] = [
+                        'stage' => 'company_pass',
+                        'brief' => $brief->withTarget(QueryIntentService::TARGET_COMPANIES),
+                        'limit' => $companyLimit,
                     ];
                 }
             } else {
@@ -197,6 +198,8 @@ class DiscoveryOrchestrator
                 ];
             }
 
+            $peoplePassCompleted = ! $brief->isBothSearch();
+
             foreach ($targetPasses as $targetPass) {
                 if ($this->pastDeadline() || count($leadsPayload) >= $effectiveLimit) {
                     break;
@@ -206,6 +209,8 @@ class DiscoveryOrchestrator
                 $passBrief = $targetPass['brief'];
                 $passLimit = (int) $targetPass['limit'];
                 $isAuthoritativePass = $passBrief->isAuthoritativePeopleQuery();
+                $isPeoplePass = ($targetPass['stage'] ?? null) === 'people_pass'
+                    || ($passBrief->isPeopleSearch() && ! $brief->isBothSearch());
 
                 if (is_string($targetPass['stage'] ?? null) && $targetPass['stage'] !== '') {
                     $this->appendStage($run, (string) $targetPass['stage']);
@@ -342,17 +347,24 @@ class DiscoveryOrchestrator
                         break;
                     }
 
-                    // First pass: prefer continuing into backfill when under the requested limit.
-                    // Only soft-complete early once we have a usable batch AND are past soft deadline
-                    // with little time left before the hard deadline.
+                    // Soft-complete a pass only with usable yield past soft deadline.
+                    // Never abort the whole both-mode run before people_pass has finished at least one cycle.
                     if (
                         $passYield >= $passMinUsable
                         && $this->pastSoftDeadline()
                         && $this->remainingSeconds() < 25
                     ) {
+                        if ($brief->isBothSearch() && ! $peoplePassCompleted && ! $isPeoplePass) {
+                            // Still need to give people_pass a turn — skip further company backfill only.
+                            break;
+                        }
                         $softCompletedEarly = true;
                         break;
                     }
+                }
+
+                if ($isPeoplePass) {
+                    $peoplePassCompleted = true;
                 }
             }
 
@@ -621,11 +633,26 @@ class DiscoveryOrchestrator
                 break;
             }
 
-            $cacheKey = $source->key() . '|' . mb_strtolower(trim($primaryBrief->searchQuery()));
+            // Hunter/company registries only on company (or both company-pass) searches.
+            if ($source->key() === 'hunter' && $brief->isPeopleSearch()) {
+                continue;
+            }
+
+            $cacheKey = $source->key() . '|' . mb_strtolower(trim($primaryBrief->searchQuery())).'|'.$effectiveLimit;
             if (isset($this->registryHitCache[$cacheKey])) {
                 $batch = $this->registryHitCache[$cacheKey];
             } else {
-                $batch = $source->search($primaryBrief, $ctx);
+                $passCtx = new SearchContext(
+                    $ctx->organizationId,
+                    $ctx->userId,
+                    max(1, $effectiveLimit),
+                    $ctx->intent,
+                );
+                $batch = $source->search($primaryBrief, $passCtx);
+                // Cap registry volume to the current pass limit so Hunter cannot oversupply.
+                if ($batch->count() > $effectiveLimit) {
+                    $batch = $batch->take(max(1, $effectiveLimit))->values();
+                }
                 $this->registryHitCache[$cacheKey] = $batch;
             }
 
@@ -634,7 +661,7 @@ class DiscoveryOrchestrator
             $hits = $hits->merge($batch);
         }
 
-        $hits = $this->dedupeHits($hits);
+        $hits = $this->preferLinkedInHits($this->dedupeHits($hits), $brief);
 
         return [
             $hits,
@@ -668,6 +695,34 @@ class DiscoveryOrchestrator
             $seen[$dedupeKey] = true;
 
             return true;
+        })->values();
+    }
+
+    /**
+     * Prefer LinkedIn profile/company hits over bare registry domains.
+     *
+     * @param  Collection<int, RawDiscoveryHit>  $hits
+     * @return Collection<int, RawDiscoveryHit>
+     */
+    private function preferLinkedInHits(Collection $hits, IcpBrief $brief): Collection
+    {
+        return $hits->sortByDesc(function (RawDiscoveryHit $hit) use ($brief): int {
+            $url = mb_strtolower((string) ($hit->url ?? ''));
+            $provider = mb_strtolower((string) ($hit->provider ?? ''));
+            if ($brief->isPeopleSearch() && str_contains($url, 'linkedin.com/in/')) {
+                return 100;
+            }
+            if ($brief->isCompanySearch() && str_contains($url, 'linkedin.com/company/')) {
+                return 90;
+            }
+            if (str_contains($url, 'linkedin.com/')) {
+                return 50;
+            }
+            if ($provider === 'hunter') {
+                return 5;
+            }
+
+            return 20;
         })->values();
     }
 
@@ -768,6 +823,7 @@ class DiscoveryOrchestrator
             ->unique(fn(RawDiscoveryHit $h) => mb_strtolower($h->name . '|' . (string) $h->url))
             ->sortByDesc(function (RawDiscoveryHit $h) use ($brief): int {
                 $url = mb_strtolower((string) $h->url);
+                $provider = mb_strtolower((string) ($h->provider ?? ''));
                 if ($brief->isPeopleSearch() && str_contains($url, 'linkedin.com/in/')) {
                     return 100;
                 }
@@ -776,6 +832,10 @@ class DiscoveryOrchestrator
                 }
                 if (str_contains($url, 'linkedin.com/')) {
                     return 40;
+                }
+                // Prefer Serper/web hits over bare Hunter domains when filling company quota.
+                if ($brief->isCompanySearch() && $provider === 'hunter') {
+                    return -10;
                 }
 
                 return 0;
@@ -831,6 +891,8 @@ class DiscoveryOrchestrator
                 if (isset($seenNames[$nameKey])) {
                     continue;
                 }
+
+                $extracted = $this->attachHitProfileUrls($extracted, $hit);
 
                 if (! $this->passesCreatabilityGate(
                     $brief,
@@ -927,7 +989,7 @@ class DiscoveryOrchestrator
 
             $scores = $candidate['scores'];
             $displayName = $candidate['displayName'];
-            $extracted = $candidate['extracted'];
+            $extracted = $this->attachHitProfileUrls($candidate['extracted'], $candidate['hit']);
             $hit = $candidate['hit'];
             $fromListicle = $candidate['fromListicle'];
 
@@ -947,6 +1009,27 @@ class DiscoveryOrchestrator
 
             if (! $hasUserQuery && ! $this->passesIcpHardGate($brief, $extracted)) {
                 continue;
+            }
+
+            // Hunter Discover often returns famous conglomerates with weak niche fit.
+            // When the ICP constrains industries/territories, require firmographic evidence —
+            // missing data must not auto-fill the company quota.
+            if (
+                $brief->isCompanySearch()
+                && mb_strtolower((string) ($hit->provider ?? '')) === 'hunter'
+                && ($brief->industries !== [] || $brief->territories !== [])
+            ) {
+                $hunterExtracted = array_merge($extracted, [
+                    'industry' => $extracted['industry'] ?? $extracted['sector'] ?? $hit->sector,
+                    'sector' => $extracted['sector'] ?? $hit->sector,
+                    'location' => $extracted['location'] ?? $hit->location,
+                ]);
+                $hasFirmographics = filled($hunterExtracted['industry'] ?? null)
+                    || filled($hunterExtracted['sector'] ?? null)
+                    || filled($hunterExtracted['location'] ?? null);
+                if (! $hasFirmographics || ! $this->passesIcpHardGate($brief, $hunterExtracted)) {
+                    continue;
+                }
             }
 
             // Below-threshold leads go into a secondary pool only in query mode.
@@ -1112,10 +1195,76 @@ class DiscoveryOrchestrator
         }
 
         if ($brief->isPeopleSearch()) {
-            return $this->personNameValidator->isValidPersonName($displayName, $extracted);
+            if (! $this->personNameValidator->isValidPersonName($displayName, $extracted)) {
+                return false;
+            }
+
+            // Authoritative / listicle digests synthesize people from articles — no profile URL yet.
+            if (
+                $fromListicle
+                || $brief->isListiclePeopleQuery()
+                || $brief->isAuthoritativePeopleQuery()
+            ) {
+                return true;
+            }
+
+            // First-batch people must have a usable profile URL (LinkedIn /in/ or other profile).
+            return $this->hasPersonProfileUrl($extracted);
         }
 
         return $this->companyNameValidator->isValidCompanyName($displayName, $extracted);
+    }
+
+    /**
+     * @param  array<string, mixed>  $extracted
+     */
+    private function hasPersonProfileUrl(array $extracted): bool
+    {
+        $linkedin = trim((string) ($extracted['linkedin_url'] ?? ''));
+        if ($linkedin !== '' && str_contains(mb_strtolower($linkedin), 'linkedin.com/in/')) {
+            return true;
+        }
+
+        $profileUrls = $extracted['profile_urls'] ?? [];
+        if (! is_array($profileUrls)) {
+            return false;
+        }
+
+        foreach ($profileUrls as $url) {
+            if (! is_string($url) || trim($url) === '') {
+                continue;
+            }
+            if ($this->looksLikeProfileUrl($url)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @param  array<string, mixed>  $extracted
+     * @return array<string, mixed>
+     */
+    private function attachHitProfileUrls(array $extracted, RawDiscoveryHit $hit): array
+    {
+        $hitUrl = trim((string) ($hit->url ?? ''));
+        if ($hitUrl !== '' && $this->looksLikeProfileUrl($hitUrl)) {
+            $existing = is_array($extracted['profile_urls'] ?? null) ? $extracted['profile_urls'] : [];
+            $existing[] = $hitUrl;
+            $extracted['profile_urls'] = array_values(array_unique(array_filter(
+                array_map(static fn ($u) => is_string($u) ? trim($u) : '', $existing),
+            )));
+
+            if (
+                str_contains(mb_strtolower($hitUrl), 'linkedin.com/in/')
+                && trim((string) ($extracted['linkedin_url'] ?? '')) === ''
+            ) {
+                $extracted['linkedin_url'] = $hitUrl;
+            }
+        }
+
+        return $extracted;
     }
 
     /**

@@ -268,6 +268,24 @@ class QueryIntentService
             return true;
         }
 
+        // Market research / industry report / category pages mistaken for people.
+        if (preg_match('/\b(market research|market size|market share|market outlook|market forecast|market analysis|market report|industry report|industry analysis|industry outlook|industry forecast)\b/u', $lower)) {
+            return true;
+        }
+
+        if (preg_match('/\b(report|forecast|outlook|analysis|insights?|overview|whitepaper|white paper|statistics|stats)\b/u', $lower)
+            && preg_match('/\b(market|industry|equipment|construction|global|worldwide|sector)\b/u', $lower)
+        ) {
+            return true;
+        }
+
+        // "X Market" / "X Equipment" category titles (3+ title-case-ish nouns ending in market/equipment).
+        if (preg_match('/\b(market|equipment|machinery|research|industry|sector|outlook|forecast)\s*$/u', $lower)
+            && preg_match('/\b(construction|equipment|heavy|loader|excavator|machinery|global|industrial)\b/u', $lower)
+        ) {
+            return true;
+        }
+
         return false;
     }
 }

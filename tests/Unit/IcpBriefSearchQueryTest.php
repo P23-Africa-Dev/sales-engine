@@ -98,6 +98,27 @@ class IcpBriefSearchQueryTest extends TestCase
         $this->assertFalse($brief->hasUserQuery());
     }
 
+    public function test_search_brief_appends_concrete_nouns_from_description(): void
+    {
+        $profile = new IcpProfile([
+            'name' => 'Niche ICP',
+            'description' => 'We sell excavators and plant-hire solutions to dealers.',
+            'config' => array_merge(IcpProfile::defaultConfig(), [
+                'industries' => ['Manufacturing'],
+                'customPrompt' => 'decision makers at companies in construction',
+            ]),
+        ]);
+
+        $brief = IcpBrief::fromIcpProfile($profile, 'give me prospects');
+        $seed = $brief->searchBrief();
+
+        $this->assertStringStartsWith('decision makers at companies in construction', $seed);
+        $this->assertStringContainsString('excavators', $seed);
+        $this->assertStringContainsString('plant-hire', $seed);
+        $this->assertStringContainsString('dealers', $seed);
+        $this->assertStringNotContainsString('Manufacturing', $seed);
+    }
+
     public function test_search_query_override_keeps_has_user_query_false_for_generic_ask(): void
     {
         $profile = new IcpProfile([

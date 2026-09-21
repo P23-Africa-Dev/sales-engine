@@ -519,6 +519,76 @@ class DiscoveryTest extends TestCase
         $stages = $response->json('data.stages') ?? [];
         $this->assertContains('company_pass', $stages);
         $this->assertContains('people_pass', $stages);
+        $peopleIdx = array_search('people_pass', $stages, true);
+        $companyIdx = array_search('company_pass', $stages, true);
+        $this->assertNotFalse($peopleIdx);
+        $this->assertNotFalse($companyIdx);
+        $this->assertLessThan($companyIdx, $peopleIdx, 'people_pass should run before company_pass');
+    }
+
+    public function test_people_search_drops_market_report_titles_without_linkedin(): void
+    {
+        config([
+            'services.serper.api_key' => 'test-serper',
+            'services.glm.api_key' => '',
+        ]);
+
+        [, $org] = $this->actingAsOrgMember();
+
+        IcpProfile::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'FinTech ICP',
+            'is_active' => true,
+            'config' => array_merge(IcpProfile::defaultConfig(), [
+                'industries' => ['FinTech'],
+                'territories' => ['Lagos, NG'],
+                'minMatchScore' => 1,
+                'enrichContactDetails' => false,
+            ]),
+        ]);
+
+        Http::fake([
+            'google.serper.dev/*' => Http::response([
+                'organic' => [
+                    [
+                        'title' => 'Loader Market Research',
+                        'link' => 'https://example.com/reports/loader-market',
+                        'snippet' => 'Market research report on loaders.',
+                    ],
+                    [
+                        'title' => 'Construction Equipment Market',
+                        'link' => 'https://example.com/reports/equipment-market',
+                        'snippet' => 'Industry outlook and forecast.',
+                    ],
+                    [
+                        'title' => 'Ada Okonkwo - CEO at OrbitPay',
+                        'link' => 'https://www.linkedin.com/in/ada-okonkwo',
+                        'snippet' => 'CEO at OrbitPay in Lagos.',
+                    ],
+                ],
+            ], 200),
+        ]);
+
+        $response = $this->withHeaders($this->orgHeaders($org))
+            ->postJson('/api/v1/discovery/runs', [
+                'query' => 'CEOs at FinTech startups',
+                'intent' => 'generate_leads',
+                'limit' => 5,
+            ]);
+
+        $response->assertCreated()
+            ->assertJsonPath('data.status', 'completed');
+
+        $leads = $response->json('data.leads') ?? [];
+        $names = collect($leads)->pluck('name')->map(fn ($n) => mb_strtolower((string) $n))->all();
+        $this->assertNotContains('loader market research', $names);
+        $this->assertNotContains('construction equipment market', $names);
+
+        $person = collect($leads)->first(fn ($lead) => ($lead['entity_type'] ?? null) === 'person');
+        $this->assertNotNull($person);
+        $this->assertStringContainsStringIgnoringCase('Ada', (string) $person['name']);
+        $linkedin = (string) ($person['linkedin_url'] ?? ($person['profile_urls'][0] ?? ''));
+        $this->assertStringContainsString('linkedin.com/in/', mb_strtolower($linkedin));
     }
 
     public function test_ambiguous_generate_defaults_to_both_and_keeps_linkedin_urls(): void
@@ -578,6 +648,11 @@ class DiscoveryTest extends TestCase
         $stages = $response->json('data.stages') ?? [];
         $this->assertContains('company_pass', $stages);
         $this->assertContains('people_pass', $stages);
+        $peopleIdx = array_search('people_pass', $stages, true);
+        $companyIdx = array_search('company_pass', $stages, true);
+        $this->assertNotFalse($peopleIdx);
+        $this->assertNotFalse($companyIdx);
+        $this->assertLessThan($companyIdx, $peopleIdx, 'people_pass should run before company_pass');
 
         $withLinkedIn = collect($leads)->first(
             fn($lead) => filled($lead['linkedin_url'] ?? null) || filled($lead['profile_urls'][0] ?? null)

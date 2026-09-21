@@ -340,9 +340,36 @@ class SerperDiscoveryAdapter implements DiscoverySourceInterface
         $trimmed = trim((string) $name);
 
         if ($brief->isPeopleSearch()) {
-            $normalized = $this->personNameValidator->normalizePersonName($trimmed);
+            // People search: only promote title text when it looks like a real person.
+            // Market-report / category titles must not become Lead.name.
+            // Authoritative listicle articles keep their title so snippet extraction can run.
+            if ($this->queryIntent->looksLikeContentOrGenericPhrase($trimmed)) {
+                if ($brief->isAuthoritativePeopleQuery() || $brief->isListiclePeopleQuery()) {
+                    return $trimmed;
+                }
 
-            return $normalized !== '' ? $normalized : $trimmed;
+                return '';
+            }
+
+            $normalized = $this->personNameValidator->normalizePersonName($trimmed);
+            $candidate = $normalized !== '' ? $normalized : $trimmed;
+
+            if (! $this->personNameValidator->isValidPersonName($candidate, [
+                'linkedin_url' => (filled($url) && str_contains(mb_strtolower((string) $url), 'linkedin.com/in/'))
+                    ? $url
+                    : null,
+            ])) {
+                // Without a LinkedIn /in/ corroboration, drop non-person titles.
+                if (! filled($url) || ! str_contains(mb_strtolower((string) $url), 'linkedin.com/in/')) {
+                    if ($brief->isAuthoritativePeopleQuery() || $brief->isListiclePeopleQuery()) {
+                        return $trimmed;
+                    }
+
+                    return '';
+                }
+            }
+
+            return $candidate;
         }
 
         return $trimmed;

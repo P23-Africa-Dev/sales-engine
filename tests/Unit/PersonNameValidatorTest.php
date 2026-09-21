@@ -68,4 +68,17 @@ class PersonNameValidatorTest extends TestCase
         $this->assertFalse($this->queryIntent->looksLikeContentOrGenericPhrase('Acme Distributors Lagos'));
         $this->assertFalse($this->queryIntent->looksLikeContentOrGenericPhrase('Elon Musk'));
     }
+
+    public function test_rejects_market_report_and_category_titles(): void
+    {
+        $this->assertFalse($this->validator->isValidPersonName('Construction Equipment Market'));
+        $this->assertFalse($this->validator->isValidPersonName('Loader Market Research'));
+        $this->assertTrue($this->queryIntent->looksLikeContentOrGenericPhrase('Construction Equipment Market'));
+        $this->assertTrue($this->queryIntent->looksLikeContentOrGenericPhrase('Loader Market Research'));
+        $this->assertTrue($this->queryIntent->looksLikeContentOrGenericPhrase('Global Industry Outlook 2024'));
+
+        $this->assertTrue($this->validator->isValidPersonName('Jane Doe', [
+            'linkedin_url' => 'https://www.linkedin.com/in/jane-doe',
+        ]));
+    }
 }
