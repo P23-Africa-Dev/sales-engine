@@ -37,4 +37,27 @@ class TimeGreetingTest extends TestCase
 
         $this->assertSame('Good afternoon', TimeGreeting::phrase('Not/A_Timezone', $at));
     }
+
+    public function test_clock_and_prompt_use_12_hour_am_pm(): void
+    {
+        $at = Carbon::parse('2026-09-21 22:16:00', 'Africa/Lagos');
+
+        $this->assertSame('10:16 PM', TimeGreeting::clock('Africa/Lagos', $at));
+        $this->assertSame('Monday, 21 Sep 2026 10:16 PM', TimeGreeting::localDateTime('Africa/Lagos', $at));
+
+        $context = TimeGreeting::promptContext('Africa/Lagos', $at);
+        $this->assertStringContainsString('10:16 PM', $context);
+        $this->assertStringContainsString('Africa/Lagos', $context);
+        $this->assertStringContainsString('12-hour AM/PM', $context);
+        $this->assertStringNotContainsString('22:16', $context);
+        $this->assertStringContainsString('Hello', $context);
+    }
+
+    public function test_morning_clock_uses_am(): void
+    {
+        $at = Carbon::parse('2026-09-21 09:05:00', 'Africa/Lagos');
+
+        $this->assertSame('9:05 AM', TimeGreeting::clock('Africa/Lagos', $at));
+        $this->assertStringContainsString('9:05 AM', TimeGreeting::promptContext('Africa/Lagos', $at));
+    }
 }

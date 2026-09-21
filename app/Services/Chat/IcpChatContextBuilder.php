@@ -50,6 +50,7 @@ class IcpChatContextBuilder
         }
 
         $parts[] = 'When the user greets you (hello, hi, etc.), reply with the appropriate time-of-day greeting above. Never use the wrong period.';
+        $parts[] = 'If you state the current time, copy the clock from the Current user local time line above (12-hour AM/PM). Do not invent a different time or use 24-hour format.';
 
         $payload = $this->toPromptPayload($icp);
         if ($payload === null) {

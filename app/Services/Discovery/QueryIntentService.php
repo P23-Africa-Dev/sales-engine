@@ -226,8 +226,20 @@ class QueryIntentService
             return true;
         }
 
+        // Vague "help my need / further my business" asks — no niche nouns.
+        if (preg_match(
+            '/\b(further|help|advance|grow|support|improve|scale)\s+(my|our|the)\s+(need|needs|business|goals?|aims?|purpose|success|company|brand)\b/u',
+            $normalized
+        )) {
+            return true;
+        }
+
+        if (preg_match('/\b(prospects?|leads?)\s+that\s+(can|will|could)\s+(further|help|advance|grow|support|fit)\b/u', $normalized)) {
+            return true;
+        }
+
         $residual = preg_replace(
-            '/\b(generate|create|find|get|show|give|need|want|please|me|my|the|a|an|some|any|new|more|kind|kinds|ideal|best|perfect|right|suitable|matching|relevant|to|for|based|on|using|according|active|icp|profile|build|search|anything|prospect|request|help|looking|looking for|of|with|our|your|brand|brands|business|company|companies|product|products|app|application|platform|startup|leads?|prospects?|contacts?|same|additional|extra|again|another)\b/u',
+            '/\b(generate|create|find|get|show|give|need|needs|want|please|me|my|the|a|an|some|any|new|more|kind|kinds|ideal|best|perfect|right|suitable|matching|relevant|to|for|based|on|using|according|active|icp|profile|build|search|anything|prospect|request|help|helps|helping|looking|looking for|of|with|our|your|brand|brands|business|company|companies|product|products|app|application|platform|startup|leads?|prospects?|contacts?|same|additional|extra|again|another|that|this|these|those|than|then|can|could|will|would|should|further|advance|advancing|grow|growing|growth|support|supporting|goal|goals|aim|aims|purpose|purposes|success|improve|improving|scale|scaling|fit|fits|fitting)\b/u',
             ' ',
             $normalized
         );
@@ -235,6 +247,32 @@ class QueryIntentService
         $residual = trim(preg_replace('/\s+/u', ' ', $residual) ?? '');
 
         return $residual === '' || mb_strlen($residual) < 3;
+    }
+
+    /**
+     * Detect GLM/history rewrites that paste ICP industries/territories/roles into the search string.
+     * Those must not become the discovery query (they force people-mode and ignore the niche brief).
+     */
+    public function looksLikeFirmographicIcpRewrite(string $query): bool
+    {
+        $normalized = mb_strtolower(trim($query));
+        if ($normalized === '') {
+            return false;
+        }
+
+        if (preg_match('/\bfit my\b.+\bfocus in\b.+\b(aligned with roles?|roles? such as)\b/u', $normalized)) {
+            return true;
+        }
+
+        if (
+            preg_match('/\baligned with roles?\b/u', $normalized)
+            && preg_match('/\b(head of sales|managing director|decision makers?)\b/u', $normalized)
+            && preg_match('/\b(manufacturing|construction|real estate|fintech|saas)\b/u', $normalized)
+        ) {
+            return true;
+        }
+
+        return false;
     }
 
     /**
@@ -273,14 +311,16 @@ class QueryIntentService
             return true;
         }
 
-        if (preg_match('/\b(report|forecast|outlook|analysis|insights?|overview|whitepaper|white paper|statistics|stats)\b/u', $lower)
+        if (
+            preg_match('/\b(report|forecast|outlook|analysis|insights?|overview|whitepaper|white paper|statistics|stats)\b/u', $lower)
             && preg_match('/\b(market|industry|equipment|construction|global|worldwide|sector)\b/u', $lower)
         ) {
             return true;
         }
 
         // "X Market" / "X Equipment" category titles (3+ title-case-ish nouns ending in market/equipment).
-        if (preg_match('/\b(market|equipment|machinery|research|industry|sector|outlook|forecast)\s*$/u', $lower)
+        if (
+            preg_match('/\b(market|equipment|machinery|research|industry|sector|outlook|forecast)\s*$/u', $lower)
             && preg_match('/\b(construction|equipment|heavy|loader|excavator|machinery|global|industrial)\b/u', $lower)
         ) {
             return true;

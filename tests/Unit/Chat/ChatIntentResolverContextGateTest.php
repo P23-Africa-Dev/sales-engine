@@ -107,4 +107,32 @@ class ChatIntentResolverContextGateTest extends TestCase
         $this->assertSame('give me prospects', $result['effective_body']);
         $this->assertTrue($resolver->isGenericLeadBody('give me prospects'));
     }
+
+    public function test_vague_further_my_need_generate_skips_contextualize(): void
+    {
+        [$user, $org] = $this->createUserWithOrg();
+        $session = ChatSession::query()->create([
+            'organization_id' => $org->id,
+            'user_id' => $user->id,
+        ]);
+        ChatMessage::query()->create([
+            'chat_session_id' => $session->id,
+            'role' => 'user',
+            'body' => 'Tell me about shipping to emerging markets',
+            'intent' => 'quick_research',
+        ]);
+
+        $memory = Mockery::mock(ConversationMemoryService::class);
+        $memory->shouldReceive('contextualize')->never();
+        $memory->shouldReceive('recentTurns')->andReturn([
+            ['role' => 'user', 'content' => 'Tell me about shipping to emerging markets'],
+        ]);
+
+        $resolver = new ChatIntentResolver($memory);
+        $body = 'Generate me 10 prospect that can further my need';
+        $result = $resolver->resolve($session, $body, 'generate_leads', $org);
+
+        $this->assertSame($body, $result['effective_body']);
+        $this->assertTrue($resolver->isGenericLeadBody($body));
+    }
 }

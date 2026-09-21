@@ -136,6 +136,8 @@ class ChatIntentResolver
     {
         $cleaned = $this->queryIntent->stripProspectCountInstruction($body);
 
-        return trim($cleaned) === '' || $this->queryIntent->isGenericLeadRequest($cleaned);
+        return trim($cleaned) === ''
+            || $this->queryIntent->isGenericLeadRequest($cleaned)
+            || $this->queryIntent->looksLikeFirmographicIcpRewrite($cleaned);
     }
 }

@@ -94,7 +94,13 @@ class QueryIntentServiceTest extends TestCase
             'Generate leads relevant to my ICP (Find 100 prospects unless a different number is specified.)'
         ));
         $this->assertTrue($this->service->isGenericLeadRequest('generate new prospects'));
+        $this->assertTrue($this->service->isGenericLeadRequest('Generate me 10 prospect that can further my need'));
+        $this->assertTrue($this->service->isGenericLeadRequest('Generate me 10 prospects that can further my need'));
+        $this->assertTrue($this->service->looksLikeFirmographicIcpRewrite(
+            'Generate me 10 prospects that fit my Manufacturing, Construction, and Real Estate focus in England, aligned with roles such as Head of Sales, Managing Director, or CEO.'
+        ));
         $this->assertFalse($this->service->isGenericLeadRequest('I need leads of the top richest people in the world'));
         $this->assertFalse($this->service->isGenericLeadRequest('FMCG distributors in Lagos'));
+        $this->assertFalse($this->service->looksLikeFirmographicIcpRewrite('earthmoving equipment dealers in Nigeria'));
     }
 }

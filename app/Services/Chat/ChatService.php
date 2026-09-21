@@ -141,6 +141,7 @@ class ChatService
             }
 
             $useIcpBrief = $this->intentResolver->isGenericLeadBody($body)
+                || $this->intentResolver->isGenericLeadBody($effectiveBody)
                 || ($intent === 'generate_more_leads' && $this->recentGenerateWasIcpSearchBrief($session));
 
             if ($useIcpBrief) {
