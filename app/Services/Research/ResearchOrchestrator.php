@@ -172,7 +172,7 @@ class ResearchOrchestrator
             $url = trim((string) ($source['url'] ?? ''));
             $snippet = trim((string) ($source['snippet'] ?? ''));
             $link = $url !== '' ? "[{$title}]({$url})" : $title;
-            $lines[] = "{$n}. {$link}" . ($snippet !== '' ? " — {$snippet}" : '');
+            $lines[] = "{$n}. {$link}" . ($snippet !== '' ? ". {$snippet}" : '');
         }
 
         $lines[] = '';
@@ -444,7 +444,7 @@ class ResearchOrchestrator
                 $n = $index + 1;
                 $title = trim((string) ($source['title'] ?? 'Untitled'));
                 $snippet = trim((string) ($source['snippet'] ?? ''));
-                $lines[] = "- [{$n}] **{$title}**" . ($snippet !== '' ? " — {$snippet}" : '');
+                $lines[] = "- [{$n}] **{$title}**" . ($snippet !== '' ? ". {$snippet}" : '');
             }
         }
 

@@ -207,7 +207,7 @@ class FreeformOpportunityRetriever
         $sources = [];
         foreach ($query->get() as $signal) {
             $sources[] = [
-                'title' => trim(($signal->company_name ?: $signal->profile_name ?: 'Social signal') . ' — ' . ($signal->intent_label ?: $signal->signal_type ?: 'signal')),
+                'title' => trim(($signal->company_name ?: $signal->profile_name ?: 'Social signal') . ': ' . ($signal->intent_label ?: $signal->signal_type ?: 'signal')),
                 'url' => $signal->post_url,
                 'snippet' => mb_substr((string) $signal->post_text, 0, 280),
                 'provider' => 'social_listening',
@@ -235,7 +235,7 @@ class FreeformOpportunityRetriever
             $url = $source['url'];
             $snippet = $source['snippet'] ?? '';
             $link = $url ? " [Read more]({$url})" : '';
-            $lines[] = "{$i}. **{$title}** — {$snippet}{$link}";
+            $lines[] = "{$i}. **{$title}**. {$snippet}{$link}";
             $i++;
         }
 

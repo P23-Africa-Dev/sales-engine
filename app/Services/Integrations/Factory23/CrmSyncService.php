@@ -214,7 +214,7 @@ class CrmSyncService
         }
 
         $payload = $this->buildLeadPayload($organization, $lead, $options);
-        $response = $this->postWithRetry($base.'/api/v1/crm/leads', $token, $payload, $organization, $lead);
+        $response = $this->postWithRetry($base . '/api/v1/crm/leads', $token, $payload, $organization, $lead);
 
         $f23LeadId = (string) ($response->json('data.lead.id') ?? $response->json('data.id') ?? $response->json('id') ?? '');
 
@@ -268,7 +268,7 @@ class CrmSyncService
 
             $response = $this->requestWithRetry(
                 'patch',
-                $base.'/api/v1/crm/leads/'.$f23LeadId.'/merge',
+                $base . '/api/v1/crm/leads/' . $f23LeadId . '/merge',
                 $token,
                 $mergePayload,
                 $organization,
@@ -377,7 +377,7 @@ class CrmSyncService
                     'method' => $method,
                 ]);
                 throw new CrmSyncException(
-                    'Could not save lead to CRM (HTTP '.$response->status().'): '.$message,
+                    'Could not save lead to CRM (HTTP ' . $response->status() . '): ' . $message,
                     'push_failed',
                 );
             } catch (CrmSyncException $e) {
@@ -413,7 +413,7 @@ class CrmSyncService
             }
 
             if ($parts !== []) {
-                return 'Some lead details could not be saved: '.implode(' ', $parts);
+                return 'Some lead details could not be saved: ' . implode(' ', $parts);
             }
         }
 
@@ -421,10 +421,10 @@ class CrmSyncService
 
         // Friendlier rewrite for common URL validation failures (website often mislabeled as mobile in older clients).
         if (preg_match('/\b(website|mobile|url)\b.*valid URL/i', $message)) {
-            return 'A website/profile URL on this lead was invalid, so it was not sent. Other details can still be saved — try again.';
+            return 'A website/profile URL on this lead was invalid, so it was not sent. Other details can still be saved. Try again.';
         }
 
-        return 'Could not save lead to CRM: '.$message;
+        return 'Could not save lead to CRM: ' . $message;
     }
 
     /**
@@ -476,7 +476,7 @@ class CrmSyncService
                 'pipeline_stage' => $pipelineStage !== '' ? $pipelineStage : null,
                 'social_signal_id' => $meta['social_signal_id'] ?? null,
             ]),
-        ], fn ($value) => $value !== null);
+        ], fn($value) => $value !== null);
 
         return $this->fieldValidator->sanitizePayload($raw)['payload'];
     }

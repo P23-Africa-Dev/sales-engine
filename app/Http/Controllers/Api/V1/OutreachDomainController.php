@@ -56,7 +56,7 @@ class OutreachDomainController extends Controller
 
         $message = $record->verification_status === 'verified'
             ? 'Domain verified. You can now send as your organization.'
-            : 'DNS records were not detected yet. Propagation can take up to 48 hours — try again shortly.';
+            : 'DNS records were not detected yet. Propagation can take up to 48 hours. Try again shortly.';
 
         return response()->json(['data' => $this->format($record), 'message' => $message]);
     }

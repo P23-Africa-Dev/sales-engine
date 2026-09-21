@@ -337,7 +337,7 @@ class SocialListeningTest extends TestCase
             'signal_type' => 'recommendation',
             'score' => 70,
             'status' => 'new',
-            'recommended_action' => 'Reach out within 24 hours — this prospect may be actively looking for solutions.',
+            'recommended_action' => 'Reach out within 24 hours. This prospect may be actively looking for solutions.',
         ]);
 
         $this->withHeaders($this->orgHeaders($org))

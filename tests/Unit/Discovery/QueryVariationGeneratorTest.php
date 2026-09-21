@@ -72,7 +72,7 @@ class QueryVariationGeneratorTest extends TestCase
 
         $backfill = $generator->generateBackfill($brief, 40, $first);
         $normalizedFirst = array_map(
-            fn (string $q) => mb_strtolower(preg_replace('/\s+/u', ' ', trim($q)) ?? ''),
+            fn(string $q) => mb_strtolower(preg_replace('/\s+/u', ' ', trim($q)) ?? ''),
             $first
         );
 
@@ -84,7 +84,7 @@ class QueryVariationGeneratorTest extends TestCase
         $this->assertNotEmpty($backfill);
     }
 
-    public function test_icp_only_variations_never_include_firmographic_tokens(): void
+    public function test_icp_only_variations_use_industries_softly_but_never_gate_tokens(): void
     {
         $generator = new QueryVariationGenerator;
         $brief = new IcpBrief(
@@ -108,7 +108,43 @@ class QueryVariationGeneratorTest extends TestCase
         );
         $this->assertNotEmpty($queries);
 
+        // When interest text is empty, industries may seed the search brief.
+        $this->assertTrue(
+            collect($queries)->contains(fn(string $q) => str_contains($q, 'ZzyxxUniqueIndustry')),
+            'Expected industry soft keywords in ICP-only search variations'
+        );
+
+        // Territory, size, and personas remain gates — never Serper tokens.
         foreach ($queries as $query) {
+            $this->assertStringNotContainsString('QqwertTerritory', $query);
+            $this->assertStringNotContainsString('51-200', $query);
+            $this->assertStringNotContainsString('UniqueDecisionMakerTitle', $query);
+        }
+    }
+
+    public function test_icp_only_variations_prefer_custom_prompt_over_industries(): void
+    {
+        $generator = new QueryVariationGenerator;
+        $brief = new IcpBrief(
+            name: 'Tech ICP',
+            description: '',
+            industries: ['ZzyxxUniqueIndustry'],
+            territories: ['QqwertTerritory'],
+            companySizes: [],
+            decisionMakers: ['UniqueDecisionMakerTitle'],
+            customPrompt: 'specialty niche suppliers expanding abroad',
+            minMatchScore: 60,
+            autoSyncCrm: false,
+            query: '',
+            target: QueryIntentService::TARGET_COMPANIES,
+            requestedLimit: 40,
+        );
+
+        $queries = $generator->generate($brief, 40);
+        $this->assertNotEmpty($queries);
+
+        foreach ($queries as $query) {
+            $this->assertStringContainsString('specialty niche suppliers', $query);
             $this->assertStringNotContainsString('ZzyxxUniqueIndustry', $query);
             $this->assertStringNotContainsString('QqwertTerritory', $query);
             $this->assertStringNotContainsString('UniqueDecisionMakerTitle', $query);

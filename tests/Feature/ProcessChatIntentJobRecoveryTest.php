@@ -159,7 +159,7 @@ class ProcessChatIntentJobRecoveryTest extends TestCase
         $timeoutMessage = ChatMessage::query()->create([
             'chat_session_id' => $session->id,
             'role' => 'assistant',
-            'body' => 'Lead search timed out or was interrupted. Please try again — results usually appear within a couple of minutes.',
+            'body' => 'Lead search timed out or was interrupted. Please try again. Results usually appear within a couple of minutes.',
             'intent' => 'generate_leads',
             'meta' => [
                 'pending' => false,

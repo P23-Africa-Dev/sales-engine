@@ -764,7 +764,7 @@ class ChatService
 
             $heading = ($index + 1) . '. ' . $name;
             if ($role !== '') {
-                $heading .= ' — ' . $role;
+                $heading .= ', ' . $role;
             }
             $lines[] = $heading;
             if ($why !== '') {
@@ -792,7 +792,7 @@ class ChatService
             return ' These answer your search; compare the Search / ICP / Intent % on each card to decide what to save.';
         }
 
-        return ' Compare Overall, Search, ICP, and Intent % on each card — stronger ICP fit is ranked higher when scores are close.';
+        return ' Compare Overall, Search, ICP, and Intent % on each card. Stronger ICP fit is ranked higher when scores are close.';
     }
 
     private function freeformReply(

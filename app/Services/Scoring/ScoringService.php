@@ -191,10 +191,10 @@ class ScoringService
                 $parts[] = "aligned with {$buyerLabel}";
             }
 
-            return implode(' ', $parts).'.';
+            return implode(' ', $parts) . '.';
         }
 
-        return "Limited overlap with your {$industryLabel} focus in {$territoryLabel} — still answers the search request.";
+        return "Limited overlap with your {$industryLabel} focus in {$territoryLabel}. Still answers the search request.";
     }
 
     /**
@@ -309,7 +309,7 @@ class ScoringService
         ])));
 
         $tokens = preg_split('/\s+/u', preg_replace('/[^\p{L}\p{N}\s]/u', ' ', $normalizedQuery) ?? '') ?: [];
-        $tokens = array_values(array_filter($tokens, fn (string $t) => mb_strlen($t) >= 3));
+        $tokens = array_values(array_filter($tokens, fn(string $t) => mb_strlen($t) >= 3));
 
         if ($tokens === []) {
             return 55.0;

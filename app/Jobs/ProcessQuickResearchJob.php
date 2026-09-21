@@ -121,7 +121,7 @@ class ProcessQuickResearchJob implements ShouldQueue
 
                 $this->finalizePlaceholder(
                     $run,
-                    'Research timed out or was interrupted. Please try again — a quick scan usually finishes within about a minute.',
+                    'Research timed out or was interrupted. Please try again. A quick scan usually finishes within about a minute.',
                     ['timed_out' => true],
                 );
             }

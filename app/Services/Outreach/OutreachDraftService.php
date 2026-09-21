@@ -42,7 +42,7 @@ class OutreachDraftService
         $leads = $this->resolveLeads($organization, $icp, $chatSessionId);
 
         $composed = $this->compose($organization, $icp, $prompt, $channel, $leads->all(), $clientTimezone, $historySlice);
-        $fallbackSubject = $channel === 'email' ? 'Introduction — ' . $icp->name : null;
+        $fallbackSubject = $channel === 'email' ? 'Introduction: ' . $icp->name : null;
         $normalized = $this->normalizeEmailParts($channel, $composed, $fallbackSubject);
         $body = $normalized['body'];
         $subject = $normalized['subject'];
@@ -210,7 +210,7 @@ class OutreachDraftService
         );
 
         $fallbackSubject = $channel === 'email'
-            ? ($activity->social_signal_id ? 'Following up on your post' : 'Introduction — ' . $icp->name)
+            ? ($activity->social_signal_id ? 'Following up on your post' : 'Introduction: ' . $icp->name)
             : null;
         $normalized = $this->normalizeEmailParts($channel, $composed, $fallbackSubject);
         $body = $normalized['body'];
@@ -437,11 +437,11 @@ class OutreachDraftService
             $greeting = TimeGreeting::phrase($clientTimezone);
             $extra = $extraInstructions ? ' ' . $extraInstructions : '';
 
-            return "{$greeting} — following up regarding {$icp->name}. " . ($names ? "Relevant accounts: {$names}. " : '') . trim($prompt) . $extra;
+            return "{$greeting}. Following up regarding {$icp->name}. " . ($names ? "Relevant accounts: {$names}. " : '') . trim($prompt) . $extra;
         }
 
         try {
-            $system = "Draft a concise {$channel} outreach message for the user's specific request. Do not claim the message was sent. Professional tone for African B2B. " . TimeGreeting::promptContext($clientTimezone) . ' Use the active ICP industries, territories, and decision makers to tailor the angle. Reference the provided lead context when relevant. When prior chat turns are provided, keep continuity with that conversation. Output ONLY the sendable message body — no subject line, no "Subject:" header, no To/From headers, and no ICP analysis preamble.';
+            $system = "Draft a concise {$channel} outreach message for the user's specific request. Do not claim the message was sent. Professional tone for African B2B. " . TimeGreeting::promptContext($clientTimezone) . ' Use the active ICP industries, territories, and decision makers to tailor the angle. Reference the provided lead context when relevant. When prior chat turns are provided, keep continuity with that conversation. Output ONLY the sendable message body. No subject line, no "Subject:" header, no To/From headers, and no ICP analysis preamble.';
 
             if (filled($extraInstructions)) {
                 $system .= ' Additional guidance from the user: ' . trim($extraInstructions);

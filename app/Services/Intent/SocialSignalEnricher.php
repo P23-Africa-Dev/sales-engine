@@ -165,7 +165,7 @@ class SocialSignalEnricher
 
     private function extractIndustryFromHit(RawSocialHit $hit): string
     {
-        $text = $hit->postText.' '.$hit->title.' '.$hit->snippet;
+        $text = $hit->postText . ' ' . $hit->title . ' ' . $hit->snippet;
         if (preg_match('/\b(FMCG|FinTech|fintech|SaaS|textile|logistics|pharma|healthcare|manufacturing)\b/u', $text, $match)) {
             return $match[1];
         }
@@ -175,7 +175,7 @@ class SocialSignalEnricher
 
     private function extractLocationFromHit(RawSocialHit $hit): string
     {
-        $text = $hit->postText.' '.$hit->title.' '.$hit->snippet;
+        $text = $hit->postText . ' ' . $hit->title . ' ' . $hit->snippet;
         if (preg_match('/\b(Lagos|Nairobi|Kenya|Nigeria|Africa|London|Accra|Cairo)\b/u', $text, $match)) {
             return $match[1];
         }
@@ -191,7 +191,7 @@ class SocialSignalEnricher
         $signalType = $this->normalizeSignalType('', '', $hit->postText, $brief);
         $score = $this->resolveScore(null, $signalType, $hit->postText, $brief);
         $actionTitle = 'Reach out soon';
-        $actionDetail = 'This prospect may be actively looking for solutions — a timely reply increases response odds.';
+        $actionDetail = 'This prospect may be actively looking for solutions. A timely reply increases response odds.';
 
         return [
             'profile_name' => $hit->authorName ?? 'Unknown',
@@ -272,7 +272,7 @@ class SocialSignalEnricher
             return $title;
         }
 
-        return "{$title} — {$detail}";
+        return "{$title}. {$detail}";
     }
 
     /**
