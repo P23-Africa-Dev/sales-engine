@@ -113,8 +113,8 @@ class QueryIntentService
             return self::TARGET_PEOPLE;
         }
 
-        // Ambiguous ICP seeds / demoted "prospects" → account-first default.
-        return self::TARGET_COMPANIES;
+        // Ambiguous / count-only generate prompts → accounts and people.
+        return self::TARGET_BOTH;
     }
 
     private function hasCompanyCues(string $normalized): bool

@@ -41,9 +41,9 @@ class QueryIntentServiceTest extends TestCase
     public function test_target_detection_matrix(): void
     {
         $cases = [
-            ['Generate leads relevant to my ICP', QueryIntentService::TARGET_COMPANIES],
-            ['business prospects in fintech', QueryIntentService::TARGET_COMPANIES],
-            ['generate new prospects', QueryIntentService::TARGET_COMPANIES],
+            ['Generate leads relevant to my ICP', QueryIntentService::TARGET_BOTH],
+            ['business prospects in fintech', QueryIntentService::TARGET_BOTH],
+            ['generate new prospects', QueryIntentService::TARGET_BOTH],
             ['FinTech companies in Lagos', QueryIntentService::TARGET_COMPANIES],
             ['enterprise accounts in Kenya', QueryIntentService::TARGET_COMPANIES],
             ['CEOs at FinTech startups', QueryIntentService::TARGET_PEOPLE],
@@ -53,12 +53,21 @@ class QueryIntentServiceTest extends TestCase
             ['accounts and contacts in Lagos', QueryIntentService::TARGET_BOTH],
             ['both people and companies in fintech', QueryIntentService::TARGET_BOTH],
             ['partnership contacts at fintech startups in Lagos', QueryIntentService::TARGET_PEOPLE],
+            ['give me prospects', QueryIntentService::TARGET_BOTH],
+            ['Generate 20 more leads', QueryIntentService::TARGET_BOTH],
         ];
 
         foreach ($cases as [$query, $expected]) {
             $result = $this->service->analyze($query, 'generate_leads');
             $this->assertSame($expected, $result['target'], "Failed for: {$query}");
         }
+    }
+
+    public function test_ambiguous_generate_defaults_to_both(): void
+    {
+        $result = $this->service->analyze('Generate 50 new leads', 'generate_leads');
+
+        $this->assertSame(QueryIntentService::TARGET_BOTH, $result['target']);
     }
 
     public function test_looks_like_content_or_generic_phrase(): void

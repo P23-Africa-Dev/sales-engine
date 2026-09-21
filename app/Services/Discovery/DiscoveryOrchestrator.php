@@ -1154,6 +1154,28 @@ class DiscoveryOrchestrator
             || str_contains($host, 'visualcapitalist.com');
     }
 
+    private function looksLikeProfileUrl(string $url): bool
+    {
+        $normalized = trim($url);
+        if ($normalized === '') {
+            return false;
+        }
+
+        $withScheme = str_contains($normalized, '://') ? $normalized : 'https://' . $normalized;
+        $host = mb_strtolower((string) (parse_url($withScheme, PHP_URL_HOST) ?: ''));
+        $path = (string) (parse_url($withScheme, PHP_URL_PATH) ?: '');
+
+        if (str_contains($host, 'linkedin.com')) {
+            return (bool) preg_match('~/(in|company)/~', $path);
+        }
+
+        return str_contains($host, 'about.me')
+            || str_contains($host, 'crunchbase.com')
+            || str_contains($host, 'xing.com')
+            || str_contains($host, 'wellfound.com')
+            || str_contains($host, 'angel.co');
+    }
+
     /**
      * @param  array<string, mixed>  $extracted
      * @param  array{icp_fit_score: float, intent_score: float, priority_score: float, query_relevance_score: float, rationale: string}  $scores
@@ -1230,6 +1252,14 @@ class DiscoveryOrchestrator
             }
         }
 
+        // Always attach LinkedIn / social profile URLs found on the discovery hit.
+        foreach ([trim((string) ($hit->url ?? '')), trim((string) ($hit->website ?? ''))] as $hitUrl) {
+            if ($hitUrl === '' || ! $this->looksLikeProfileUrl($hitUrl)) {
+                continue;
+            }
+            $candidateUrls[] = $hitUrl;
+        }
+
         $trustedUrls = [];
         if (filled($hit->url)) {
             $trustedUrls[] = (string) $hit->url;
@@ -1295,7 +1325,17 @@ class DiscoveryOrchestrator
         $phone = trim((string) ($extracted['phone'] ?? ''));
         $website = trim((string) ($extracted['website'] ?? ''));
         if ($website === '' && filled($hit->website)) {
-            $website = trim((string) $hit->website);
+            $hitWebsite = trim((string) $hit->website);
+            $hitWebsiteHost = mb_strtolower((string) (parse_url(
+                str_contains($hitWebsite, '://') ? $hitWebsite : 'https://' . $hitWebsite,
+                PHP_URL_HOST
+            ) ?: $hitWebsite));
+            if (
+                ! str_contains($hitWebsiteHost, 'linkedin.com')
+                && ! str_contains($hitWebsiteHost, 'about.me')
+            ) {
+                $website = $hitWebsite;
+            }
         }
         if ($website === '' && filled($hit->url)) {
             $host = parse_url((string) $hit->url, PHP_URL_HOST);

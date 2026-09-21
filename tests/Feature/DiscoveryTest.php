@@ -521,6 +521,72 @@ class DiscoveryTest extends TestCase
         $this->assertContains('people_pass', $stages);
     }
 
+    public function test_ambiguous_generate_defaults_to_both_and_keeps_linkedin_urls(): void
+    {
+        config([
+            'services.serper.api_key' => 'test-serper',
+            'services.glm.api_key' => '',
+        ]);
+
+        [, $org] = $this->actingAsOrgMember();
+
+        IcpProfile::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'FinTech ICP',
+            'is_active' => true,
+            'config' => array_merge(IcpProfile::defaultConfig(), [
+                'industries' => ['FinTech'],
+                'territories' => ['Lagos, NG'],
+                'minMatchScore' => 1,
+                'enrichContactDetails' => false,
+            ]),
+        ]);
+
+        Http::fake([
+            'google.serper.dev/*' => Http::response([
+                'organic' => [
+                    [
+                        'title' => 'OrbitPay | Company',
+                        'link' => 'https://www.linkedin.com/company/orbitpay',
+                        'snippet' => 'FinTech company in Lagos.',
+                    ],
+                    [
+                        'title' => 'Chidi Bassey - Founder at OrbitPay',
+                        'link' => 'https://www.linkedin.com/in/chidi-bassey',
+                        'snippet' => 'Founder at OrbitPay.',
+                    ],
+                ],
+            ], 200),
+        ]);
+
+        $response = $this->withHeaders($this->orgHeaders($org))
+            ->postJson('/api/v1/discovery/runs', [
+                'query' => 'Generate 20 more leads',
+                'intent' => 'generate_leads',
+                'limit' => 4,
+            ]);
+
+        $response->assertCreated()
+            ->assertJsonPath('data.status', 'completed');
+
+        $leads = $response->json('data.leads') ?? [];
+        $this->assertNotEmpty($leads);
+        $types = collect($leads)->pluck('entity_type')->unique()->sort()->values()->all();
+        $this->assertContains('company', $types);
+        $this->assertContains('person', $types);
+
+        $stages = $response->json('data.stages') ?? [];
+        $this->assertContains('company_pass', $stages);
+        $this->assertContains('people_pass', $stages);
+
+        $withLinkedIn = collect($leads)->first(
+            fn($lead) => filled($lead['linkedin_url'] ?? null) || filled($lead['profile_urls'][0] ?? null)
+        );
+        $this->assertNotNull($withLinkedIn, 'Expected at least one lead to retain a LinkedIn/profile URL from the hit');
+        $linkedin = (string) ($withLinkedIn['linkedin_url'] ?? ($withLinkedIn['profile_urls'][0] ?? ''));
+        $this->assertStringContainsString('linkedin.com', mb_strtolower($linkedin));
+    }
+
     public function test_cancel_soft_failed_run_awaiting_user_choice(): void
     {
         [$user, $org] = $this->actingAsOrgMember();
