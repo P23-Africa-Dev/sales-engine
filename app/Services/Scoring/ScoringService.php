@@ -179,10 +179,29 @@ class ScoringService
         }
 
         if ($fit['unknown']) {
+            $briefNouns = $this->briefNounOverlap($brief, $companyPayload);
+            if ($briefNouns !== []) {
+                return 'Matches your search for ' . implode(' / ', $briefNouns) . '; firmographic fit not verified yet.';
+            }
+
             return 'Matched search; firmographic fit not verified yet.';
         }
 
         if ($matchesIcp) {
+            $hasNicheBrief = trim($brief->customPrompt) !== '' || trim($brief->description) !== '';
+            $briefNouns = $hasNicheBrief ? $this->briefNounOverlap($brief, $companyPayload) : [];
+            if ($briefNouns !== []) {
+                $parts = ['Matches your search for ' . implode(' / ', array_map(
+                    static fn(string $n): string => mb_convert_case($n, MB_CASE_TITLE, 'UTF-8'),
+                    $briefNouns,
+                ))];
+                if ($territories !== []) {
+                    $parts[] = "in {$territoryLabel}";
+                }
+
+                return implode(' ', $parts) . '.';
+            }
+
             $parts = ["Fits your {$industryLabel} focus"];
             if ($territories !== []) {
                 $parts[] = "in {$territoryLabel}";
@@ -194,7 +213,86 @@ class ScoringService
             return implode(' ', $parts) . '.';
         }
 
+        $hasNicheBrief = trim($brief->customPrompt) !== '' || trim($brief->description) !== '';
+        $briefNouns = $hasNicheBrief ? $this->briefNounOverlap($brief, $companyPayload) : [];
+        if ($briefNouns !== []) {
+            return 'Matches your search for ' . implode(' / ', array_map(
+                static fn(string $n): string => mb_convert_case($n, MB_CASE_TITLE, 'UTF-8'),
+                $briefNouns,
+            )) . '; limited firmographic overlap with your ICP filters.';
+        }
+
         return "Limited overlap with your {$industryLabel} focus in {$territoryLabel}. Still answers the search request.";
+    }
+
+    /**
+     * Concrete nouns from the ICP search brief that also appear in the lead payload.
+     *
+     * @param  array<string, mixed>  $companyPayload
+     * @return list<string>
+     */
+    private function briefNounOverlap(IcpBrief $brief, array $companyPayload): array
+    {
+        $seed = mb_strtolower($brief->searchBrief());
+        if ($seed === '') {
+            return [];
+        }
+
+        $haystack = mb_strtolower(trim(implode(' ', array_filter([
+            (string) ($companyPayload['name'] ?? ''),
+            (string) ($companyPayload['person_name'] ?? ''),
+            (string) ($companyPayload['company'] ?? ''),
+            (string) ($companyPayload['summary'] ?? ''),
+            (string) ($companyPayload['title'] ?? ''),
+            (string) ($companyPayload['industry'] ?? ''),
+            (string) ($companyPayload['sector'] ?? ''),
+            (string) ($companyPayload['snippet'] ?? ''),
+        ]))));
+        if ($haystack === '') {
+            return [];
+        }
+
+        $stop = [
+            'and',
+            'the',
+            'for',
+            'with',
+            'from',
+            'into',
+            'that',
+            'this',
+            'your',
+            'our',
+            'companies',
+            'company',
+            'business',
+            'businesses',
+            'decision',
+            'makers',
+            'maker',
+            'expanding',
+            'emerging',
+            'markets',
+            'market',
+            'focus',
+            'looking',
+        ];
+        $tokens = preg_split('/[^\p{L}\p{N}\-&]+/u', $seed) ?: [];
+        $hits = [];
+        foreach ($tokens as $token) {
+            $token = trim($token);
+            if (mb_strlen($token) < 4 || in_array($token, $stop, true)) {
+                continue;
+            }
+            if (str_contains($haystack, $token)) {
+                $hits[$token] = $token;
+            }
+            if (count($hits) >= 3) {
+                break;
+            }
+        }
+
+        return array_values($hits);
     }
 
     /**

@@ -1011,6 +1011,25 @@ class DiscoveryOrchestrator
                 continue;
             }
 
+            // ICP-driven runs: when industries/territories are set, refuse unverified firmographics.
+            // Prefer a thinner trusted batch over "Matched search; fit not verified" fillers.
+            if (
+                ! $hasUserQuery
+                && ($brief->industries !== [] || $brief->territories !== [])
+            ) {
+                $fit = $this->scoring->assessFirmographicFit(
+                    array_merge($extracted, [
+                        'industry' => $extracted['industry'] ?? $extracted['sector'] ?? $hit->sector,
+                        'sector' => $extracted['sector'] ?? $hit->sector,
+                        'location' => $extracted['location'] ?? $hit->location,
+                    ]),
+                    $brief,
+                );
+                if ($fit['unknown']) {
+                    continue;
+                }
+            }
+
             // Hunter Discover often returns famous conglomerates with weak niche fit.
             // When the ICP constrains industries/territories, require firmographic evidence —
             // missing data must not auto-fill the company quota.

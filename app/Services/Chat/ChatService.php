@@ -343,6 +343,7 @@ class ChatService
                 $intent,
                 $clientTimezone,
                 $historySlice,
+                $icpSearchBrief,
             );
         } elseif ($intent === 'create_outreach' && $icp) {
             $draft = $this->outreach->draftFromPrompt(
@@ -537,6 +538,7 @@ class ChatService
                     $intent,
                     $clientTimezone,
                     $historySlice,
+                    $icpSearchBrief,
                 );
             } else {
                 $run->update(['status' => 'failed', 'error' => 'Unsupported async intent.', 'finished_at' => now()]);
@@ -717,20 +719,28 @@ class ChatService
         string $intent,
         ?string $clientTimezone = null,
         array $historySlice = [],
+        bool $icpSearchBrief = false,
     ): string {
         $count = count($leads);
-        $hasUserQuery = trim($query) !== '';
 
         if ($count === 0) {
-            if ($hasUserQuery) {
-                return 'No leads could be extracted for your search. Try a broader industry or role (for example FinTech CEOs in Africa), or generate from your active ICP without extra wording.';
+            if ($icpSearchBrief) {
+                return "No leads met your ICP search brief for \"{$icp->name}\". Edit \"What we search for\" in the ICP builder, or loosen territory/size filters — then generate again.";
             }
 
-            return "No leads met the match threshold for ICP \"{$icp->name}\". Try refining territories or industries.";
+            if (trim($query) !== '') {
+                return 'No leads could be extracted for your search. Try a more specific niche (product, buyer, or geography), or generate from your active ICP without extra wording.';
+            }
+
+            return "No leads met the match threshold for ICP \"{$icp->name}\". Edit \"What we search for\" or loosen qualify filters.";
         }
 
         $icpRecommendedCount = count(array_filter($leads, fn(array $lead) => (bool) ($lead['icp_recommended'] ?? false)));
-        $advisoryNote = $this->buildIcpAdvisoryNote($icp, $count, $icpRecommendedCount, $hasUserQuery);
+        $advisoryNote = $this->buildIcpAdvisoryNote($icp, $count, $icpRecommendedCount, ! $icpSearchBrief && trim($query) !== '');
+
+        if ($icpSearchBrief && $count < 3) {
+            $advisoryNote .= ' Thin batch after trust gates — try widening qualify filters or refining “What we search for.”';
+        }
 
         return $this->formatGroundedLeadNarration($leads, $count, $advisoryNote);
     }

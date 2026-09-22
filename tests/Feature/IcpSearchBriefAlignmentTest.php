@@ -198,6 +198,70 @@ class IcpSearchBriefAlignmentTest extends TestCase
         $this->assertContains('company_pass', $stages);
     }
 
+    public function test_companies_only_mode_cue_keeps_icp_brief(): void
+    {
+        config([
+            'services.serper.api_key' => 'test-serper',
+            'services.serper.base_url' => 'https://google.serper.dev',
+            'services.glm.api_key' => '',
+            'services.apollo.api_key' => '',
+            'services.hunter.api_key' => '',
+            'services.bytemine.api_key' => '',
+            'services.youtube.api_key' => '',
+            'services.x.bearer_token' => '',
+            'services.meta.access_token' => '',
+            'queue.default' => 'sync',
+        ]);
+
+        [$user, $org] = $this->actingAsOrgMember();
+
+        IcpProfile::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'UK',
+            'is_active' => true,
+            'config' => array_merge(IcpProfile::defaultConfig(), [
+                'industries' => ['Manufacturing'],
+                'customPrompt' => 'companies in construction, earthmoving, and heavy equipment expanding to emerging markets',
+                'minMatchScore' => 1,
+                'enrichContactDetails' => false,
+            ]),
+        ]);
+
+        $session = ChatSession::query()->create([
+            'organization_id' => $org->id,
+            'user_id' => $user->id,
+            'title' => 'UK',
+        ]);
+
+        Http::fake([
+            'google.serper.dev/*' => Http::response([
+                'organic' => [
+                    [
+                        'title' => 'Plant Hire Ltd | Company',
+                        'link' => 'https://www.linkedin.com/company/plant-hire-ltd',
+                        'snippet' => 'Earthmoving equipment hire.',
+                    ],
+                ],
+            ], 200),
+        ]);
+
+        $response = $this->withHeaders($this->orgHeaders($org))
+            ->postJson("/api/v1/chat/sessions/{$session->id}/messages", [
+                'body' => 'give me prospects (companies only)',
+                'intent' => 'generate_leads',
+            ]);
+
+        $response->assertOk();
+        $meta = ChatMessage::query()->find($response->json('data.user_message.id'))?->meta ?? [];
+        $this->assertTrue((bool) ($meta['icp_search_brief'] ?? false));
+        $this->assertStringContainsString('earthmoving', mb_strtolower((string) ($meta['effective_query'] ?? '')));
+
+        $run = DiscoveryRun::query()->where('chat_session_id', $session->id)->orderByDesc('id')->first();
+        $this->assertNotNull($run);
+        $stages = is_array($run->stages) ? $run->stages : [];
+        $this->assertNotContains('people_pass', $stages);
+    }
+
     public function test_generate_more_reseeds_from_current_icp_brief(): void
     {
         config([

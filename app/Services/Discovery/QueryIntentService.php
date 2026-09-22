@@ -216,12 +216,23 @@ class QueryIntentService
     }
 
     /**
+     * Strip trailing entity-mode cues so "give me prospects (companies only)" stays a generic ICP-brief ask.
+     */
+    public function stripEntityModeCue(string $query): string
+    {
+        $stripped = preg_replace('/\s*\((?:companies|people|accounts|contacts)\s+only\)\s*$/iu', '', $query) ?? $query;
+        $stripped = preg_replace('/\s+(?:companies|people|accounts|contacts)\s+only\s*$/iu', '', $stripped) ?? $stripped;
+
+        return trim(preg_replace('/\s+/u', ' ', $stripped) ?? $stripped);
+    }
+
+    /**
      * True when the prompt has no real targeting content (industries, places, companies, people names)
      * and is just a generic "generate leads / relevant to my ICP" instruction.
      */
     public function isGenericLeadRequest(string $query): bool
     {
-        $normalized = mb_strtolower($this->stripProspectCountInstruction($query));
+        $normalized = mb_strtolower($this->stripEntityModeCue($this->stripProspectCountInstruction($query)));
         if ($normalized === '') {
             return true;
         }
@@ -235,11 +246,14 @@ class QueryIntentService
         }
 
         if (preg_match('/\b(prospects?|leads?)\s+that\s+(can|will|could)\s+(further|help|advance|grow|support|fit)\b/u', $normalized)) {
-            return true;
+            // Keep deictic follow-ups ("…in this") eligible for chat contextualize.
+            if (! preg_match('/\b(this|that|these|those)\b/u', $normalized)) {
+                return true;
+            }
         }
 
         $residual = preg_replace(
-            '/\b(generate|create|find|get|show|give|need|needs|want|please|me|my|the|a|an|some|any|new|more|kind|kinds|ideal|best|perfect|right|suitable|matching|relevant|to|for|based|on|using|according|active|icp|profile|build|search|anything|prospect|request|help|helps|helping|looking|looking for|of|with|our|your|brand|brands|business|company|companies|product|products|app|application|platform|startup|leads?|prospects?|contacts?|same|additional|extra|again|another|that|this|these|those|than|then|can|could|will|would|should|further|advance|advancing|grow|growing|growth|support|supporting|goal|goals|aim|aims|purpose|purposes|success|improve|improving|scale|scaling|fit|fits|fitting)\b/u',
+            '/\b(generate|create|find|get|show|give|need|needs|want|please|me|my|the|a|an|some|any|new|more|kind|kinds|ideal|best|perfect|right|suitable|matching|relevant|to|for|based|on|using|according|active|icp|profile|build|search|anything|prospect|request|help|helps|helping|looking|looking for|of|with|our|your|brand|brands|business|company|companies|product|products|app|application|platform|startup|leads?|prospects?|contacts?|same|additional|extra|again|another|that|this|these|those|than|then|can|could|will|would|should|further|advance|advancing|grow|growing|growth|support|supporting|goal|goals|aim|aims|purpose|purposes|success|improve|improving|scale|scaling|fit|fits|fitting|only|accounts?|people|persons?)\b/u',
             ' ',
             $normalized
         );

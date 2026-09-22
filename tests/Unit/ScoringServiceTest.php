@@ -116,4 +116,28 @@ class ScoringServiceTest extends TestCase
         $this->assertStringContainsString('not verified', mb_strtolower($scores['icp_relevance_reason']));
         $this->assertStringNotContainsString('Fits your', $scores['icp_relevance_reason']);
     }
+
+    public function test_brief_noun_overlap_preferred_in_relevance_reason(): void
+    {
+        $brief = IcpBrief::fromIcpProfile(new IcpProfile([
+            'name' => 'UK',
+            'description' => 'earthmoving plant-hire dealers',
+            'config' => array_merge(IcpProfile::defaultConfig(), [
+                'industries' => ['Manufacturing'],
+                'territories' => ['england'],
+                'customPrompt' => 'companies in construction, earthmoving, and heavy equipment',
+                'minMatchScore' => 50,
+            ]),
+        ]), 'generate leads');
+
+        $reason = app(ScoringService::class)->buildIcpRelevanceReason($brief, 80.0, false, [
+            'name' => 'Midlands Earthmoving Ltd',
+            'industry' => 'Manufacturing',
+            'location' => 'england',
+            'summary' => 'Heavy equipment and earthmoving hire.',
+        ]);
+
+        $this->assertStringContainsString('Matches your search for', $reason);
+        $this->assertStringContainsString('earthmoving', mb_strtolower($reason));
+    }
 }

@@ -134,7 +134,9 @@ readonly class IcpBrief
     public function hasUserQuery(): bool
     {
         $queryIntent = app(QueryIntentService::class);
-        $cleaned = $queryIntent->stripProspectCountInstruction($this->query);
+        $cleaned = $queryIntent->stripEntityModeCue(
+            $queryIntent->stripProspectCountInstruction($this->query)
+        );
 
         return trim($cleaned) !== '' && ! $queryIntent->isGenericLeadRequest($cleaned);
     }

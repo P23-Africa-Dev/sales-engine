@@ -96,6 +96,16 @@ class QueryIntentServiceTest extends TestCase
         $this->assertTrue($this->service->isGenericLeadRequest('generate new prospects'));
         $this->assertTrue($this->service->isGenericLeadRequest('Generate me 10 prospect that can further my need'));
         $this->assertTrue($this->service->isGenericLeadRequest('Generate me 10 prospects that can further my need'));
+        $this->assertTrue($this->service->isGenericLeadRequest('give me prospects (companies only)'));
+        $this->assertTrue($this->service->isGenericLeadRequest('give me prospects (people only)'));
+        $this->assertSame(
+            QueryIntentService::TARGET_COMPANIES,
+            $this->service->analyze('give me prospects (companies only)', 'generate_leads')['target']
+        );
+        $this->assertSame(
+            QueryIntentService::TARGET_PEOPLE,
+            $this->service->analyze('give me prospects (people only)', 'generate_leads')['target']
+        );
         $this->assertTrue($this->service->looksLikeFirmographicIcpRewrite(
             'Generate me 10 prospects that fit my Manufacturing, Construction, and Real Estate focus in England, aligned with roles such as Head of Sales, Managing Director, or CEO.'
         ));

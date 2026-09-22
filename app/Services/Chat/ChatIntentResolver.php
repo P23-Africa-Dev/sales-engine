@@ -134,7 +134,9 @@ class ChatIntentResolver
      */
     public function isGenericLeadBody(string $body): bool
     {
-        $cleaned = $this->queryIntent->stripProspectCountInstruction($body);
+        $cleaned = $this->queryIntent->stripEntityModeCue(
+            $this->queryIntent->stripProspectCountInstruction($body)
+        );
 
         return trim($cleaned) === ''
             || $this->queryIntent->isGenericLeadRequest($cleaned)
