@@ -599,7 +599,7 @@ class IcpSearchBriefAlignmentTest extends TestCase
         });
     }
 
-    public function test_linkedin_company_without_place_is_kept_advisory(): void
+    public function test_linkedin_company_without_place_is_kept_recommended_eligible(): void
     {
         config([
             'services.serper.api_key' => 'test-serper',
@@ -656,7 +656,9 @@ class IcpSearchBriefAlignmentTest extends TestCase
         $leads = $response->json('data.assistant_message.leads') ?? [];
         $this->assertNotEmpty($leads);
         $this->assertSame('Cedarline Warehousing', $leads[0]['name'] ?? null);
-        $this->assertFalse((bool) ($leads[0]['icp_recommended'] ?? true));
+        // Geo-aimed search + trusted LinkedIn company: keep as recommended-eligible, not junk advisory.
+        $this->assertTrue((bool) ($leads[0]['icp_recommended'] ?? false));
+        $this->assertFalse((bool) ($leads[0]['low_confidence'] ?? true));
         $this->assertSame('unknown', $leads[0]['location_status'] ?? null);
     }
 
