@@ -111,19 +111,71 @@ class IcpFilterService
             return false;
         }
 
-        $candidateTokens = $this->tokenize($candidateTerritory);
+        $candidateTokens = $this->expandTerritoryTokens($candidateTerritory);
         if ($candidateTokens === []) {
             return false;
         }
 
         foreach ($allowedTerritories as $territory) {
-            $allowedTokens = $this->tokenize($territory);
+            $allowedTokens = $this->expandTerritoryTokens($territory);
             if (array_intersect($candidateTokens, $allowedTokens) !== []) {
                 return true;
             }
         }
 
         return false;
+    }
+
+    /**
+     * Alias groups so ICP "england" matches UK / London / Britain, etc.
+     *
+     * @var list<list<string>>
+     */
+    private const TERRITORY_ALIAS_GROUPS = [
+        ['england', 'uk', 'u.k.', 'united kingdom', 'britain', 'great britain', 'london', 'manchester', 'birmingham', 'leeds', 'bristol', 'liverpool', 'sheffield'],
+        ['scotland', 'edinburgh', 'glasgow'],
+        ['wales', 'cardiff'],
+        ['nigeria', 'lagos', 'abuja', 'kano', 'port harcourt', 'ibadan', 'ng'],
+        ['kenya', 'nairobi', 'mombasa'],
+        ['ghana', 'accra'],
+        ['south africa', 'johannesburg', 'cape town', 'durban'],
+        ['egypt', 'cairo'],
+        ['united states', 'usa', 'u.s.', 'u.s.a.', 'america', 'us'],
+    ];
+
+    /**
+     * @return list<string>
+     */
+    private function expandTerritoryTokens(string $value): array
+    {
+        $normalized = mb_strtolower(trim($value));
+        $tokens = $this->tokenize($normalized);
+        // Short geo codes (uk, ng, us) are meaningful for territory matching.
+        $rawParts = preg_split('/[,\s\/]+/u', $normalized) ?: [];
+        foreach ($rawParts as $part) {
+            $part = trim($part);
+            if ($part !== '' && mb_strlen($part) >= 2 && mb_strlen($part) < 3) {
+                $tokens[] = $part;
+            }
+        }
+        $tokens = array_values(array_unique($tokens));
+
+        foreach (self::TERRITORY_ALIAS_GROUPS as $group) {
+            $hit = array_intersect($tokens, $group) !== [];
+            if (! $hit) {
+                foreach ($group as $alias) {
+                    if (str_contains($alias, ' ') && str_contains($normalized, $alias)) {
+                        $hit = true;
+                        break;
+                    }
+                }
+            }
+            if ($hit) {
+                $tokens = array_values(array_unique(array_merge($tokens, $group)));
+            }
+        }
+
+        return $tokens;
     }
 
     /**

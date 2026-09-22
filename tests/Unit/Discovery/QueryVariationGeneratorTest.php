@@ -109,7 +109,7 @@ class QueryVariationGeneratorTest extends TestCase
         $this->assertStringContainsString('linkedin.com/company', $joinedBackfill);
     }
 
-    public function test_icp_only_variations_use_industries_softly_but_never_gate_tokens(): void
+    public function test_icp_only_variations_use_industries_softly_but_never_size_or_persona_tokens(): void
     {
         $generator = new QueryVariationGenerator;
         $brief = new IcpBrief(
@@ -139,12 +139,62 @@ class QueryVariationGeneratorTest extends TestCase
             'Expected industry soft keywords in ICP-only search variations'
         );
 
-        // Territory, size, and personas remain gates — never Serper tokens.
+        // ICP-brief mode geo-biases with primary territory; size/personas stay gates only.
+        $this->assertTrue(
+            collect($queries)->contains(fn(string $q) => str_contains($q, 'QqwertTerritory')),
+            'Expected ICP-brief territory geo-bias in search variations'
+        );
+
         foreach ($queries as $query) {
-            $this->assertStringNotContainsString('QqwertTerritory', $query);
             $this->assertStringNotContainsString('51-200', $query);
             $this->assertStringNotContainsString('UniqueDecisionMakerTitle', $query);
         }
+    }
+
+    public function test_icp_brief_geo_bias_appends_england_for_uk_territory(): void
+    {
+        $generator = new QueryVariationGenerator;
+        $brief = new IcpBrief(
+            name: 'UK ICP',
+            description: '',
+            industries: ['Construction'],
+            territories: ['england'],
+            companySizes: [],
+            decisionMakers: [],
+            customPrompt: 'earthmoving equipment expanding abroad',
+            minMatchScore: 60,
+            autoSyncCrm: false,
+            query: 'give me prospects',
+            target: QueryIntentService::TARGET_BOTH,
+            requestedLimit: 20,
+        );
+
+        $joined = mb_strtolower(implode("\n", $generator->generate($brief, 20)));
+        $this->assertStringContainsString('england', $joined);
+        $this->assertStringContainsString('earthmoving', $joined);
+    }
+
+    public function test_user_niche_query_is_not_geo_rewritten_with_icp_territory(): void
+    {
+        $generator = new QueryVariationGenerator;
+        $brief = new IcpBrief(
+            name: 'UK ICP',
+            description: '',
+            industries: ['Construction'],
+            territories: ['england'],
+            companySizes: [],
+            decisionMakers: [],
+            customPrompt: 'earthmoving equipment',
+            minMatchScore: 60,
+            autoSyncCrm: false,
+            query: 'FMCG distributors in Lagos',
+            target: QueryIntentService::TARGET_COMPANIES,
+            requestedLimit: 20,
+        );
+
+        $joined = mb_strtolower(implode("\n", $generator->generate($brief, 20)));
+        $this->assertStringContainsString('lagos', $joined);
+        $this->assertStringNotContainsString('england', $joined);
     }
 
     public function test_icp_only_variations_prefer_custom_prompt_over_industries(): void
@@ -171,8 +221,12 @@ class QueryVariationGeneratorTest extends TestCase
         foreach ($queries as $query) {
             $this->assertStringContainsString('specialty niche suppliers', $query);
             $this->assertStringNotContainsString('ZzyxxUniqueIndustry', $query);
-            $this->assertStringNotContainsString('QqwertTerritory', $query);
             $this->assertStringNotContainsString('UniqueDecisionMakerTitle', $query);
         }
+
+        $this->assertTrue(
+            collect($queries)->contains(fn(string $q) => str_contains($q, 'QqwertTerritory')),
+            'Expected ICP-brief territory geo-bias alongside custom prompt'
+        );
     }
 }

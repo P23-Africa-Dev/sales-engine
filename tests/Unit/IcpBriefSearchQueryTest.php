@@ -74,8 +74,12 @@ class IcpBriefSearchQueryTest extends TestCase
         $this->assertStringNotContainsString('relevant to my ICP', $query);
 
         $variations = app(\App\Services\Discovery\QueryVariationGenerator::class)->generate($brief, 20);
+        // ICP-brief mode geo-biases Serper with primary territory; personas stay out.
+        $this->assertTrue(
+            collect($variations)->contains(fn (string $v) => str_contains($v, 'Lagos')),
+            'Expected ICP-brief territory geo-bias in fan-out variations'
+        );
         foreach ($variations as $variation) {
-            $this->assertStringNotContainsString('Lagos', $variation);
             $this->assertStringNotContainsString('Head of Sales', $variation);
         }
     }

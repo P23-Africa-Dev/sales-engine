@@ -93,6 +93,17 @@ class IcpFilterServiceTest extends TestCase
         $this->assertFalse($fail->reasons['territory']);
     }
 
+    public function test_england_aliases_match_uk_london_and_united_kingdom(): void
+    {
+        $brief = $this->brief(['territories' => ['england']]);
+        $filter = new IcpFilterService;
+
+        $this->assertTrue($filter->passes($brief, new CandidateCompany(territory: 'London, UK'))->reasons['territory']);
+        $this->assertTrue($filter->passes($brief, new CandidateCompany(territory: 'United Kingdom'))->reasons['territory']);
+        $this->assertTrue($filter->passes($brief, new CandidateCompany(territory: 'Manchester, Britain'))->reasons['territory']);
+        $this->assertFalse($filter->passes($brief, new CandidateCompany(territory: 'Lagos, Nigeria'))->reasons['territory']);
+    }
+
     public function test_fails_overall_when_any_single_field_fails(): void
     {
         $brief = $this->brief([

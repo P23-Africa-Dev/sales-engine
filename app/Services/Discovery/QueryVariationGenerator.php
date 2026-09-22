@@ -46,30 +46,42 @@ class QueryVariationGenerator
 
         $primary = $brief->searchQuery();
         if ($primary !== '') {
-            $variations[] = $primary;
+            $variations[] = $this->withIcpTerritoryBias($brief, $primary);
         }
 
         foreach ($this->geoSplitVariations($primary !== '' ? $primary : $this->searchSeed($brief)) as $geoQuery) {
-            $variations[] = $geoQuery;
+            $variations[] = $this->withIcpTerritoryBias($brief, $geoQuery);
         }
 
         $seed = $this->searchSeed($brief);
         foreach (array_slice(self::SIGNAL_MODIFIERS, 0, 4) as $i => $signal) {
-            $variations[] = $this->composePeopleOrCompany($brief, $seed.' '.$signal, $i % 2 === 0);
+            $variations[] = $this->withIcpTerritoryBias(
+                $brief,
+                $this->composePeopleOrCompany($brief, $seed.' '.$signal, $i % 2 === 0)
+            );
         }
 
         if ($brief->isPeopleSearch() || $brief->isAuthoritativePeopleQuery()) {
             foreach (array_slice(self::AUTHORITATIVE_LIST_HINTS, 0, 2) as $hint) {
-                $variations[] = trim($seed.' '.$hint);
+                $variations[] = $this->withIcpTerritoryBias($brief, trim($seed.' '.$hint));
             }
-            $variations[] = $this->composePeopleOrCompany($brief, $seed, true);
+            $variations[] = $this->withIcpTerritoryBias(
+                $brief,
+                $this->composePeopleOrCompany($brief, $seed, true)
+            );
         } else {
-            $variations[] = $this->composePeopleOrCompany($brief, $seed.' companies', true);
-            $variations[] = $this->composePeopleOrCompany($brief, $seed, true);
-            $variations[] = trim($seed.' site:linkedin.com/company');
-            $variations[] = trim('list of '.$seed);
+            $variations[] = $this->withIcpTerritoryBias(
+                $brief,
+                $this->composePeopleOrCompany($brief, $seed.' companies', true)
+            );
+            $variations[] = $this->withIcpTerritoryBias(
+                $brief,
+                $this->composePeopleOrCompany($brief, $seed, true)
+            );
+            $variations[] = $this->withIcpTerritoryBias($brief, trim($seed.' site:linkedin.com/company'));
+            $variations[] = $this->withIcpTerritoryBias($brief, trim('list of '.$seed));
             if (! preg_match('/\bnigeria\b/iu', $seed)) {
-                $variations[] = trim($seed.' Nigeria');
+                $variations[] = $this->withIcpTerritoryBias($brief, trim($seed.' Nigeria'));
             }
         }
 
@@ -97,21 +109,33 @@ class QueryVariationGenerator
 
         // Company backfill: LinkedIn company pages first so fan-out stays account-oriented.
         if ($brief->isCompanySearch()) {
-            $variations[] = trim($seed.' site:linkedin.com/company');
-            $variations[] = $this->composePeopleOrCompany($brief, $seed.' companies', true);
-            $variations[] = $this->composePeopleOrCompany($brief, $seed, true);
+            $variations[] = $this->withIcpTerritoryBias($brief, trim($seed.' site:linkedin.com/company'));
+            $variations[] = $this->withIcpTerritoryBias(
+                $brief,
+                $this->composePeopleOrCompany($brief, $seed.' companies', true)
+            );
+            $variations[] = $this->withIcpTerritoryBias(
+                $brief,
+                $this->composePeopleOrCompany($brief, $seed, true)
+            );
         }
 
         foreach (['executives', 'founders', 'leadership team', 'decision makers', 'partnerships'] as $hint) {
-            $variations[] = $this->composePeopleOrCompany($brief, $seed.' '.$hint, false);
+            $variations[] = $this->withIcpTerritoryBias(
+                $brief,
+                $this->composePeopleOrCompany($brief, $seed.' '.$hint, false)
+            );
         }
 
         foreach (array_slice(self::SIGNAL_MODIFIERS, 0, 5) as $i => $signal) {
-            $variations[] = $this->composePeopleOrCompany($brief, $seed.' '.$signal, $i % 2 === 0);
+            $variations[] = $this->withIcpTerritoryBias(
+                $brief,
+                $this->composePeopleOrCompany($brief, $seed.' '.$signal, $i % 2 === 0)
+            );
         }
 
         foreach (array_slice(self::AUTHORITATIVE_LIST_HINTS, 0, 3) as $hint) {
-            $variations[] = trim($seed.' '.$hint);
+            $variations[] = $this->withIcpTerritoryBias($brief, trim($seed.' '.$hint));
         }
 
         $excluded = [];
@@ -148,6 +172,54 @@ class QueryVariationGenerator
         }
 
         return $brief->interestSearchSeed();
+    }
+
+    /**
+     * ICP-brief mode only: append primary territory so Serper skews to ICP geography.
+     * Never rewrite a user's specific niche query.
+     */
+    private function withIcpTerritoryBias(IcpBrief $brief, string $query): string
+    {
+        $query = trim($query);
+        if ($query === '' || $brief->hasUserQuery() || $brief->territories === []) {
+            return $query;
+        }
+
+        $geo = $this->primaryTerritoryLabel((string) $brief->territories[0]);
+        if ($geo === '') {
+            return $query;
+        }
+
+        if (preg_match('/\b'.preg_quote($geo, '/').'\b/iu', $query)) {
+            return $query;
+        }
+
+        return trim($query.' '.$geo);
+    }
+
+    private function primaryTerritoryLabel(string $territory): string
+    {
+        $territory = trim($territory);
+        if ($territory === '') {
+            return '';
+        }
+
+        $lower = mb_strtolower($territory);
+        // Prefer a searchable country/region label over a city list entry.
+        if (str_contains($lower, 'england') || $lower === 'uk' || str_contains($lower, 'united kingdom') || str_contains($lower, 'britain')) {
+            return 'England';
+        }
+        if (str_contains($lower, 'nigeria') || in_array($lower, ['lagos', 'abuja', 'kano', 'port harcourt', 'ibadan'], true)) {
+            return 'Nigeria';
+        }
+        if (str_contains($lower, 'kenya') || str_contains($lower, 'nairobi')) {
+            return 'Kenya';
+        }
+
+        // First comma-separated segment (e.g. "Lagos, NG" → Lagos).
+        $first = trim(explode(',', $territory)[0]);
+
+        return $first !== '' ? $first : $territory;
     }
 
     /**

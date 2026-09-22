@@ -54,6 +54,13 @@ class DiscoveryOrchestrator
     /** @var array<string, Collection<int, RawDiscoveryHit>> */
     private array $registryHitCache = [];
 
+    /** @var array{dropped_creatability: int, dropped_hard_gate: int, kept_advisory_profile: int} */
+    private array $gateStats = [
+        'dropped_creatability' => 0,
+        'dropped_hard_gate' => 0,
+        'kept_advisory_profile' => 0,
+    ];
+
     /** @param  list<DiscoverySourceInterface>  $sources */
     public function __construct(
         private readonly array $sources,
@@ -132,6 +139,11 @@ class DiscoveryOrchestrator
             $this->deadlineAt = $this->startedAt + self::HARD_DEADLINE_SECONDS;
             $this->deferContactEnrichment = $deferContactEnrichment;
             $this->registryHitCache = [];
+            $this->gateStats = [
+                'dropped_creatability' => 0,
+                'dropped_hard_gate' => 0,
+                'kept_advisory_profile' => 0,
+            ];
             $this->enrichment->setDeferContactWaterfall($deferContactEnrichment);
 
             $brief = $briefSeed;
@@ -508,6 +520,9 @@ class DiscoveryOrchestrator
                         'sources_hit_count' => $allSourcesHitCount,
                         'candidates_extracted' => array_sum($allSourcesHitCount),
                         'candidates_passed_gates' => $candidatesFound,
+                        'dropped_creatability' => $this->gateStats['dropped_creatability'],
+                        'dropped_hard_gate' => $this->gateStats['dropped_hard_gate'],
+                        'kept_advisory_profile' => $this->gateStats['kept_advisory_profile'],
                         'fan_out_strategy_used' => $fanOutUsed,
                         'quality_threshold' => $this->qualityThreshold,
                         'backfill_passes' => $backfillPasses,
@@ -1009,6 +1024,7 @@ class DiscoveryOrchestrator
             $fromListicle = $candidate['fromListicle'];
 
             if (! $this->passesCreatabilityGate($brief, $displayName, $extracted, $fromListicle)) {
+                $this->gateStats['dropped_creatability']++;
                 continue;
             }
 
@@ -1022,8 +1038,19 @@ class DiscoveryOrchestrator
                 $scores,
             );
 
+            // ICP-brief mode: hard-gate firmographics, but keep trusted LinkedIn profiles
+            // as advisory leads (fixes zero-yield when Serper returns global hits).
+            // Hunter company path stays strict below.
             if (! $hasUserQuery && ! $this->passesIcpHardGate($brief, $extracted)) {
-                continue;
+                $isHunter = mb_strtolower((string) ($hit->provider ?? '')) === 'hunter';
+                if (! $isHunter && $this->hasTrustedEntityProfileUrl($brief, $extracted, $hit)) {
+                    $icpRecommended = false;
+                    $extracted['low_confidence'] = true;
+                    $this->gateStats['kept_advisory_profile']++;
+                } else {
+                    $this->gateStats['dropped_hard_gate']++;
+                    continue;
+                }
             }
 
             // ICP-driven runs: when industries/territories are set, refuse unverified firmographics
