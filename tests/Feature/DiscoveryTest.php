@@ -91,7 +91,7 @@ class DiscoveryTest extends TestCase
                     [
                         'title' => 'Global Retail Holdings',
                         'link' => 'https://global-retail.example.com',
-                        'snippet' => 'Major global retail conglomerate outside health tech.',
+                        'snippet' => 'Major global retail conglomerate outside health tech, based in Lagos.',
                     ],
                 ],
             ], 200),
@@ -494,7 +494,7 @@ class DiscoveryTest extends TestCase
                     [
                         'title' => 'Chidi Bassey - Founder at OrbitPay',
                         'link' => 'https://www.linkedin.com/in/chidi-bassey',
-                        'snippet' => 'Founder at OrbitPay.',
+                        'snippet' => 'Founder at OrbitPay in Lagos.',
                     ],
                 ],
             ], 200),
@@ -623,7 +623,7 @@ class DiscoveryTest extends TestCase
                     [
                         'title' => 'Chidi Bassey - Founder at OrbitPay',
                         'link' => 'https://www.linkedin.com/in/chidi-bassey',
-                        'snippet' => 'Founder at OrbitPay.',
+                        'snippet' => 'Founder at OrbitPay in Lagos.',
                     ],
                 ],
             ], 200),
@@ -746,7 +746,7 @@ class DiscoveryTest extends TestCase
                     [
                         'title' => 'James Whitfield - Managing Director',
                         'link' => 'https://www.linkedin.com/in/james-whitfield',
-                        'snippet' => 'Managing Director focused on growth.',
+                        'snippet' => 'Managing Director focused on growth in London, United Kingdom.',
                     ],
                 ],
             ], 200),

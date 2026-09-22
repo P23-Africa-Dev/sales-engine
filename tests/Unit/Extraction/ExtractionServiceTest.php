@@ -103,4 +103,42 @@ class ExtractionServiceTest extends TestCase
         $this->assertSame('', $people[0]['summary']);
         $this->assertNull($people[0]['linkedin_url'] ?? null);
     }
+
+    public function test_company_fallback_does_not_fill_location_from_icp(): void
+    {
+        config(['services.glm.api_key' => '']);
+
+        $service = new ExtractionService(
+            new GlmClient,
+            new QueryIntentService,
+        );
+
+        [, $org] = $this->actingAsOrgMember();
+        $brief = IcpBrief::fromIcpProfile(
+            IcpProfile::query()->create([
+                'organization_id' => $org->id,
+                'name' => 'NG ICP',
+                'is_active' => true,
+                'config' => array_merge(IcpProfile::defaultConfig(), [
+                    'territories' => ['Nigeria'],
+                    'customPrompt' => 'logistics 3PL',
+                ]),
+            ]),
+            'give me prospects',
+        );
+
+        $hit = new RawDiscoveryHit(
+            name: 'Northstar Freight Co',
+            snippet: 'Nationwide freight directory listing.',
+            url: 'https://example.com/northstar-freight',
+            source: 'serper',
+            provider: 'serper',
+            location: null,
+            sector: null,
+        );
+
+        $extracted = $service->extract($hit, $brief, $org);
+
+        $this->assertNull($extracted['location'] ?? null);
+    }
 }

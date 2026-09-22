@@ -200,4 +200,16 @@ class IcpFilterServiceTest extends TestCase
 
         $this->assertTrue($result->passed);
     }
+
+    public function test_india_does_not_match_nigeria_via_in_token(): void
+    {
+        $brief = $this->brief(['territories' => ['Nigeria']]);
+        $filter = new IcpFilterService;
+
+        $this->assertFalse($filter->passes($brief, new CandidateCompany(territory: 'Pune, India'))->reasons['territory']);
+        $this->assertFalse($filter->passes($brief, new CandidateCompany(territory: 'IN'))->reasons['territory']);
+        $this->assertFalse($filter->passes($brief, new CandidateCompany(territory: 'India'))->reasons['territory']);
+        $this->assertTrue($filter->passes($brief, new CandidateCompany(territory: 'Lagos, NG'))->reasons['territory']);
+        $this->assertTrue($filter->passes($brief, new CandidateCompany(territory: 'Nigeria'))->reasons['territory']);
+    }
 }

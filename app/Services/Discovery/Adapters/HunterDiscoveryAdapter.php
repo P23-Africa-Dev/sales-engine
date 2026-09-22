@@ -4,6 +4,7 @@ namespace App\Services\Discovery\Adapters;
 
 use App\Models\ApiUsage;
 use App\Services\Discovery\Contracts\DiscoverySourceInterface;
+use App\Services\Discovery\DiscoveryGeo;
 use App\Services\Discovery\DTO\IcpBrief;
 use App\Services\Discovery\DTO\RawDiscoveryHit;
 use App\Services\Discovery\DTO\SearchContext;
@@ -16,6 +17,10 @@ use Illuminate\Support\Facades\Log;
  */
 class HunterDiscoveryAdapter implements DiscoverySourceInterface
 {
+    public function __construct(
+        private readonly DiscoveryGeo $discoveryGeo = new DiscoveryGeo,
+    ) {}
+
     public function key(): string
     {
         return 'hunter';
@@ -128,43 +133,15 @@ class HunterDiscoveryAdapter implements DiscoverySourceInterface
     {
         $payload = ['query' => $query];
 
-        $locations = $this->inferHeadquartersLocations($query, $brief);
-        if ($locations !== []) {
-            $payload['headquarters_location'] = [
-                'include' => $locations,
-            ];
-        }
-
-        return $payload;
-    }
-
-    /**
-     * @return list<array<string, string>>
-     */
-    private function inferHeadquartersLocations(string $query, IcpBrief $brief): array
-    {
-        $haystack = mb_strtolower($query.' '.implode(' ', $brief->territories));
-        $locations = [];
-
-        $cityCountry = [
-            'lagos' => ['city' => 'Lagos', 'country' => 'NG'],
-            'abuja' => ['city' => 'Abuja', 'country' => 'NG'],
-            'nairobi' => ['city' => 'Nairobi', 'country' => 'KE'],
-            'accra' => ['city' => 'Accra', 'country' => 'GH'],
-            'johannesburg' => ['city' => 'Johannesburg', 'country' => 'ZA'],
-            'cape town' => ['city' => 'Cape Town', 'country' => 'ZA'],
-        ];
-
-        foreach ($cityCountry as $needle => $loc) {
-            if (str_contains($haystack, $needle)) {
-                $locations[] = $loc;
+        if ($this->discoveryGeo->shouldApplyRetrievalGeo($brief)) {
+            $locations = $this->discoveryGeo->hunterHeadquarters($brief);
+            if ($locations !== []) {
+                $payload['headquarters_location'] = [
+                    'include' => $locations,
+                ];
             }
         }
 
-        if ($locations === [] && (str_contains($haystack, 'nigeria') || str_contains($haystack, ' ng'))) {
-            $locations[] = ['country' => 'NG'];
-        }
-
-        return $locations;
+        return $payload;
     }
 }

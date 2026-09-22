@@ -3,6 +3,7 @@
 namespace App\Services\Extraction;
 
 use App\Models\Organization;
+use App\Services\Discovery\DiscoveryGeo;
 use App\Services\Discovery\DTO\IcpBrief;
 use App\Services\Discovery\DTO\RawDiscoveryHit;
 use App\Services\Discovery\QueryIntentService;
@@ -13,6 +14,7 @@ class ExtractionService
     public function __construct(
         private readonly GlmClient $glm,
         private readonly QueryIntentService $queryIntent,
+        private readonly DiscoveryGeo $discoveryGeo = new DiscoveryGeo,
     ) {}
 
     /**
@@ -54,7 +56,7 @@ class ExtractionService
             $result = $this->glm->chatJson([
                 [
                     'role' => 'system',
-                    'content' => 'Extract structured company intelligence as JSON with keys: name, sector, location, summary, contact_email (only if explicitly present in the hit; never invent; reject generic info@/contact@), contact_phone (only if explicitly present; never invent), business_fields (object), commercial_signals (array of strings). The name must be a real company/organization name — never an article title, tip list, award, requirement phrase, blog post, or generic advice headline. If the hit is not a real company, set name to an empty string. Never use the ICP profile name as the company name unless the hit explicitly refers to that exact company. No markdown.',
+                    'content' => 'Extract structured company intelligence as JSON with keys: name, sector, location, summary, contact_email (only if explicitly present in the hit; never invent; reject generic info@/contact@), contact_phone (only if explicitly present; never invent), business_fields (object), commercial_signals (array of strings). The name must be a real company/organization name — never an article title, tip list, award, requirement phrase, blog post, or generic advice headline. If the hit is not a real company, set name to an empty string. Never use the ICP profile name as the company name unless the hit explicitly refers to that exact company. Extract location and sector only from the hit title, snippet, URL, or website — never copy ICP territories or industries. If the hit does not name a place, set location to an empty string. No markdown.',
                 ],
                 [
                     'role' => 'user',
@@ -87,7 +89,7 @@ class ExtractionService
                 return [
                     'name' => '',
                     'sector' => $result['sector'] ?? $hit->sector,
-                    'location' => $result['location'] ?? $hit->location,
+                    'location' => $this->honestLocation($hit, $result['location'] ?? null),
                     'summary' => $result['summary'] ?? ($hit->snippet ?? ''),
                     'business_fields' => $result['business_fields'] ?? ['website' => $hit->website],
                     'commercial_signals' => $result['commercial_signals'] ?? [],
@@ -106,6 +108,8 @@ class ExtractionService
                     $result['phone'] = $contactPhone;
                 }
             }
+
+            $result['location'] = $this->honestLocation($hit, $result['location'] ?? null);
 
             return $result;
         } catch (\Throwable) {
@@ -302,7 +306,7 @@ class ExtractionService
                 'email' => $email !== '' ? $email : null,
                 'phone' => $phone !== '' ? $phone : null,
                 'linkedin_url' => $this->resolvePersonUrl($result['linkedin_url'] ?? null, $hit->url),
-                'location' => $result['location'] ?? $hit->location,
+                'location' => $this->honestLocation($hit, $result['location'] ?? null),
                 'summary' => $summary,
                 'business_fields' => array_filter([
                     'linkedin_url' => $this->resolvePersonUrl($result['linkedin_url'] ?? null, $hit->url),
@@ -325,11 +329,12 @@ class ExtractionService
     private function fallbackCompany(RawDiscoveryHit $hit): array
     {
         $name = $hit->name;
+        $location = $this->honestLocation($hit, null);
         if ($this->queryIntent->looksLikeContentOrGenericPhrase($name)) {
             return [
                 'name' => '',
                 'sector' => $hit->sector,
-                'location' => $hit->location,
+                'location' => $location,
                 'summary' => $hit->snippet ?? '',
                 'business_fields' => ['website' => $hit->website],
                 'commercial_signals' => [],
@@ -340,12 +345,52 @@ class ExtractionService
         return [
             'name' => $name,
             'sector' => $hit->sector,
-            'location' => $hit->location,
+            'location' => $location,
             'summary' => $hit->snippet ?? $hit->name,
             'business_fields' => ['website' => $hit->website],
             'commercial_signals' => [],
             'low_confidence' => true,
         ];
+    }
+
+    /**
+     * Location only from the hit (or place names in title/snippet/URL) — never from the ICP.
+     */
+    private function honestLocation(RawDiscoveryHit $hit, mixed $extractedLocation): ?string
+    {
+        $haystack = trim($hit->name.' '.($hit->snippet ?? '').' '.($hit->url ?? '').' '.($hit->location ?? ''));
+        $fromModel = is_string($extractedLocation) ? trim($extractedLocation) : '';
+
+        if ($fromModel !== '' && $this->locationSupportedByHit($fromModel, $haystack)) {
+            return $fromModel;
+        }
+
+        if (filled($hit->location)) {
+            return trim((string) $hit->location);
+        }
+
+        return $this->discoveryGeo->inferLocationFromText($haystack);
+    }
+
+    private function locationSupportedByHit(string $location, string $haystack): bool
+    {
+        if (trim($haystack) === '') {
+            return false;
+        }
+
+        $hay = mb_strtolower($haystack);
+        if (str_contains($hay, mb_strtolower($location))) {
+            return true;
+        }
+
+        $parts = preg_split('/[,\s\/]+/u', mb_strtolower($location)) ?: [];
+        foreach ($parts as $part) {
+            if (mb_strlen($part) >= 3 && str_contains($hay, $part)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -397,6 +442,7 @@ class ExtractionService
             'name' => $name,
             'person_name' => $name,
             'linkedin_url' => $linkedinUrl,
+            'location' => $this->honestLocation($hit, null),
             'summary' => $this->queryIntent->isListicleUrl($hit->url) ? '' : ($hit->snippet ?? $name),
             'business_fields' => array_filter([
                 'source_url' => $hit->url,

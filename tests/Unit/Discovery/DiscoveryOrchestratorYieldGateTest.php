@@ -99,6 +99,63 @@ class DiscoveryOrchestratorYieldGateTest extends TestCase
         $this->assertTrue($method->invoke($orchestrator, 3, 1, 6, 12));
     }
 
+    public function test_hard_gate_drops_india_and_missing_location_when_icp_is_nigeria(): void
+    {
+        $orchestrator = app(DiscoveryOrchestrator::class);
+        $method = $this->privateMethod($orchestrator, 'passesIcpHardGate');
+
+        $brief = $this->companyBriefNigeria();
+
+        $this->assertFalse($method->invoke($orchestrator, $brief, [
+            'location' => 'Pune, India',
+            'industry' => 'Logistics',
+        ]));
+        $this->assertFalse($method->invoke($orchestrator, $brief, [
+            'industry' => 'Logistics',
+        ]));
+    }
+
+    public function test_hard_gate_allows_unknown_industry_when_territories_empty(): void
+    {
+        $orchestrator = app(DiscoveryOrchestrator::class);
+        $method = $this->privateMethod($orchestrator, 'passesIcpHardGate');
+
+        $brief = new IcpBrief(
+            name: 'Industry ICP',
+            description: '',
+            industries: ['Construction'],
+            territories: [],
+            companySizes: [],
+            decisionMakers: [],
+            customPrompt: '',
+            minMatchScore: 1,
+            autoSyncCrm: false,
+            query: 'give me prospects',
+            target: 'companies',
+        );
+
+        $this->assertTrue($method->invoke($orchestrator, $brief, [
+            'name' => 'OrbitPay',
+        ]));
+    }
+
+    private function companyBriefNigeria(): IcpBrief
+    {
+        return new IcpBrief(
+            name: 'NG ICP',
+            description: '',
+            industries: ['Logistics'],
+            territories: ['Nigeria'],
+            companySizes: [],
+            decisionMakers: [],
+            customPrompt: 'logistics 3PL',
+            minMatchScore: 1,
+            autoSyncCrm: false,
+            query: 'give me prospects',
+            target: 'companies',
+        );
+    }
+
     private function peopleBrief(): IcpBrief
     {
         return new IcpBrief(

@@ -229,4 +229,30 @@ class QueryVariationGeneratorTest extends TestCase
             'Expected ICP-brief territory geo-bias alongside custom prompt'
         );
     }
+
+    public function test_kenya_icp_does_not_hardcode_nigeria_variation(): void
+    {
+        $generator = new QueryVariationGenerator;
+        $brief = new IcpBrief(
+            name: 'Kenya ICP',
+            description: '',
+            industries: ['Logistics'],
+            territories: ['Kenya'],
+            companySizes: [],
+            decisionMakers: [],
+            customPrompt: 'logistics 3PL operators',
+            minMatchScore: 60,
+            autoSyncCrm: false,
+            query: '',
+            target: QueryIntentService::TARGET_COMPANIES,
+            requestedLimit: 12,
+        );
+
+        $queries = $generator->generate($brief, 12);
+        $joined = mb_strtolower(implode("\n", $queries));
+
+        $this->assertStringContainsString('kenya', $joined);
+        $this->assertStringNotContainsString('nigeria', $joined);
+        $this->assertStringNotContainsString('logistics', implode(' ', $brief->decisionMakers));
+    }
 }

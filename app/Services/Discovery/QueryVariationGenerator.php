@@ -7,15 +7,19 @@ use App\Services\Discovery\DTO\IcpBrief;
 /**
  * Diversified search strings for Discovery fan-out.
  *
- * new_plan.md: ICP firmographic fields (industry, size, revenue, territory,
- * target roles) are never concatenated into search queries. Fan-out uses the
- * user's typed question, or interest language (customPrompt / description).
+ * Industry, size, revenue, and roles stay out of search text. Geography is the
+ * explicit exception: ICP-brief queries get a primary-country clause via DiscoveryGeo.
  */
 class QueryVariationGenerator
 {
     public const MAX_QUERIES = 15;
 
+    /** Fan-out stays at 20 to limit Serper spend; limit-12 runs geo-bias the primary query instead. */
     public const FAN_OUT_THRESHOLD = 20;
+
+    public function __construct(
+        private readonly DiscoveryGeo $discoveryGeo = new DiscoveryGeo,
+    ) {}
 
     /** @var list<string> */
     private const SIGNAL_MODIFIERS = [
@@ -80,9 +84,6 @@ class QueryVariationGenerator
             );
             $variations[] = $this->withIcpTerritoryBias($brief, trim($seed.' site:linkedin.com/company'));
             $variations[] = $this->withIcpTerritoryBias($brief, trim('list of '.$seed));
-            if (! preg_match('/\bnigeria\b/iu', $seed)) {
-                $variations[] = $this->withIcpTerritoryBias($brief, trim($seed.' Nigeria'));
-            }
         }
 
         return $this->dedupeAndCap($variations, $needed);
@@ -175,51 +176,12 @@ class QueryVariationGenerator
     }
 
     /**
-     * ICP-brief mode only: append primary territory so Serper skews to ICP geography.
+     * ICP-brief mode only: append primary country so Serper skews to ICP geography.
      * Never rewrite a user's specific niche query.
      */
     private function withIcpTerritoryBias(IcpBrief $brief, string $query): string
     {
-        $query = trim($query);
-        if ($query === '' || $brief->hasUserQuery() || $brief->territories === []) {
-            return $query;
-        }
-
-        $geo = $this->primaryTerritoryLabel((string) $brief->territories[0]);
-        if ($geo === '') {
-            return $query;
-        }
-
-        if (preg_match('/\b'.preg_quote($geo, '/').'\b/iu', $query)) {
-            return $query;
-        }
-
-        return trim($query.' '.$geo);
-    }
-
-    private function primaryTerritoryLabel(string $territory): string
-    {
-        $territory = trim($territory);
-        if ($territory === '') {
-            return '';
-        }
-
-        $lower = mb_strtolower($territory);
-        // Prefer a searchable country/region label over a city list entry.
-        if (str_contains($lower, 'england') || $lower === 'uk' || str_contains($lower, 'united kingdom') || str_contains($lower, 'britain')) {
-            return 'England';
-        }
-        if (str_contains($lower, 'nigeria') || in_array($lower, ['lagos', 'abuja', 'kano', 'port harcourt', 'ibadan'], true)) {
-            return 'Nigeria';
-        }
-        if (str_contains($lower, 'kenya') || str_contains($lower, 'nairobi')) {
-            return 'Kenya';
-        }
-
-        // First comma-separated segment (e.g. "Lagos, NG" → Lagos).
-        $first = trim(explode(',', $territory)[0]);
-
-        return $first !== '' ? $first : $territory;
+        return $this->discoveryGeo->appendTerritoryClause($brief, $query);
     }
 
     /**

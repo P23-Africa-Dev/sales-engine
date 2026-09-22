@@ -4,6 +4,7 @@ namespace App\Services\Discovery\Adapters;
 
 use App\Models\ApiUsage;
 use App\Services\Discovery\Contracts\DiscoverySourceInterface;
+use App\Services\Discovery\DiscoveryGeo;
 use App\Services\Discovery\DTO\IcpBrief;
 use App\Services\Discovery\DTO\RawDiscoveryHit;
 use App\Services\Discovery\DTO\SearchContext;
@@ -19,6 +20,7 @@ class SerperDiscoveryAdapter implements DiscoverySourceInterface
     public function __construct(
         private readonly QueryIntentService $queryIntent,
         private readonly PersonNameValidator $personNameValidator,
+        private readonly DiscoveryGeo $discoveryGeo = new DiscoveryGeo,
     ) {}
 
     public function key(): string
@@ -54,6 +56,7 @@ class SerperDiscoveryAdapter implements DiscoverySourceInterface
 
         $baseUrl = rtrim((string) config('services.serper.base_url'), '/');
         $resultLimit = $this->resolveResultLimit($brief, $ctx);
+        $geoParams = $this->serperGeoParams($brief);
         $hits = collect();
         $uniqueQueries = array_values(array_unique(array_filter(array_map(
             fn(string $q): string => $this->sanitizeQuery($q),
@@ -61,7 +64,7 @@ class SerperDiscoveryAdapter implements DiscoverySourceInterface
         ))));
 
         foreach (array_chunk($uniqueQueries, 4) as $chunk) {
-            $responses = Http::pool(function ($pool) use ($chunk, $baseUrl, $resultLimit) {
+            $responses = Http::pool(function ($pool) use ($chunk, $baseUrl, $resultLimit, $geoParams) {
                 foreach ($chunk as $index => $query) {
                     $pool->as((string) $index)
                         ->timeout(30)
@@ -69,10 +72,7 @@ class SerperDiscoveryAdapter implements DiscoverySourceInterface
                             'X-API-KEY' => (string) config('services.serper.api_key'),
                             'Content-Type' => 'application/json',
                         ])
-                        ->post($baseUrl . '/search', [
-                            'q' => $query,
-                            'num' => $resultLimit,
-                        ]);
+                        ->post($baseUrl . '/search', $this->searchPayload($query, $resultLimit, $geoParams));
                 }
             });
 
@@ -94,7 +94,7 @@ class SerperDiscoveryAdapter implements DiscoverySourceInterface
                         'original_num' => $resultLimit,
                         'safe_num' => $safeLimit,
                     ]);
-                    $response = $this->postSearch($baseUrl, $safeQuery, $safeLimit);
+                    $response = $this->postSearch($baseUrl, $safeQuery, $safeLimit, $geoParams);
                     $activeQuery = $safeQuery;
                     $activeLimit = $safeLimit;
                 }
@@ -154,8 +154,8 @@ class SerperDiscoveryAdapter implements DiscoverySourceInterface
                     source: 'web',
                     provider: 'serper',
                     website: isset($item['link']) ? parse_url((string) $item['link'], PHP_URL_HOST) : null,
-                    location: $brief->territories[0] ?? null,
-                    sector: $brief->industries[0] ?? null,
+                    location: null,
+                    sector: null,
                     snippet: $item['snippet'] ?? null,
                     url: $url,
                     meta: ['title' => $title, 'target' => $brief->target],
@@ -272,17 +272,49 @@ class SerperDiscoveryAdapter implements DiscoverySourceInterface
         return min($configuredMax, $desired);
     }
 
-    private function postSearch(string $baseUrl, string $query, int $num): Response
+    /**
+     * @return array<string, string>
+     */
+    private function serperGeoParams(IcpBrief $brief): array
+    {
+        if (! $this->discoveryGeo->shouldApplyRetrievalGeo($brief)) {
+            return [];
+        }
+
+        $params = $this->discoveryGeo->serperParams($brief);
+
+        return array_filter(
+            [
+                'location' => isset($params['location']) ? trim((string) $params['location']) : '',
+                'gl' => isset($params['gl']) ? trim((string) $params['gl']) : '',
+            ],
+            static fn (string $value): bool => $value !== '',
+        );
+    }
+
+    /**
+     * @param  array<string, string>  $geoParams
+     * @return array<string, mixed>
+     */
+    private function searchPayload(string $query, int $num, array $geoParams): array
+    {
+        return array_merge([
+            'q' => $query,
+            'num' => $num,
+        ], $geoParams);
+    }
+
+    /**
+     * @param  array<string, string>  $geoParams
+     */
+    private function postSearch(string $baseUrl, string $query, int $num, array $geoParams = []): Response
     {
         return Http::timeout(30)
             ->withHeaders([
                 'X-API-KEY' => (string) config('services.serper.api_key'),
                 'Content-Type' => 'application/json',
             ])
-            ->post($baseUrl . '/search', [
-                'q' => $query,
-                'num' => $num,
-            ]);
+            ->post($baseUrl . '/search', $this->searchPayload($query, $num, $geoParams));
     }
 
     private function isFreeTierPatternBlock(Response $response): bool

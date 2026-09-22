@@ -118,7 +118,7 @@ class HighCapacityDiscoveryTest extends TestCase
                 $organic[] = [
                     'title' => "Brightpath Software {$n} LLC | Home",
                     'link' => "https://brightpath-{$n}.example.com",
-                    'snippet' => "Enterprise software company {$n} expanding globally.",
+                    'snippet' => "Enterprise software company {$n} expanding in the United States.",
                 ];
             }
 

@@ -724,12 +724,23 @@ class ChatService
         $count = count($leads);
 
         if ($count === 0) {
+            $territoryList = $this->icpTerritoryList($icp);
+
             if ($icpSearchBrief) {
+                if ($territoryList !== '') {
+                    return "No leads in {$territoryList} met your ICP search brief for \"{$icp->name}\". Try a more specific \"What we search for\" (products and buyers, not a definition), or loosen territory.";
+                }
+
                 return "No leads met your ICP search brief for \"{$icp->name}\". Edit \"What we search for\" in the ICP builder, or loosen territory/size filters, then generate again.";
             }
 
             if (trim($query) !== '') {
-                return 'No leads could be extracted for your search. Try a more specific niche (product, buyer, or geography), or generate from your active ICP without extra wording.';
+                $hint = 'No leads could be extracted for your search. Try a more specific niche (product, buyer, or geography), or generate from your active ICP without extra wording.';
+                if ($territoryList !== '') {
+                    $hint .= " Territory filter ({$territoryList}) still applied unless your query named a different country.";
+                }
+
+                return $hint;
             }
 
             return "No leads met the match threshold for ICP \"{$icp->name}\". Edit \"What we search for\" or loosen qualify filters.";
@@ -743,6 +754,20 @@ class ChatService
         }
 
         return $this->formatGroundedLeadNarration($leads, $count, $advisoryNote);
+    }
+
+    private function icpTerritoryList(IcpProfile $icp): string
+    {
+        $config = is_array($icp->config) ? $icp->config : [];
+        $territories = array_values(array_filter(
+            array_map(
+                static fn ($value): string => is_string($value) ? trim($value) : '',
+                $config['territories'] ?? [],
+            ),
+            static fn (string $value): bool => $value !== '',
+        ));
+
+        return implode(', ', array_slice($territories, 0, 3));
     }
 
     /**

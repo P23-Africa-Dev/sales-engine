@@ -351,4 +351,251 @@ class IcpSearchBriefAlignmentTest extends TestCase
             $meta['effective_query'] ?? null
         );
     }
+
+    public function test_generic_generate_geo_scopes_serper_and_drops_india_linkedin(): void
+    {
+        config([
+            'services.serper.api_key' => 'test-serper',
+            'services.serper.base_url' => 'https://google.serper.dev',
+            'services.glm.api_key' => '',
+            'services.apollo.api_key' => '',
+            'services.hunter.api_key' => '',
+            'services.bytemine.api_key' => '',
+            'services.youtube.api_key' => '',
+            'services.x.bearer_token' => '',
+            'services.meta.access_token' => '',
+            'queue.default' => 'sync',
+        ]);
+
+        [$user, $org] = $this->actingAsOrgMember();
+
+        IcpProfile::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'Logistics NG',
+            'is_active' => true,
+            'config' => array_merge(IcpProfile::defaultConfig(), [
+                'industries' => ['Logistics'],
+                'territories' => ['Nigeria'],
+                'decisionMakers' => ['UniqueDecisionMakerTitle'],
+                'customPrompt' => 'logistics 3PL operators',
+                'minMatchScore' => 1,
+            ]),
+        ]);
+
+        $session = ChatSession::query()->create([
+            'organization_id' => $org->id,
+            'user_id' => $user->id,
+            'title' => 'NG',
+        ]);
+
+        Http::fake([
+            'google.serper.dev/*' => Http::response([
+                'organic' => [
+                    [
+                        'title' => 'Pune Freight Hub',
+                        'link' => 'https://www.linkedin.com/company/pune-freight-hub',
+                        'snippet' => 'Logistics and 3PL operator in India.',
+                    ],
+                ],
+            ], 200),
+        ]);
+
+        $response = $this->withHeaders($this->orgHeaders($org))
+            ->postJson("/api/v1/chat/sessions/{$session->id}/messages", [
+                'body' => 'give me prospects (companies only)',
+                'intent' => 'generate_leads',
+            ]);
+
+        $response->assertOk();
+        $this->assertEmpty($response->json('data.assistant_message.leads') ?? []);
+
+        Http::assertSent(function ($request) {
+            $data = $request->data();
+            $q = mb_strtolower((string) ($data['q'] ?? ''));
+
+            $geoScoped = ($data['gl'] ?? null) === 'ng'
+                || str_contains((string) ($data['location'] ?? ''), 'Nigeria')
+                || str_contains($q, 'nigeria');
+
+            return $geoScoped && ! str_contains($q, 'uniquedecisionmakertitle');
+        });
+    }
+
+    public function test_generic_generate_keeps_lagos_logistics_hit(): void
+    {
+        config([
+            'services.serper.api_key' => 'test-serper',
+            'services.serper.base_url' => 'https://google.serper.dev',
+            'services.glm.api_key' => '',
+            'services.apollo.api_key' => '',
+            'services.hunter.api_key' => '',
+            'services.bytemine.api_key' => '',
+            'services.youtube.api_key' => '',
+            'services.x.bearer_token' => '',
+            'services.meta.access_token' => '',
+            'queue.default' => 'sync',
+        ]);
+
+        [$user, $org] = $this->actingAsOrgMember();
+
+        IcpProfile::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'Logistics NG',
+            'is_active' => true,
+            'config' => array_merge(IcpProfile::defaultConfig(), [
+                'industries' => ['Logistics'],
+                'territories' => ['Nigeria'],
+                'customPrompt' => 'logistics 3PL operators',
+                'minMatchScore' => 1,
+            ]),
+        ]);
+
+        $session = ChatSession::query()->create([
+            'organization_id' => $org->id,
+            'user_id' => $user->id,
+            'title' => 'NG keep',
+        ]);
+
+        Http::fake([
+            'google.serper.dev/*' => Http::response([
+                'organic' => [
+                    [
+                        'title' => 'Lagos 3PL Partners',
+                        'link' => 'https://lagos3pl.example.com',
+                        'snippet' => 'Contract logistics and 3PL warehousing in Lagos, Nigeria.',
+                    ],
+                ],
+            ], 200),
+        ]);
+
+        $response = $this->withHeaders($this->orgHeaders($org))
+            ->postJson("/api/v1/chat/sessions/{$session->id}/messages", [
+                'body' => 'give me prospects (companies only)',
+                'intent' => 'generate_leads',
+            ]);
+
+        $response->assertOk()
+            ->assertJsonPath('data.assistant_message.leads.0.name', 'Lagos 3PL Partners');
+    }
+
+    public function test_user_query_naming_india_may_persist_india_hit(): void
+    {
+        config([
+            'services.serper.api_key' => 'test-serper',
+            'services.serper.base_url' => 'https://google.serper.dev',
+            'services.glm.api_key' => '',
+            'services.apollo.api_key' => '',
+            'services.hunter.api_key' => '',
+            'services.bytemine.api_key' => '',
+            'services.youtube.api_key' => '',
+            'services.x.bearer_token' => '',
+            'services.meta.access_token' => '',
+            'queue.default' => 'sync',
+        ]);
+
+        [$user, $org] = $this->actingAsOrgMember();
+
+        IcpProfile::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'Logistics NG',
+            'is_active' => true,
+            'config' => array_merge(IcpProfile::defaultConfig(), [
+                'industries' => ['Logistics'],
+                'territories' => ['Nigeria'],
+                'customPrompt' => 'logistics 3PL operators',
+                'minMatchScore' => 1,
+            ]),
+        ]);
+
+        $session = ChatSession::query()->create([
+            'organization_id' => $org->id,
+            'user_id' => $user->id,
+            'title' => 'India override',
+        ]);
+
+        Http::fake([
+            'google.serper.dev/*' => Http::response([
+                'organic' => [
+                    [
+                        'title' => 'Pune Freight Hub',
+                        'link' => 'https://punefreight.example.com',
+                        'snippet' => 'Logistics and 3PL operator in India.',
+                    ],
+                ],
+            ], 200),
+        ]);
+
+        $response = $this->withHeaders($this->orgHeaders($org))
+            ->postJson("/api/v1/chat/sessions/{$session->id}/messages", [
+                'body' => 'companies in India (companies only)',
+                'intent' => 'generate_leads',
+            ]);
+
+        $response->assertOk()
+            ->assertJsonPath('data.assistant_message.leads.0.name', 'Pune Freight Hub');
+    }
+
+    public function test_authoritative_people_query_does_not_require_nigeria_in_q(): void
+    {
+        config([
+            'services.serper.api_key' => 'test-serper',
+            'services.serper.base_url' => 'https://google.serper.dev',
+            'services.glm.api_key' => '',
+            'services.apollo.api_key' => '',
+            'services.hunter.api_key' => '',
+            'services.bytemine.api_key' => '',
+            'services.youtube.api_key' => '',
+            'services.x.bearer_token' => '',
+            'services.meta.access_token' => '',
+            'queue.default' => 'sync',
+        ]);
+
+        [$user, $org] = $this->actingAsOrgMember();
+
+        IcpProfile::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'Logistics NG',
+            'is_active' => true,
+            'config' => array_merge(IcpProfile::defaultConfig(), [
+                'territories' => ['Nigeria'],
+                'customPrompt' => 'logistics 3PL operators',
+                'minMatchScore' => 1,
+            ]),
+        ]);
+
+        $session = ChatSession::query()->create([
+            'organization_id' => $org->id,
+            'user_id' => $user->id,
+            'title' => 'Wealth',
+        ]);
+
+        Http::fake([
+            'google.serper.dev/*' => Http::response([
+                'organic' => [
+                    [
+                        'title' => 'Top 10 Wealthiest Men in the World',
+                        'link' => 'https://www.forbes.com/billionaires',
+                        'snippet' => '1. Bernard Arnault 2. Elon Musk 3. Jeff Bezos',
+                    ],
+                ],
+            ], 200),
+        ]);
+
+        $response = $this->withHeaders($this->orgHeaders($org))
+            ->postJson("/api/v1/chat/sessions/{$session->id}/messages", [
+                'body' => 'top 10 wealthiest men',
+                'intent' => 'generate_leads',
+            ]);
+
+        $response->assertOk();
+
+        Http::assertSent(function ($request) {
+            $data = $request->data();
+            $q = mb_strtolower((string) ($data['q'] ?? ''));
+
+            return str_contains($q, 'forbes')
+                && ! str_contains($q, 'nigeria')
+                && ($data['gl'] ?? null) !== 'ng';
+        });
+    }
 }

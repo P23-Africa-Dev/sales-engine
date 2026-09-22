@@ -10,6 +10,7 @@ use App\Models\Organization;
 use App\Models\User;
 use App\Services\CompanyCache\CompanyCacheService;
 use App\Services\Discovery\Contracts\DiscoverySourceInterface;
+use App\Services\Discovery\DiscoveryGeo;
 use App\Services\Discovery\DTO\IcpBrief;
 use App\Services\Discovery\DTO\RawDiscoveryHit;
 use App\Services\Discovery\DTO\SearchContext;
@@ -76,6 +77,7 @@ class DiscoveryOrchestrator
         private readonly ProfileUrlValidator $profileUrlValidator,
         private readonly LeadQueryNormalizer $leadQueryNormalizer,
         private readonly IcpFilterService $icpFilter = new IcpFilterService,
+        private readonly DiscoveryGeo $discoveryGeo = new DiscoveryGeo,
     ) {}
 
     public function setQualityThreshold(string $threshold): self
@@ -284,6 +286,7 @@ class DiscoveryOrchestrator
                         if (
                             in_array($intent, ['generate_leads', 'generate_more_leads'], true)
                             && $passBrief->isPeopleSearch()
+                            && ! $passBrief->isAuthoritativePeopleQuery()
                             && $passLimit <= QueryIntentService::DEFAULT_LEAD_LIMIT
                         ) {
                             $firstPassQueries = $this->leadQueryNormalizer->firstBatchPeopleQueries($icp);
@@ -523,6 +526,10 @@ class DiscoveryOrchestrator
                         'dropped_creatability' => $this->gateStats['dropped_creatability'],
                         'dropped_hard_gate' => $this->gateStats['dropped_hard_gate'],
                         'kept_advisory_profile' => $this->gateStats['kept_advisory_profile'],
+                        'gate_stats' => $this->gateStats,
+                        'serper_geo' => $this->discoveryGeo->shouldApplyRetrievalGeo($brief)
+                            ? $this->discoveryGeo->serperParams($brief)
+                            : [],
                         'fan_out_strategy_used' => $fanOutUsed,
                         'quality_threshold' => $this->qualityThreshold,
                         'backfill_passes' => $backfillPasses,
@@ -595,7 +602,7 @@ class DiscoveryOrchestrator
             return self::QUALITY_VOLUME;
         }
 
-        if ($effectiveLimit >= 20) {
+        if ($effectiveLimit >= 12) {
             return self::QUALITY_BALANCED;
         }
 
@@ -627,7 +634,8 @@ class DiscoveryOrchestrator
         } elseif ($fanOut) {
             $variations = $this->queryVariationGenerator->generate($brief, $effectiveLimit);
         } else {
-            $variations = [$brief->searchQuery()];
+            $q = $this->discoveryGeo->appendTerritoryClause($brief, $brief->searchQuery());
+            $variations = [$q];
         }
 
         $queriesExecuted = array_values(array_filter(array_map('strval', $variations)));
@@ -1038,12 +1046,23 @@ class DiscoveryOrchestrator
                 $scores,
             );
 
-            // ICP-brief mode: hard-gate firmographics, but keep trusted LinkedIn profiles
-            // as advisory leads (fixes zero-yield when Serper returns global hits).
-            // Hunter company path stays strict below.
-            if (! $hasUserQuery && ! $this->passesIcpHardGate($brief, $extracted)) {
+            $gateResult = $this->icpHardGateResult($brief, $extracted);
+            $territoryPassed = (bool) ($gateResult->reasons['territory'] ?? true);
+            $enforceTerritory = $brief->territories !== []
+                && ! $brief->isAuthoritativePeopleQuery()
+                && ! $this->discoveryGeo->userNamedDifferentCountry($brief);
+
+            if ($enforceTerritory && ! $territoryPassed) {
+                $this->gateStats['dropped_hard_gate']++;
+                continue;
+            }
+
+            // ICP-brief mode: hard-gate remaining firmographics. Trusted LinkedIn URLs
+            // may stay as advisory only when territory passed (or was unconstrained).
+            if (! $hasUserQuery && ! $gateResult->passed) {
                 $isHunter = mb_strtolower((string) ($hit->provider ?? '')) === 'hunter';
-                if (! $isHunter && $this->hasTrustedEntityProfileUrl($brief, $extracted, $hit)) {
+                $industryOnlyFail = $territoryPassed && ($gateResult->reasons['industry'] ?? true) === false;
+                if (! $isHunter && $industryOnlyFail && $this->hasTrustedEntityProfileUrl($brief, $extracted, $hit)) {
                     $icpRecommended = false;
                     $extracted['low_confidence'] = true;
                     $this->gateStats['kept_advisory_profile']++;
@@ -1053,8 +1072,9 @@ class DiscoveryOrchestrator
                 }
             }
 
-            // ICP-driven runs: when industries/territories are set, refuse unverified firmographics
-            // unless the candidate has a trusted direct profile URL (/in/ or /company/).
+            // ICP-driven runs: when industries are set, refuse unverified firmographics
+            // unless the candidate has a trusted direct profile URL. Territory misses
+            // already dropped above — do not keep missing-geo LinkedIn hits.
             if (
                 ! $hasUserQuery
                 && ($brief->industries !== [] || $brief->territories !== [])
@@ -1067,6 +1087,10 @@ class DiscoveryOrchestrator
                     ]),
                     $brief,
                 );
+                if ($fit['unknown'] && $enforceTerritory) {
+                    $this->gateStats['dropped_hard_gate']++;
+                    continue;
+                }
                 if ($fit['unknown'] && ! $this->hasTrustedEntityProfileUrl($brief, $extracted, $hit)) {
                     continue;
                 }
@@ -1174,6 +1198,14 @@ class DiscoveryOrchestrator
      */
     private function passesIcpHardGate(IcpBrief $brief, array $extracted): bool
     {
+        return $this->icpHardGateResult($brief, $extracted)->passed;
+    }
+
+    /**
+     * @param  array<string, mixed>  $extracted
+     */
+    private function icpHardGateResult(IcpBrief $brief, array $extracted): \App\Services\IcpFiltering\DTO\IcpFilterResult
+    {
         $industry = trim((string) ($extracted['industry'] ?? '')) ?: null;
         $territory = trim((string) ($extracted['location'] ?? $extracted['territory'] ?? $extracted['city'] ?? '')) ?: null;
         $companySize = trim((string) ($extracted['company_size'] ?? $extracted['employee_count'] ?? '')) ?: null;
@@ -1183,7 +1215,9 @@ class DiscoveryOrchestrator
         if ($industry !== null) {
             $available[] = 'industry';
         }
-        if ($territory !== null) {
+        if ($brief->territories !== []) {
+            $available[] = 'territory';
+        } elseif ($territory !== null) {
             $available[] = 'territory';
         }
         if ($companySize !== null) {
@@ -1191,10 +1225,6 @@ class DiscoveryOrchestrator
         }
         if ($revenue !== null) {
             $available[] = 'revenue';
-        }
-
-        if ($available === []) {
-            return true;
         }
 
         return $this->icpFilter->passes(
@@ -1206,7 +1236,7 @@ class DiscoveryOrchestrator
                 territory: $territory,
             ),
             $available,
-        )->passed;
+        );
     }
 
     /**

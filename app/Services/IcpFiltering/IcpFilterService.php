@@ -141,6 +141,7 @@ class IcpFilterService
         ['south africa', 'johannesburg', 'cape town', 'durban'],
         ['egypt', 'cairo'],
         ['united states', 'usa', 'u.s.', 'u.s.a.', 'america', 'us'],
+        ['india', 'bharat', 'mumbai', 'delhi', 'bangalore', 'bengaluru', 'hyderabad', 'chennai', 'pune', 'kolkata', 'in'],
     ];
 
     /**
