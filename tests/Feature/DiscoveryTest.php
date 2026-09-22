@@ -580,11 +580,11 @@ class DiscoveryTest extends TestCase
             ->assertJsonPath('data.status', 'completed');
 
         $leads = $response->json('data.leads') ?? [];
-        $names = collect($leads)->pluck('name')->map(fn ($n) => mb_strtolower((string) $n))->all();
+        $names = collect($leads)->pluck('name')->map(fn($n) => mb_strtolower((string) $n))->all();
         $this->assertNotContains('loader market research', $names);
         $this->assertNotContains('construction equipment market', $names);
 
-        $person = collect($leads)->first(fn ($lead) => ($lead['entity_type'] ?? null) === 'person');
+        $person = collect($leads)->first(fn($lead) => ($lead['entity_type'] ?? null) === 'person');
         $this->assertNotNull($person);
         $this->assertStringContainsStringIgnoringCase('Ada', (string) $person['name']);
         $linkedin = (string) ($person['linkedin_url'] ?? ($person['profile_urls'][0] ?? ''));
@@ -717,5 +717,103 @@ class DiscoveryTest extends TestCase
         $this->assertFalse((bool) ($placeholder->meta['pending'] ?? true));
         $this->assertTrue((bool) ($placeholder->meta['cancelled'] ?? false));
         $this->assertStringContainsString('stopped', mb_strtolower($placeholder->body));
+    }
+
+    public function test_icp_mode_keeps_person_with_linkedin_in_when_firmographics_unknown(): void
+    {
+        config([
+            'services.serper.api_key' => 'test-serper',
+            'services.glm.api_key' => '',
+        ]);
+
+        [, $org] = $this->actingAsOrgMember();
+
+        IcpProfile::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'UK Construction',
+            'is_active' => true,
+            'config' => array_merge(IcpProfile::defaultConfig(), [
+                'industries' => ['Construction'],
+                'territories' => ['United Kingdom'],
+                'minMatchScore' => 1,
+                'enrichContactDetails' => false,
+            ]),
+        ]);
+
+        Http::fake([
+            'google.serper.dev/*' => Http::response([
+                'organic' => [
+                    [
+                        'title' => 'James Whitfield - Managing Director',
+                        'link' => 'https://www.linkedin.com/in/james-whitfield',
+                        'snippet' => 'Managing Director focused on growth.',
+                    ],
+                ],
+            ], 200),
+        ]);
+
+        $response = $this->withHeaders($this->orgHeaders($org))
+            ->postJson('/api/v1/discovery/runs', [
+                'query' => 'give me prospects (people only)',
+                'intent' => 'generate_leads',
+                'limit' => 5,
+            ]);
+
+        $response->assertCreated()
+            ->assertJsonPath('data.status', 'completed');
+
+        $leads = $response->json('data.leads') ?? [];
+        $this->assertNotEmpty($leads, 'Trusted /in/ profile should pass ICP unknown-firmographic gate');
+        $this->assertSame('person', $leads[0]['entity_type'] ?? null);
+        $linkedin = (string) ($leads[0]['linkedin_url'] ?? $leads[0]['profile_urls'][0] ?? '');
+        $this->assertStringContainsString('linkedin.com/in/', mb_strtolower($linkedin));
+    }
+
+    public function test_icp_mode_drops_person_with_only_post_url_when_firmographics_unknown(): void
+    {
+        config([
+            'services.serper.api_key' => 'test-serper',
+            'services.glm.api_key' => '',
+        ]);
+
+        [, $org] = $this->actingAsOrgMember();
+
+        IcpProfile::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'UK Construction',
+            'is_active' => true,
+            'config' => array_merge(IcpProfile::defaultConfig(), [
+                'industries' => ['Construction'],
+                'territories' => ['United Kingdom'],
+                'minMatchScore' => 1,
+                'enrichContactDetails' => false,
+            ]),
+        ]);
+
+        Http::fake([
+            'google.serper.dev/*' => Http::response([
+                'organic' => [
+                    [
+                        'title' => 'James Whitfield shared a post',
+                        'link' => 'https://www.linkedin.com/posts/james-whitfield_growth-activity-999',
+                        'snippet' => 'Thoughts on the market.',
+                    ],
+                ],
+            ], 200),
+        ]);
+
+        $response = $this->withHeaders($this->orgHeaders($org))
+            ->postJson('/api/v1/discovery/runs', [
+                'query' => 'give me prospects (people only)',
+                'intent' => 'generate_leads',
+                'limit' => 5,
+            ]);
+
+        $response->assertCreated()
+            ->assertJsonPath('data.status', 'completed');
+
+        $leads = $response->json('data.leads') ?? [];
+        $people = collect($leads)->where('entity_type', 'person')->values()->all();
+        $this->assertSame([], $people, 'Post-only hits must not become person leads');
     }
 }

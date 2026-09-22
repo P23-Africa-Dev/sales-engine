@@ -348,12 +348,9 @@ class DiscoveryOrchestrator
                     }
 
                     // Soft-complete a pass only with usable yield past soft deadline.
+                    // Never abort while under half of the requested quota (keep backfilling).
                     // Never abort the whole both-mode run before people_pass has finished at least one cycle.
-                    if (
-                        $passYield >= $passMinUsable
-                        && $this->pastSoftDeadline()
-                        && $this->remainingSeconds() < 25
-                    ) {
+                    if ($this->shouldSoftCompletePass($passYield, $passMinUsable, count($leadsPayload), $effectiveLimit)) {
                         if ($brief->isBothSearch() && ! $peoplePassCompleted && ! $isPeoplePass) {
                             // Still need to give people_pass a turn — skip further company backfill only.
                             break;
@@ -554,6 +551,24 @@ class DiscoveryOrchestrator
         return max(0, $this->deadlineAt - microtime(true));
     }
 
+    /**
+     * Soft-complete only when we already have at least half the requested quota.
+     * Under-quota runs keep backfilling until the hard deadline.
+     */
+    private function shouldSoftCompletePass(
+        int $passYield,
+        int $passMinUsable,
+        int $leadCount,
+        int $effectiveLimit,
+    ): bool {
+        $halfQuota = (int) ceil($effectiveLimit / 2);
+
+        return $passYield >= $passMinUsable
+            && $leadCount >= $halfQuota
+            && $this->pastSoftDeadline()
+            && $this->remainingSeconds() < 25;
+    }
+
     private function shouldUseFanOut(int $limit): bool
     {
         return $limit >= QueryVariationGenerator::FAN_OUT_THRESHOLD;
@@ -638,7 +653,7 @@ class DiscoveryOrchestrator
                 continue;
             }
 
-            $cacheKey = $source->key() . '|' . mb_strtolower(trim($primaryBrief->searchQuery())).'|'.$effectiveLimit;
+            $cacheKey = $source->key() . '|' . mb_strtolower(trim($primaryBrief->searchQuery())) . '|' . $effectiveLimit;
             if (isset($this->registryHitCache[$cacheKey])) {
                 $batch = $this->registryHitCache[$cacheKey];
             } else {
@@ -1011,8 +1026,8 @@ class DiscoveryOrchestrator
                 continue;
             }
 
-            // ICP-driven runs: when industries/territories are set, refuse unverified firmographics.
-            // Prefer a thinner trusted batch over "Matched search; fit not verified" fillers.
+            // ICP-driven runs: when industries/territories are set, refuse unverified firmographics
+            // unless the candidate has a trusted direct profile URL (/in/ or /company/).
             if (
                 ! $hasUserQuery
                 && ($brief->industries !== [] || $brief->territories !== [])
@@ -1025,7 +1040,7 @@ class DiscoveryOrchestrator
                     ]),
                     $brief,
                 );
-                if ($fit['unknown']) {
+                if ($fit['unknown'] && ! $this->hasTrustedEntityProfileUrl($brief, $extracted, $hit)) {
                     continue;
                 }
             }
@@ -1272,7 +1287,7 @@ class DiscoveryOrchestrator
             $existing = is_array($extracted['profile_urls'] ?? null) ? $extracted['profile_urls'] : [];
             $existing[] = $hitUrl;
             $extracted['profile_urls'] = array_values(array_unique(array_filter(
-                array_map(static fn ($u) => is_string($u) ? trim($u) : '', $existing),
+                array_map(static fn($u) => is_string($u) ? trim($u) : '', $existing),
             )));
 
             if (
@@ -1334,7 +1349,11 @@ class DiscoveryOrchestrator
         $path = (string) (parse_url($withScheme, PHP_URL_PATH) ?: '');
 
         if (str_contains($host, 'linkedin.com')) {
-            return (bool) preg_match('~/(in|company)/~', $path);
+            if (preg_match('~/(posts|pulse|feed|recent-activity)\b~i', $path) || preg_match('~activity-~i', $path)) {
+                return false;
+            }
+
+            return (bool) preg_match('~/(in|company)/[^/]+~', $path);
         }
 
         return str_contains($host, 'about.me')
@@ -1342,6 +1361,84 @@ class DiscoveryOrchestrator
             || str_contains($host, 'xing.com')
             || str_contains($host, 'wellfound.com')
             || str_contains($host, 'angel.co');
+    }
+
+    /** True when a URL/host must never be stored as a company website field. */
+    private function isProfileOrSocialHost(string $urlOrHost): bool
+    {
+        $normalized = trim($urlOrHost);
+        if ($normalized === '') {
+            return false;
+        }
+
+        $withScheme = str_contains($normalized, '://') ? $normalized : 'https://' . $normalized;
+        $host = mb_strtolower((string) (parse_url($withScheme, PHP_URL_HOST) ?: $normalized));
+
+        return str_contains($host, 'linkedin.com')
+            || str_contains($host, 'about.me')
+            || str_contains($host, 'crunchbase.com')
+            || str_contains($host, 'xing.com')
+            || str_contains($host, 'wellfound.com')
+            || str_contains($host, 'angel.co');
+    }
+
+    /**
+     * Trusted identity for ICP unknown-firmographic keep: entity-matching profile URL.
+     * People need /in/{slug}; companies need /company/{slug}; never posts/articles.
+     *
+     * @param  array<string, mixed>  $extracted
+     */
+    private function hasTrustedEntityProfileUrl(IcpBrief $brief, array $extracted, RawDiscoveryHit $hit): bool
+    {
+        $wantPerson = $brief->isPeopleSearch();
+        $candidates = [];
+
+        foreach (['linkedin_url', 'profile_url', 'url'] as $key) {
+            $value = trim((string) ($extracted[$key] ?? ''));
+            if ($value !== '') {
+                $candidates[] = $value;
+            }
+        }
+
+        $profileUrls = $extracted['profile_urls'] ?? null;
+        if (is_array($profileUrls)) {
+            foreach ($profileUrls as $url) {
+                $value = trim((string) $url);
+                if ($value !== '') {
+                    $candidates[] = $value;
+                }
+            }
+        }
+
+        if (filled($hit->url)) {
+            $candidates[] = (string) $hit->url;
+        }
+
+        foreach ($candidates as $url) {
+            if (! $this->looksLikeProfileUrl($url)) {
+                continue;
+            }
+
+            $withScheme = str_contains($url, '://') ? $url : 'https://' . $url;
+            $path = (string) (parse_url($withScheme, PHP_URL_PATH) ?: '');
+            $host = mb_strtolower((string) (parse_url($withScheme, PHP_URL_HOST) ?: ''));
+
+            if (str_contains($host, 'linkedin.com')) {
+                if ($wantPerson && preg_match('~/in/[^/]+~', $path)) {
+                    return true;
+                }
+                if (! $wantPerson && preg_match('~/company/[^/]+~', $path)) {
+                    return true;
+                }
+
+                continue;
+            }
+
+            // Non-LinkedIn trusted profile hosts count for either entity when looksLikeProfileUrl passed.
+            return true;
+        }
+
+        return false;
     }
 
     /**
@@ -1458,15 +1555,17 @@ class DiscoveryOrchestrator
             if (! str_contains($host, 'linkedin.com')) {
                 continue;
             }
-            if (preg_match('~/in/~', $path) || ($allowCompanyLinkedIn && preg_match('~/company/~', $path))) {
+            // Never treat posts/pulse/feed as a profile URL.
+            if (preg_match('~/(posts|pulse|feed|recent-activity)\b~i', $path) || preg_match('~activity-~i', $path)) {
+                continue;
+            }
+            if ($entityType === 'person' && preg_match('~/in/[^/]+~', $path)) {
                 $linkedinUrl = $url;
                 break;
             }
-        }
-        if ($linkedinUrl === '' && $validUrls !== []) {
-            $first = $validUrls[0];
-            if (str_contains(mb_strtolower((string) parse_url($first, PHP_URL_HOST)), 'linkedin.com')) {
-                $linkedinUrl = $first;
+            if ($entityType === 'company' && preg_match('~/company/[^/]+~', $path)) {
+                $linkedinUrl = $url;
+                break;
             }
         }
 
@@ -1474,8 +1573,17 @@ class DiscoveryOrchestrator
             ($linkedinUrl !== '' ? $linkedinUrl : null)
             ?? ($profileUrls[0] ?? null)
             ?? ($extracted['business_fields']['source_url'] ?? null)
-            ?? $hit->url
         ));
+        // Discovery hit URLs are often posts/articles — only use as source when they are real profiles.
+        if ($sourceUrl === '' && filled($hit->url) && $this->looksLikeProfileUrl((string) $hit->url)) {
+            $hitPath = (string) (parse_url((string) $hit->url, PHP_URL_PATH) ?: '');
+            $hitOk = $entityType === 'person'
+                ? (bool) preg_match('~/in/[^/]+~', $hitPath)
+                : (bool) preg_match('~/company/[^/]+~', $hitPath);
+            if ($hitOk) {
+                $sourceUrl = (string) $hit->url;
+            }
+        }
 
         $nextAction = trim((string) ($extracted['next_action'] ?? ''));
         if ($nextAction === '') {
@@ -1492,22 +1600,18 @@ class DiscoveryOrchestrator
         $email = trim((string) ($extracted['email'] ?? ''));
         $phone = trim((string) ($extracted['phone'] ?? ''));
         $website = trim((string) ($extracted['website'] ?? ''));
+        if ($website !== '' && $this->isProfileOrSocialHost($website)) {
+            $website = '';
+        }
         if ($website === '' && filled($hit->website)) {
             $hitWebsite = trim((string) $hit->website);
-            $hitWebsiteHost = mb_strtolower((string) (parse_url(
-                str_contains($hitWebsite, '://') ? $hitWebsite : 'https://' . $hitWebsite,
-                PHP_URL_HOST
-            ) ?: $hitWebsite));
-            if (
-                ! str_contains($hitWebsiteHost, 'linkedin.com')
-                && ! str_contains($hitWebsiteHost, 'about.me')
-            ) {
+            if (! $this->isProfileOrSocialHost($hitWebsite)) {
                 $website = $hitWebsite;
             }
         }
         if ($website === '' && filled($hit->url)) {
             $host = parse_url((string) $hit->url, PHP_URL_HOST);
-            if (is_string($host) && $host !== '' && ! str_contains(mb_strtolower($host), 'linkedin.com')) {
+            if (is_string($host) && $host !== '' && ! $this->isProfileOrSocialHost($host)) {
                 $website = $host;
             }
         }

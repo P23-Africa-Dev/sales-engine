@@ -725,7 +725,7 @@ class ChatService
 
         if ($count === 0) {
             if ($icpSearchBrief) {
-                return "No leads met your ICP search brief for \"{$icp->name}\". Edit \"What we search for\" in the ICP builder, or loosen territory/size filters — then generate again.";
+                return "No leads met your ICP search brief for \"{$icp->name}\". Edit \"What we search for\" in the ICP builder, or loosen territory/size filters, then generate again.";
             }
 
             if (trim($query) !== '') {
