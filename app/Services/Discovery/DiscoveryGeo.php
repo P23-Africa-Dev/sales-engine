@@ -333,6 +333,34 @@ final class DiscoveryGeo
     }
 
     /**
+     * Tokens that must not appear in an ICP search brief (countries, cities, ISO aliases).
+     *
+     * @return list<string>
+     */
+    public function geoStopTokens(): array
+    {
+        $skip = ['in', 'us', 'or', 'and', 'the', 'to'];
+        $tokens = [];
+        foreach (self::REGIONS as $region) {
+            $candidates = array_merge(
+                [mb_strtolower($region['label']), mb_strtolower($region['gl']), mb_strtolower($region['hunterCountry'])],
+                $region['aliases'],
+                array_keys($region['cities']),
+                array_map(static fn (string $label): string => mb_strtolower($label), array_values($region['cities'])),
+            );
+            foreach ($candidates as $token) {
+                $token = trim((string) $token);
+                if ($token === '' || mb_strlen($token) < 3 || in_array($token, $skip, true)) {
+                    continue;
+                }
+                $tokens[$token] = $token;
+            }
+        }
+
+        return array_values($tokens);
+    }
+
+    /**
      * @return array{label: string, gl: string, hunterCountry: string, aliases: list<string>, cities: array<string, string>}|null
      */
     private function resolveRegion(IcpBrief $brief): ?array
