@@ -40,7 +40,7 @@ final class DiscoveryGeo
             'label' => 'England',
             'gl' => 'uk',
             'hunterCountry' => 'GB',
-            'aliases' => ['england', 'united kingdom', 'britain', 'great britain', 'u.k.'],
+            'aliases' => ['england', 'united kingdom', 'britain', 'great britain', 'u.k.', 'uk', 'gb'],
             'cities' => [
                 'london' => 'London',
                 'manchester' => 'Manchester',
@@ -277,11 +277,24 @@ final class DiscoveryGeo
             return null;
         }
 
+        $fromTld = $this->inferLocationFromTld($haystack);
+        if ($fromTld !== null) {
+            return $fromTld;
+        }
+
         foreach (self::REGIONS as $region) {
             foreach ($region['cities'] as $cityKey => $cityLabel) {
                 if (preg_match('/\b'.preg_quote($cityKey, '/').'\b/u', $haystack)) {
                     return $cityLabel.', '.$region['label'];
                 }
+            }
+            $iso = mb_strtolower($region['hunterCountry']);
+            // Match HQ codes like NG/GB; skip US/IN which collide with English words.
+            if (
+                ! in_array($iso, ['us', 'in'], true)
+                && preg_match('/\b'.preg_quote($iso, '/').'\b/u', $haystack)
+            ) {
+                return $region['label'];
             }
             foreach ($region['aliases'] as $alias) {
                 if (mb_strlen($alias) < 3) {
@@ -291,6 +304,29 @@ final class DiscoveryGeo
                     return $region['label'];
                 }
             }
+        }
+
+        return null;
+    }
+
+    /**
+     * Country from a ccTLD on a URL/domain. Never treat .com as a country.
+     */
+    public function inferLocationFromTld(string $haystack): ?string
+    {
+        $haystack = mb_strtolower(trim($haystack));
+        if ($haystack === '') {
+            return null;
+        }
+
+        if (preg_match('/(?:^|[\/\s:@])(?:[\w-]+\.)*[\w-]+\.co\.uk(?:[\/:?#\s]|$)/u', $haystack)
+            || preg_match('/(?:^|[\/\s:@])(?:[\w-]+\.)*[\w-]+\.uk(?:[\/:?#\s]|$)/u', $haystack)
+        ) {
+            return 'England';
+        }
+
+        if (preg_match('/(?:^|[\/\s:@])(?:[\w-]+\.)*[\w-]+\.ng(?:[\/:?#\s]|$)/u', $haystack)) {
+            return 'Nigeria';
         }
 
         return null;

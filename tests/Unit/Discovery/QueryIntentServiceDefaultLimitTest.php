@@ -28,7 +28,8 @@ class QueryIntentServiceDefaultLimitTest extends TestCase
     {
         $service = new QueryIntentService;
 
-        $this->assertSame(20, $service->analyze('Find 20 leads in FinTech', 'generate_leads')['limit']);
-        $this->assertSame(50, $service->analyze('give me 50 SaaS companies', 'generate_leads')['limit']);
+        $this->assertSame(25, $service->analyze('give me 25 prospects', 'generate_leads')['limit']);
+        $this->assertTrue($service->isGenericLeadRequest('give me 25 prospects'));
+        $this->assertSame(40, $service->analyze('give me 40 prospects (companies only)', 'generate_leads')['limit']);
     }
 }

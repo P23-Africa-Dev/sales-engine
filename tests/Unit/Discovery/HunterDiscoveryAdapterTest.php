@@ -81,7 +81,7 @@ class HunterDiscoveryAdapterTest extends TestCase
         $adapter = new HunterDiscoveryAdapter;
         $hits = $adapter->search($this->brief(), new SearchContext(1, 1, 5, 'generate_leads'));
 
-        $this->assertCount(5, $hits);
+        $this->assertCount(15, $hits);
     }
 
     private function brief(): IcpBrief

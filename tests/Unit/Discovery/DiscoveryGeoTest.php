@@ -91,6 +91,27 @@ class DiscoveryGeoTest extends TestCase
         $this->assertFalse($geo->shouldApplyRetrievalGeo($brief));
     }
 
+    public function test_tld_ng_and_co_uk_infer_countries_not_com(): void
+    {
+        $geo = new DiscoveryGeo;
+
+        $this->assertSame('Nigeria', $geo->inferLocationFromTld('https://acme.com.ng/about'));
+        $this->assertSame('England', $geo->inferLocationFromTld('https://freight.co.uk/'));
+        $this->assertNull($geo->inferLocationFromTld('https://acme.com/about'));
+        $this->assertSame('Nigeria', $geo->inferLocationFromText('Visit kobo360.com.ng for freight'));
+        $this->assertSame('Nigeria', $geo->inferLocationFromText('HQ country NG'));
+        $this->assertSame('England', $geo->inferLocationFromText('registered in GB'));
+    }
+
+    public function test_gb_iso_resolves_england_region(): void
+    {
+        $geo = new DiscoveryGeo;
+        $brief = $this->brief(['territories' => ['GB']]);
+
+        $this->assertSame('England', $geo->primaryLabel($brief));
+        $this->assertSame('uk', $geo->serperParams($brief)['gl'] ?? null);
+    }
+
     /**
      * @param  array<string, mixed>  $overrides
      */

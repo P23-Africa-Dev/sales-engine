@@ -82,8 +82,12 @@ class HunterDiscoveryAdapter implements DiscoverySourceInterface
                 return collect();
             }
 
+            $registryCap = $ctx->limit <= 40
+                ? min(40, max(1, $ctx->limit * 3))
+                : max(1, (int) ceil($ctx->limit * 1.5));
+
             return collect($items)
-                ->take(max(1, $ctx->limit))
+                ->take($registryCap)
                 ->map(function ($item) use ($brief) {
                     $row = is_array($item) ? $item : [];
                     $name = trim((string) ($row['organization'] ?? $row['company'] ?? $row['name'] ?? ''));

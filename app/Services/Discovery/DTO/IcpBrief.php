@@ -215,8 +215,7 @@ readonly class IcpBrief
     {
         $interest = trim($this->customPrompt);
         if ($interest !== '') {
-            $extra = $this->concreteNounsFromText(trim($this->description), $interest, 4);
-            return $extra !== '' ? trim($interest . ' ' . $extra) : $interest;
+            return $interest;
         }
 
         $description = trim($this->description);

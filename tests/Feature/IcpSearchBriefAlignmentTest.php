@@ -598,4 +598,220 @@ class IcpSearchBriefAlignmentTest extends TestCase
                 && ($data['gl'] ?? null) !== 'ng';
         });
     }
+
+    public function test_linkedin_company_without_place_is_kept_advisory(): void
+    {
+        config([
+            'services.serper.api_key' => 'test-serper',
+            'services.serper.base_url' => 'https://google.serper.dev',
+            'services.glm.api_key' => '',
+            'services.apollo.api_key' => '',
+            'services.hunter.api_key' => '',
+            'services.bytemine.api_key' => '',
+            'services.youtube.api_key' => '',
+            'services.x.bearer_token' => '',
+            'services.meta.access_token' => '',
+            'queue.default' => 'sync',
+        ]);
+
+        [$user, $org] = $this->actingAsOrgMember();
+
+        IcpProfile::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'Logistics NG',
+            'is_active' => true,
+            'config' => array_merge(IcpProfile::defaultConfig(), [
+                'industries' => ['Logistics'],
+                'territories' => ['Nigeria'],
+                'customPrompt' => 'logistics 3PL operators',
+                'minMatchScore' => 1,
+            ]),
+        ]);
+
+        $session = ChatSession::query()->create([
+            'organization_id' => $org->id,
+            'user_id' => $user->id,
+            'title' => 'Unknown geo keep',
+        ]);
+
+        Http::fake([
+            'google.serper.dev/*' => Http::response([
+                'organic' => [
+                    [
+                        'title' => 'Cedarline Warehousing',
+                        'link' => 'https://www.linkedin.com/company/cedarline-warehousing',
+                        'snippet' => 'Contract logistics and 3PL warehousing for retailers.',
+                    ],
+                ],
+            ], 200),
+        ]);
+
+        $response = $this->withHeaders($this->orgHeaders($org))
+            ->postJson("/api/v1/chat/sessions/{$session->id}/messages", [
+                'body' => 'give me prospects (companies only)',
+                'intent' => 'generate_leads',
+            ]);
+
+        $response->assertOk();
+        $leads = $response->json('data.assistant_message.leads') ?? [];
+        $this->assertNotEmpty($leads);
+        $this->assertSame('Cedarline Warehousing', $leads[0]['name'] ?? null);
+        $this->assertFalse((bool) ($leads[0]['icp_recommended'] ?? true));
+        $this->assertSame('unknown', $leads[0]['location_status'] ?? null);
+    }
+
+    public function test_hunter_ng_hit_is_not_starved_behind_serper_junk(): void
+    {
+        config([
+            'services.serper.api_key' => 'test-serper',
+            'services.serper.base_url' => 'https://google.serper.dev',
+            'services.glm.api_key' => '',
+            'services.apollo.api_key' => '',
+            'services.hunter.api_key' => 'test-hunter',
+            'services.bytemine.api_key' => '',
+            'services.youtube.api_key' => '',
+            'services.x.bearer_token' => '',
+            'services.meta.access_token' => '',
+            'queue.default' => 'sync',
+        ]);
+
+        [$user, $org] = $this->actingAsOrgMember();
+
+        IcpProfile::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'Logistics NG',
+            'is_active' => true,
+            'config' => array_merge(IcpProfile::defaultConfig(), [
+                'industries' => ['Logistics'],
+                'territories' => ['Nigeria'],
+                'customPrompt' => 'logistics 3PL operators',
+                'minMatchScore' => 1,
+            ]),
+        ]);
+
+        $session = ChatSession::query()->create([
+            'organization_id' => $org->id,
+            'user_id' => $user->id,
+            'title' => 'Hunter NG',
+        ]);
+
+        $junk = [];
+        for ($i = 1; $i <= 12; $i++) {
+            $junk[] = [
+                'title' => "Top {$i} logistics strategies for 2024",
+                'link' => "https://blog.example.com/logistics-guide-{$i}",
+                'snippet' => 'A blog checklist of logistics tips and playbooks.',
+            ];
+        }
+
+        Http::fake([
+            'google.serper.dev/*' => Http::response(['organic' => $junk], 200),
+            'api.hunter.io/*' => Http::response([
+                'data' => [
+                    [
+                        'organization' => 'Kobo Logistics',
+                        'domain' => 'kobo360.com.ng',
+                        'country' => 'NG',
+                        'industry' => 'Logistics',
+                        'description' => 'Freight and 3PL across Nigeria.',
+                    ],
+                ],
+            ], 200),
+        ]);
+
+        $response = $this->withHeaders($this->orgHeaders($org))
+            ->postJson("/api/v1/chat/sessions/{$session->id}/messages", [
+                'body' => 'give me prospects (companies only)',
+                'intent' => 'generate_leads',
+            ]);
+
+        $response->assertOk();
+        $names = collect($response->json('data.assistant_message.leads') ?? [])
+            ->pluck('name')
+            ->all();
+        $this->assertContains('Kobo Logistics', $names);
+    }
+
+    public function test_generate_more_uses_leftover_hit_urls(): void
+    {
+        config([
+            'services.serper.api_key' => 'test-serper',
+            'services.serper.base_url' => 'https://google.serper.dev',
+            'services.glm.api_key' => '',
+            'services.apollo.api_key' => '',
+            'services.hunter.api_key' => '',
+            'services.bytemine.api_key' => '',
+            'services.youtube.api_key' => '',
+            'services.x.bearer_token' => '',
+            'services.meta.access_token' => '',
+            'queue.default' => 'sync',
+        ]);
+
+        [$user, $org] = $this->actingAsOrgMember();
+
+        IcpProfile::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'Logistics NG',
+            'is_active' => true,
+            'config' => array_merge(IcpProfile::defaultConfig(), [
+                'industries' => ['Logistics'],
+                'territories' => ['Nigeria'],
+                'customPrompt' => 'logistics 3PL operators',
+                'minMatchScore' => 1,
+            ]),
+        ]);
+
+        $session = ChatSession::query()->create([
+            'organization_id' => $org->id,
+            'user_id' => $user->id,
+            'title' => 'Leftover',
+        ]);
+
+        $organic = [];
+        $names = [
+            'Northstar Freight', 'Palmridge Warehousing', 'Cedarline 3PL', 'Riverton Haulage',
+            'Oakmont Distribution', 'Silverline Freight', 'Mapleton Logistics', 'Harborline 3PL',
+            'Pinecrest Warehousing', 'Goldridge Freight', 'Lakeshore 3PL', 'Summitline Haulage',
+            'Westbrook Distribution', 'Ashford Freight', 'Brookvale 3PL',
+        ];
+        foreach ($names as $index => $name) {
+            $slug = strtolower(str_replace(' ', '-', $name));
+            $organic[] = [
+                'title' => $name,
+                'link' => "https://www.linkedin.com/company/{$slug}",
+                'snippet' => 'Contract logistics and 3PL warehousing for retailers.',
+            ];
+        }
+
+        Http::fake([
+            'google.serper.dev/*' => Http::response(['organic' => $organic], 200),
+        ]);
+
+        $first = $this->withHeaders($this->orgHeaders($org))
+            ->postJson("/api/v1/chat/sessions/{$session->id}/messages", [
+                'body' => 'give me prospects (companies only)',
+                'intent' => 'generate_leads',
+            ]);
+
+        $first->assertOk();
+        $firstLeads = $first->json('data.assistant_message.leads') ?? [];
+        $this->assertCount(12, $firstLeads);
+        $firstNames = collect($firstLeads)->pluck('name')->all();
+
+        $run = DiscoveryRun::query()->where('chat_session_id', $session->id)->latest('id')->first();
+        $this->assertNotEmpty($run?->result_summary['unused_hits'] ?? []);
+
+        $more = $this->withHeaders($this->orgHeaders($org))
+            ->postJson("/api/v1/chat/sessions/{$session->id}/messages", [
+                'body' => 'generate more prospects',
+                'intent' => 'generate_more_leads',
+            ]);
+
+        $more->assertOk();
+        $moreLeads = $more->json('data.assistant_message.leads') ?? [];
+        $this->assertNotEmpty($moreLeads);
+        $moreNames = collect($moreLeads)->pluck('name')->all();
+        $this->assertEmpty(array_intersect($firstNames, $moreNames));
+        $this->assertNotEmpty(array_intersect($names, $moreNames));
+    }
 }

@@ -99,7 +99,7 @@ class DiscoveryOrchestratorYieldGateTest extends TestCase
         $this->assertTrue($method->invoke($orchestrator, 3, 1, 6, 12));
     }
 
-    public function test_hard_gate_drops_india_and_missing_location_when_icp_is_nigeria(): void
+    public function test_hard_gate_drops_india_but_skips_blank_location_when_icp_is_nigeria(): void
     {
         $orchestrator = app(DiscoveryOrchestrator::class);
         $method = $this->privateMethod($orchestrator, 'passesIcpHardGate');
@@ -110,9 +110,45 @@ class DiscoveryOrchestratorYieldGateTest extends TestCase
             'location' => 'Pune, India',
             'industry' => 'Logistics',
         ]));
-        $this->assertFalse($method->invoke($orchestrator, $brief, [
+        $this->assertTrue($method->invoke($orchestrator, $brief, [
             'industry' => 'Logistics',
         ]));
+        $this->assertTrue($method->invoke($orchestrator, $brief, [
+            'location' => 'Lagos, Nigeria',
+            'industry' => 'Logistics',
+        ]));
+        $this->assertFalse($method->invoke($orchestrator, $brief, [
+            'location' => 'Austin, USA',
+            'industry' => 'Logistics',
+        ]));
+    }
+
+    public function test_gather_prefers_hunter_ng_over_bare_serper(): void
+    {
+        $orchestrator = app(DiscoveryOrchestrator::class);
+        $method = $this->privateMethod($orchestrator, 'gatherPriority');
+        $brief = $this->companyBriefNigeria();
+
+        $hunter = new RawDiscoveryHit(
+            name: 'Kobo Logistics',
+            source: 'database',
+            provider: 'hunter',
+            website: 'kobo360.com',
+            location: 'NG',
+            url: 'https://kobo360.com',
+        );
+        $serper = new RawDiscoveryHit(
+            name: 'Random Freight Blog',
+            source: 'serper',
+            provider: 'serper',
+            url: 'https://example.com/freight',
+            snippet: 'A logistics directory listing.',
+        );
+
+        $this->assertGreaterThan(
+            $method->invoke($orchestrator, $serper, $brief),
+            $method->invoke($orchestrator, $hunter, $brief),
+        );
     }
 
     public function test_hard_gate_allows_unknown_industry_when_territories_empty(): void

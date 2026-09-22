@@ -102,7 +102,7 @@ class IcpBriefSearchQueryTest extends TestCase
         $this->assertFalse($brief->hasUserQuery());
     }
 
-    public function test_search_brief_appends_concrete_nouns_from_description(): void
+    public function test_search_brief_does_not_append_description_nouns_when_custom_prompt_is_set(): void
     {
         $profile = new IcpProfile([
             'name' => 'Niche ICP',
@@ -116,11 +116,22 @@ class IcpBriefSearchQueryTest extends TestCase
         $brief = IcpBrief::fromIcpProfile($profile, 'give me prospects');
         $seed = $brief->searchBrief();
 
-        $this->assertStringStartsWith('decision makers at companies in construction', $seed);
-        $this->assertStringContainsString('excavators', $seed);
-        $this->assertStringContainsString('plant-hire', $seed);
-        $this->assertStringContainsString('dealers', $seed);
+        $this->assertSame('decision makers at companies in construction', $seed);
+        $this->assertStringNotContainsString('excavators', $seed);
         $this->assertStringNotContainsString('Manufacturing', $seed);
+    }
+
+    public function test_search_brief_skips_definition_blurb_nouns(): void
+    {
+        $profile = new IcpProfile([
+            'name' => 'Logistics',
+            'description' => 'Industries specialize in 3PL warehousing and freight forwarding.',
+            'config' => array_merge(IcpProfile::defaultConfig(), [
+                'customPrompt' => 'logistics 3PL e-commerce',
+            ]),
+        ]);
+
+        $this->assertSame('logistics 3PL e-commerce', IcpBrief::fromIcpProfile($profile, 'give me prospects')->searchBrief());
     }
 
     public function test_search_query_override_keeps_has_user_query_false_for_generic_ask(): void
@@ -155,5 +166,18 @@ class IcpBriefSearchQueryTest extends TestCase
         $this->assertTrue($brief->isAuthoritativePeopleQuery());
         $this->assertStringNotContainsString('Find 100 prospects', $brief->query);
         $this->assertStringContainsString('Forbes', $brief->searchQuery());
+    }
+
+    public function test_give_me_25_prospects_sets_requested_limit(): void
+    {
+        $profile = new IcpProfile([
+            'name' => 'Test ICP',
+            'config' => IcpProfile::defaultConfig(),
+        ]);
+
+        $brief = IcpBrief::fromIcpProfile($profile, 'give me 25 prospects');
+
+        $this->assertFalse($brief->hasUserQuery());
+        $this->assertSame(25, $brief->requestedLimit);
     }
 }

@@ -98,6 +98,7 @@ class IcpFilterServiceTest extends TestCase
         $brief = $this->brief(['territories' => ['england']]);
         $filter = new IcpFilterService;
 
+        $this->assertTrue($filter->passes($brief, new CandidateCompany(territory: 'GB'))->reasons['territory']);
         $this->assertTrue($filter->passes($brief, new CandidateCompany(territory: 'London, UK'))->reasons['territory']);
         $this->assertTrue($filter->passes($brief, new CandidateCompany(territory: 'United Kingdom'))->reasons['territory']);
         $this->assertTrue($filter->passes($brief, new CandidateCompany(territory: 'Manchester, Britain'))->reasons['territory']);

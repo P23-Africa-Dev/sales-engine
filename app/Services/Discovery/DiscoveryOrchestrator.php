@@ -55,12 +55,25 @@ class DiscoveryOrchestrator
     /** @var array<string, Collection<int, RawDiscoveryHit>> */
     private array $registryHitCache = [];
 
-    /** @var array{dropped_creatability: int, dropped_hard_gate: int, kept_advisory_profile: int} */
+    /** @var array<string, int> */
     private array $gateStats = [
         'dropped_creatability' => 0,
         'dropped_hard_gate' => 0,
         'kept_advisory_profile' => 0,
+        'gather_junk_title' => 0,
+        'gather_invalid_name' => 0,
+        'gather_empty_extract' => 0,
+        'gather_creatability' => 0,
+        'gather_time_cut' => 0,
+        'unknown_geo_kept' => 0,
+        'wrong_country_dropped' => 0,
     ];
+
+    /** Compact raw hits from this run, used to persist leftover URLs for Generate more. */
+    private array $allCollectedHits = [];
+
+    /** @var Collection<int, RawDiscoveryHit>|null */
+    private ?Collection $seedHits = null;
 
     /** @param  list<DiscoverySourceInterface>  $sources */
     public function __construct(
@@ -141,12 +154,24 @@ class DiscoveryOrchestrator
             $this->deadlineAt = $this->startedAt + self::HARD_DEADLINE_SECONDS;
             $this->deferContactEnrichment = $deferContactEnrichment;
             $this->registryHitCache = [];
+            $this->allCollectedHits = [];
+            $this->seedHits = collect();
             $this->gateStats = [
                 'dropped_creatability' => 0,
                 'dropped_hard_gate' => 0,
                 'kept_advisory_profile' => 0,
+                'gather_junk_title' => 0,
+                'gather_invalid_name' => 0,
+                'gather_empty_extract' => 0,
+                'gather_creatability' => 0,
+                'gather_time_cut' => 0,
+                'unknown_geo_kept' => 0,
+                'wrong_country_dropped' => 0,
             ];
             $this->enrichment->setDeferContactWaterfall($deferContactEnrichment);
+            if (in_array($intent, ['generate_more_leads'], true)) {
+                $this->seedHits = $this->loadUnusedHitsFromSession($chatSessionId, $run->id, $excludeLeadNames);
+            }
 
             $brief = $briefSeed;
             $hasUserQuery = $brief->hasUserQuery();
@@ -292,13 +317,29 @@ class DiscoveryOrchestrator
                             $firstPassQueries = $this->leadQueryNormalizer->firstBatchPeopleQueries($icp);
                         }
 
-                        [$hits, $sourcesChecked, $fanOutMeta] = $this->collectHits(
-                            $passBrief,
-                            $ctx,
-                            $passLimit,
-                            $firstPassQueries !== [] ? $firstPassQueries : null,
-                        );
+                        $reuseOnly = $intent === 'generate_more_leads'
+                            && $this->seedHitsForBrief($passBrief)->count() >= $remaining;
+
+                        if ($reuseOnly) {
+                            $hits = collect();
+                            $fanOutMeta = [
+                                'queries_executed' => [],
+                                'sources_hit_count' => [
+                                    'unused_cache' => $this->seedHitsForBrief($passBrief)->count(),
+                                ],
+                                'fan_out_strategy_used' => false,
+                            ];
+                        } else {
+                            [$hits, $sourcesChecked, $fanOutMeta] = $this->collectHits(
+                                $passBrief,
+                                $ctx,
+                                $passLimit,
+                                $firstPassQueries !== [] ? $firstPassQueries : null,
+                            );
+                        }
                     }
+
+                    $hits = $this->mergeSeedHits($hits, $passBrief);
 
                     $allQueriesExecuted = array_values(array_unique(array_merge(
                         $allQueriesExecuted,
@@ -501,6 +542,7 @@ class DiscoveryOrchestrator
             }
 
             $leadsPayload = array_slice($this->sortLeadsPayload($leadsPayload), 0, $effectiveLimit);
+            $unusedHits = $this->unusedHitsForReuse($leadsPayload);
 
             $this->appendStage($run, 'compiling_results');
             $this->updateProgress($run, 4, $sourcesChecked, $candidatesFound);
@@ -526,7 +568,19 @@ class DiscoveryOrchestrator
                         'dropped_creatability' => $this->gateStats['dropped_creatability'],
                         'dropped_hard_gate' => $this->gateStats['dropped_hard_gate'],
                         'kept_advisory_profile' => $this->gateStats['kept_advisory_profile'],
+                        'unknown_geo_kept' => $this->gateStats['unknown_geo_kept'],
+                        'wrong_country_dropped' => $this->gateStats['wrong_country_dropped'],
+                        'gather_junk_title' => $this->gateStats['gather_junk_title'],
+                        'gather_invalid_name' => $this->gateStats['gather_invalid_name'],
+                        'gather_empty_extract' => $this->gateStats['gather_empty_extract'],
+                        'gather_creatability' => $this->gateStats['gather_creatability'],
+                        'gather_time_cut' => $this->gateStats['gather_time_cut'],
                         'gate_stats' => $this->gateStats,
+                        'unused_hits' => $unusedHits,
+                        'unused_hit_urls' => array_values(array_filter(array_map(
+                            static fn(array $hit): string => trim((string) ($hit['url'] ?? '')),
+                            $unusedHits,
+                        ))),
                         'serper_geo' => $this->discoveryGeo->shouldApplyRetrievalGeo($brief)
                             ? $this->discoveryGeo->serperParams($brief)
                             : [],
@@ -540,6 +594,8 @@ class DiscoveryOrchestrator
                 ),
                 'finished_at' => now(),
             ]);
+
+            $this->dispatchLocationResolveJobs($leadsPayload, $brief);
 
             return ['run' => $run->fresh(), 'leads' => $leadsPayload, 'companies' => $companies];
         } catch (\Throwable $e) {
@@ -687,9 +743,9 @@ class DiscoveryOrchestrator
                     $ctx->intent,
                 );
                 $batch = $source->search($primaryBrief, $passCtx);
-                // Cap registry volume to the current pass limit so Hunter cannot oversupply.
-                if ($batch->count() > $effectiveLimit) {
-                    $batch = $batch->take(max(1, $effectiveLimit))->values();
+                $registryCap = $this->gatherCap($effectiveLimit);
+                if ($batch->count() > $registryCap) {
+                    $batch = $batch->take($registryCap)->values();
                 }
                 $this->registryHitCache[$cacheKey] = $batch;
             }
@@ -700,6 +756,7 @@ class DiscoveryOrchestrator
         }
 
         $hits = $this->preferLinkedInHits($this->dedupeHits($hits), $brief);
+        $this->rememberCollectedHits($hits);
 
         return [
             $hits,
@@ -855,34 +912,20 @@ class DiscoveryOrchestrator
     ): array {
         $candidates = [];
         $seenNames = $seenLeadNames;
-        $gatherCap = max($effectiveLimit, (int) ceil($effectiveLimit * 1.5));
+        $gatherCap = $this->gatherCap($effectiveLimit);
 
         $orderedHits = $hits
             ->unique(fn(RawDiscoveryHit $h) => mb_strtolower($h->name . '|' . (string) $h->url))
-            ->sortByDesc(function (RawDiscoveryHit $h) use ($brief): int {
-                $url = mb_strtolower((string) $h->url);
-                $provider = mb_strtolower((string) ($h->provider ?? ''));
-                if ($brief->isPeopleSearch() && str_contains($url, 'linkedin.com/in/')) {
-                    return 100;
-                }
-                if ($brief->isCompanySearch() && str_contains($url, 'linkedin.com/company/')) {
-                    return 100;
-                }
-                if (str_contains($url, 'linkedin.com/')) {
-                    return 40;
-                }
-                // Prefer Serper/web hits over bare Hunter domains when filling company quota.
-                if ($brief->isCompanySearch() && $provider === 'hunter') {
-                    return -10;
-                }
-
-                return 0;
-            })
+            ->sortByDesc(fn(RawDiscoveryHit $h): int => $this->gatherPriority($h, $brief))
             ->values();
 
         /** @var RawDiscoveryHit $hit */
         foreach ($orderedHits as $hit) {
-            if (count($candidates) >= $gatherCap || $this->pastDeadline() || $this->remainingSeconds() < 20) {
+            if (count($candidates) >= $gatherCap) {
+                break;
+            }
+            if ($this->pastDeadline() || $this->remainingSeconds() < 20) {
+                $this->gateStats['gather_time_cut']++;
                 break;
             }
 
@@ -891,6 +934,7 @@ class DiscoveryOrchestrator
                 $this->queryIntent->looksLikeContentOrGenericPhrase($hit->name)
                 && ! str_contains(mb_strtolower((string) $hit->url), 'linkedin.com/in/')
             ) {
+                $this->gateStats['gather_junk_title']++;
                 continue;
             }
 
@@ -907,12 +951,14 @@ class DiscoveryOrchestrator
                     ])
                     && ! $this->companyNameValidator->isValidCompanyName($hit->name, [])
                 ) {
+                    $this->gateStats['gather_invalid_name']++;
                     continue;
                 }
             } elseif (! $this->companyNameValidator->isValidCompanyName($hit->name, [
                 'website' => $hit->website,
                 'url' => $hit->url,
             ])) {
+                $this->gateStats['gather_invalid_name']++;
                 continue;
             }
 
@@ -923,6 +969,7 @@ class DiscoveryOrchestrator
                 $nameKey = mb_strtolower($displayName);
 
                 if ($displayName === '' || mb_strtolower($displayName) === mb_strtolower($brief->name)) {
+                    $this->gateStats['gather_empty_extract']++;
                     continue;
                 }
 
@@ -938,6 +985,7 @@ class DiscoveryOrchestrator
                     $extracted,
                     (bool) ($extracted['from_listicle'] ?? false),
                 )) {
+                    $this->gateStats['gather_creatability']++;
                     continue;
                 }
 
@@ -1046,38 +1094,65 @@ class DiscoveryOrchestrator
                 $scores,
             );
 
+            $extractedLocation = trim((string) ($extracted['location'] ?? $extracted['territory'] ?? $extracted['city'] ?? $hit->location ?? ''));
+            $locationUnknown = $extractedLocation === '';
             $gateResult = $this->icpHardGateResult($brief, $extracted);
             $territoryPassed = (bool) ($gateResult->reasons['territory'] ?? true);
             $enforceTerritory = $brief->territories !== []
                 && ! $brief->isAuthoritativePeopleQuery()
                 && ! $this->discoveryGeo->userNamedDifferentCountry($brief);
 
-            if ($enforceTerritory && ! $territoryPassed) {
+            // Known other country: hard drop. Blank location is skipped in the filter, not a fail.
+            if ($enforceTerritory && ! $locationUnknown && ! $territoryPassed) {
                 $this->gateStats['dropped_hard_gate']++;
+                $this->gateStats['wrong_country_dropped']++;
                 continue;
             }
 
+            if ($enforceTerritory && $locationUnknown) {
+                $icpRecommended = false;
+                $extracted['low_confidence'] = true;
+                $extracted['location_status'] = 'unknown';
+                $this->gateStats['unknown_geo_kept']++;
+                $this->gateStats['kept_advisory_profile']++;
+            }
+
             // ICP-brief mode: hard-gate remaining firmographics. Trusted LinkedIn URLs
-            // may stay as advisory only when territory passed (or was unconstrained).
+            // may stay as advisory when industry fails or geo is unconfirmed.
             if (! $hasUserQuery && ! $gateResult->passed) {
                 $isHunter = mb_strtolower((string) ($hit->provider ?? '')) === 'hunter';
-                $industryOnlyFail = $territoryPassed && ($gateResult->reasons['industry'] ?? true) === false;
-                if (! $isHunter && $industryOnlyFail && $this->hasTrustedEntityProfileUrl($brief, $extracted, $hit)) {
+                $industryFailed = ($gateResult->reasons['industry'] ?? true) === false;
+                $territoryFailed = ($gateResult->reasons['territory'] ?? true) === false;
+                $industryOnlyFail = $industryFailed && ! $territoryFailed;
+                $unknownOrIndustryAdvisory = $locationUnknown || $industryOnlyFail;
+                if (
+                    ! $isHunter
+                    && $unknownOrIndustryAdvisory
+                    && $this->hasTrustedEntityProfileUrl($brief, $extracted, $hit)
+                ) {
                     $icpRecommended = false;
                     $extracted['low_confidence'] = true;
                     $this->gateStats['kept_advisory_profile']++;
-                } else {
+                } elseif ($territoryFailed && ! $locationUnknown) {
+                    $this->gateStats['dropped_hard_gate']++;
+                    $this->gateStats['wrong_country_dropped']++;
+                    continue;
+                } elseif ($industryFailed && ! $this->hasTrustedEntityProfileUrl($brief, $extracted, $hit)) {
                     $this->gateStats['dropped_hard_gate']++;
                     continue;
+                } else {
+                    $icpRecommended = false;
+                    $extracted['low_confidence'] = true;
+                    $this->gateStats['kept_advisory_profile']++;
                 }
             }
 
-            // ICP-driven runs: when industries are set, refuse unverified firmographics
-            // unless the candidate has a trusted direct profile URL. Territory misses
-            // already dropped above — do not keep missing-geo LinkedIn hits.
+            // Missing industry with no trusted URL still drops (evaluate-when-present).
+            // Unknown geo is no longer a fail — do not double-drop on enforceTerritory.
             if (
                 ! $hasUserQuery
-                && ($brief->industries !== [] || $brief->territories !== [])
+                && $brief->industries !== []
+                && ! $locationUnknown
             ) {
                 $fit = $this->scoring->assessFirmographicFit(
                     array_merge($extracted, [
@@ -1087,18 +1162,13 @@ class DiscoveryOrchestrator
                     ]),
                     $brief,
                 );
-                if ($fit['unknown'] && $enforceTerritory) {
-                    $this->gateStats['dropped_hard_gate']++;
-                    continue;
-                }
                 if ($fit['unknown'] && ! $this->hasTrustedEntityProfileUrl($brief, $extracted, $hit)) {
+                    $this->gateStats['dropped_hard_gate']++;
                     continue;
                 }
             }
 
-            // Hunter Discover often returns famous conglomerates with weak niche fit.
-            // When the ICP constrains industries/territories, require firmographic evidence —
-            // missing data must not auto-fill the company quota.
+            // Hunter Discover: drop proven wrong country; keep HQ-stamped NG/GB rows.
             if (
                 $brief->isCompanySearch()
                 && mb_strtolower((string) ($hit->provider ?? '')) === 'hunter'
@@ -1109,20 +1179,23 @@ class DiscoveryOrchestrator
                     'sector' => $extracted['sector'] ?? $hit->sector,
                     'location' => $extracted['location'] ?? $hit->location,
                 ]);
-                $hasFirmographics = filled($hunterExtracted['industry'] ?? null)
-                    || filled($hunterExtracted['sector'] ?? null)
-                    || filled($hunterExtracted['location'] ?? null);
-                if (! $hasFirmographics || ! $this->passesIcpHardGate($brief, $hunterExtracted)) {
+                $hunterLocation = trim((string) ($hunterExtracted['location'] ?? ''));
+                if ($hunterLocation !== '' && ! $this->passesIcpHardGate($brief, $hunterExtracted)) {
+                    $this->gateStats['dropped_hard_gate']++;
+                    $this->gateStats['wrong_country_dropped']++;
                     continue;
                 }
             }
 
-            // Below-threshold leads go into a secondary pool only in query mode.
-            // ICP-driven runs hard-drop them (new_plan.md Stage 1).
+            // Below-threshold: query mode secondary pool; ICP-brief keeps as advisory.
             $minPriority = $this->effectiveMinMatchScore($brief);
             $isSecondary = $intent === 'generate_leads'
                 && $hasUserQuery
                 && $scores['priority_score'] < $minPriority;
+            if (! $hasUserQuery && $scores['priority_score'] < $minPriority) {
+                $icpRecommended = false;
+                $extracted['low_confidence'] = true;
+            }
 
             if ($brief->isPeopleSearch()) {
                 $enrichedProfile = $this->enrichment->enrich(
@@ -1215,9 +1288,7 @@ class DiscoveryOrchestrator
         if ($industry !== null) {
             $available[] = 'industry';
         }
-        if ($brief->territories !== []) {
-            $available[] = 'territory';
-        } elseif ($territory !== null) {
+        if ($territory !== null && $brief->territories !== []) {
             $available[] = 'territory';
         }
         if ($companySize !== null) {
@@ -1690,6 +1761,16 @@ class DiscoveryOrchestrator
             ? $displayName
             : ($extracted['company'] ?? null);
 
+        $locationValue = trim((string) ($extracted['location'] ?? ''));
+        $locationStatus = trim((string) ($extracted['location_status'] ?? ''));
+        if ($locationStatus === '') {
+            if ($locationValue === '' && $brief->territories !== []) {
+                $locationStatus = 'unknown';
+            } elseif ($locationValue !== '') {
+                $locationStatus = 'confirmed';
+            }
+        }
+
         $lead = Lead::query()->create([
             'organization_id' => $organization->id,
             'company_id' => $company->id,
@@ -1708,6 +1789,7 @@ class DiscoveryOrchestrator
                 'company' => $metaCompany,
                 'contact_person' => $entityType === 'company' && $contactPerson !== '' ? $contactPerson : null,
                 'location' => $extracted['location'] ?? null,
+                'location_status' => $locationStatus !== '' ? $locationStatus : null,
                 'email' => $email !== '' ? $email : null,
                 'phone' => $phone !== '' ? $phone : null,
                 'website' => $website !== '' ? $website : null,
@@ -1742,6 +1824,7 @@ class DiscoveryOrchestrator
                 'company' => $metaCompany,
                 'contact_person' => $entityType === 'company' && $contactPerson !== '' ? $contactPerson : null,
                 'location' => $extracted['location'] ?? null,
+                'location_status' => $locationStatus !== '' ? $locationStatus : null,
                 'website' => $website !== '' ? $website : null,
                 'email' => $email !== '' ? $email : null,
                 'phone' => $phone !== '' ? $phone : null,
@@ -1877,5 +1960,243 @@ class DiscoveryOrchestrator
             self::QUALITY_BALANCED => min($brief->minMatchScore, 55),
             default => $brief->minMatchScore,
         };
+    }
+
+    private function gatherCap(int $effectiveLimit): int
+    {
+        $effectiveLimit = max(1, $effectiveLimit);
+        if ($effectiveLimit <= 40) {
+            return min(40, max($effectiveLimit * 3, $effectiveLimit));
+        }
+
+        return max($effectiveLimit, (int) ceil($effectiveLimit * 1.5));
+    }
+
+    private function gatherPriority(RawDiscoveryHit $hit, IcpBrief $brief): int
+    {
+        $url = mb_strtolower((string) $hit->url);
+        $provider = mb_strtolower((string) ($hit->provider ?? ''));
+        $score = 0;
+
+        if ($this->hitHasGeoEvidence($hit)) {
+            $score += 80;
+        }
+        if ($provider === 'hunter' && filled($hit->location)) {
+            $score += 50;
+        }
+        if ($brief->isPeopleSearch() && str_contains($url, 'linkedin.com/in/')) {
+            $score += 50;
+        }
+        if ($brief->isCompanySearch() && str_contains($url, 'linkedin.com/company/')) {
+            $score += 50;
+        }
+        if (str_contains($url, 'linkedin.com/')) {
+            $score += 20;
+        }
+
+        return $score;
+    }
+
+    private function hitHasGeoEvidence(RawDiscoveryHit $hit): bool
+    {
+        if (filled($hit->location)) {
+            return true;
+        }
+
+        $haystack = trim($hit->name.' '.($hit->snippet ?? '').' '.($hit->url ?? '').' '.($hit->website ?? ''));
+
+        return $this->discoveryGeo->inferLocationFromText($haystack) !== null;
+    }
+
+    /**
+     * @param  Collection<int, RawDiscoveryHit>  $hits
+     * @return Collection<int, RawDiscoveryHit>
+     */
+    private function mergeSeedHits(Collection $hits, IcpBrief $brief): Collection
+    {
+        $seed = $this->seedHitsForBrief($brief);
+        if ($seed->isEmpty()) {
+            return $hits;
+        }
+
+        $this->rememberCollectedHits($seed);
+
+        return $this->dedupeHits($seed->merge($hits)->values());
+    }
+
+    /**
+     * @return Collection<int, RawDiscoveryHit>
+     */
+    private function seedHitsForBrief(IcpBrief $brief): Collection
+    {
+        $seed = $this->seedHits ?? collect();
+        if ($seed->isEmpty()) {
+            return collect();
+        }
+
+        if ($brief->isPeopleSearch()) {
+            return $seed->filter(
+                fn(RawDiscoveryHit $hit): bool => str_contains(mb_strtolower((string) $hit->url), 'linkedin.com/in/')
+            )->values();
+        }
+
+        if ($brief->isCompanySearch()) {
+            return $seed->filter(
+                fn(RawDiscoveryHit $hit): bool => ! str_contains(mb_strtolower((string) $hit->url), 'linkedin.com/in/')
+            )->values();
+        }
+
+        return $seed->values();
+    }
+
+    /**
+     * @param  Collection<int, RawDiscoveryHit>  $hits
+     */
+    private function rememberCollectedHits(Collection $hits): void
+    {
+        foreach ($hits as $hit) {
+            $this->allCollectedHits[] = $this->snapshotHit($hit);
+        }
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function snapshotHit(RawDiscoveryHit $hit): array
+    {
+        return [
+            'name' => $hit->name,
+            'source' => $hit->source,
+            'provider' => $hit->provider,
+            'website' => $hit->website,
+            'location' => $hit->location,
+            'sector' => $hit->sector,
+            'snippet' => mb_substr((string) ($hit->snippet ?? ''), 0, 280),
+            'url' => $hit->url,
+            'externalId' => $hit->externalId,
+        ];
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $leadsPayload
+     * @return list<array<string, mixed>>
+     */
+    private function unusedHitsForReuse(array $leadsPayload): array
+    {
+        $used = [];
+        foreach ($leadsPayload as $lead) {
+            $url = mb_strtolower(trim((string) ($lead['source_url'] ?? $lead['linkedin_url'] ?? $lead['website'] ?? '')));
+            $name = mb_strtolower(trim((string) ($lead['name'] ?? '')));
+            if ($url !== '') {
+                $used['url:'.$url] = true;
+            }
+            if ($name !== '') {
+                $used['name:'.$name] = true;
+            }
+        }
+
+        $unused = [];
+        $seen = [];
+        foreach ($this->allCollectedHits as $snap) {
+            $url = mb_strtolower(trim((string) ($snap['url'] ?? '')));
+            $name = mb_strtolower(trim((string) ($snap['name'] ?? '')));
+            $key = $url !== '' ? 'url:'.$url : 'name:'.$name;
+            if ($key === 'url:' || $key === 'name:' || isset($seen[$key])) {
+                continue;
+            }
+            $seen[$key] = true;
+            if (isset($used['url:'.$url]) || isset($used['name:'.$name])) {
+                continue;
+            }
+            $unused[] = $snap;
+            if (count($unused) >= 40) {
+                break;
+            }
+        }
+
+        return $unused;
+    }
+
+    /**
+     * @param  list<string>  $excludeLeadNames
+     * @return Collection<int, RawDiscoveryHit>
+     */
+    private function loadUnusedHitsFromSession(?int $chatSessionId, int $currentRunId, array $excludeLeadNames): Collection
+    {
+        if ($chatSessionId === null || $chatSessionId < 1) {
+            return collect();
+        }
+
+        $previous = DiscoveryRun::query()
+            ->where('chat_session_id', $chatSessionId)
+            ->where('status', 'completed')
+            ->where('id', '<', $currentRunId)
+            ->whereIn('intent', ['generate_leads', 'generate_more_leads'])
+            ->latest('id')
+            ->first();
+
+        $rows = is_array($previous?->result_summary['unused_hits'] ?? null)
+            ? $previous->result_summary['unused_hits']
+            : [];
+        if ($rows === []) {
+            return collect();
+        }
+
+        $excluded = [];
+        foreach ($excludeLeadNames as $name) {
+            $key = mb_strtolower(trim((string) $name));
+            if ($key !== '') {
+                $excluded[$key] = true;
+            }
+        }
+
+        return collect($rows)
+            ->map(function ($row) use ($excluded): ?RawDiscoveryHit {
+                if (! is_array($row)) {
+                    return null;
+                }
+                $name = trim((string) ($row['name'] ?? ''));
+                if ($name === '' || isset($excluded[mb_strtolower($name)])) {
+                    return null;
+                }
+
+                return new RawDiscoveryHit(
+                    name: $name,
+                    source: (string) ($row['source'] ?? 'cache'),
+                    provider: (string) ($row['provider'] ?? 'unused_cache'),
+                    website: isset($row['website']) ? (string) $row['website'] : null,
+                    location: isset($row['location']) ? (string) $row['location'] : null,
+                    sector: isset($row['sector']) ? (string) $row['sector'] : null,
+                    snippet: isset($row['snippet']) ? (string) $row['snippet'] : null,
+                    url: isset($row['url']) ? (string) $row['url'] : null,
+                    externalId: isset($row['externalId']) ? (string) $row['externalId'] : null,
+                );
+            })
+            ->filter()
+            ->values();
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $leadsPayload
+     */
+    private function dispatchLocationResolveJobs(array $leadsPayload, IcpBrief $brief): void
+    {
+        if ($brief->territories === [] || app()->runningUnitTests()) {
+            return;
+        }
+
+        foreach ($leadsPayload as $lead) {
+            $leadId = (int) ($lead['id'] ?? 0);
+            if ($leadId < 1) {
+                continue;
+            }
+            $location = trim((string) ($lead['location'] ?? ''));
+            $status = (string) ($lead['location_status'] ?? '');
+            if ($location !== '' && $status !== 'unknown') {
+                continue;
+            }
+
+            \App\Jobs\ResolveLeadLocationJob::dispatch($leadId);
+        }
     }
 }

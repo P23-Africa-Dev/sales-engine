@@ -132,7 +132,7 @@ class IcpFilterService
      * @var list<list<string>>
      */
     private const TERRITORY_ALIAS_GROUPS = [
-        ['england', 'uk', 'u.k.', 'united kingdom', 'britain', 'great britain', 'london', 'manchester', 'birmingham', 'leeds', 'bristol', 'liverpool', 'sheffield'],
+        ['england', 'uk', 'u.k.', 'united kingdom', 'britain', 'great britain', 'gb', 'london', 'manchester', 'birmingham', 'leeds', 'bristol', 'liverpool', 'sheffield'],
         ['scotland', 'edinburgh', 'glasgow'],
         ['wales', 'cardiff'],
         ['nigeria', 'lagos', 'abuja', 'kano', 'port harcourt', 'ibadan', 'ng'],
