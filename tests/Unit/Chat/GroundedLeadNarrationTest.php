@@ -55,10 +55,50 @@ class GroundedLeadNarrationTest extends TestCase
         $this->assertStringContainsString('Found 2 leads for your search.', $body);
         $this->assertStringContainsString('1. Lekan Adewoye, Managing Director/CEO at Suntrail Group Ltd', $body);
         $this->assertStringContainsString('2. Aneesh Bond, Managing Director / CEO at AJO MOBILE APP', $body);
-        $this->assertStringContainsString('All 2 score strongly against your ICP "My Tech ICP".', $body);
+        $this->assertStringContainsString('All 2 look like strong matches for your ICP "My Tech ICP".', $body);
         $this->assertStringNotContainsString('Interswitch', $body);
         $this->assertStringNotContainsString('Olusegun', $body);
         $this->assertStringNotContainsString('Flutterwave', $body);
+    }
+
+    public function test_narration_reports_strong_vs_review_split(): void
+    {
+        $service = app(ChatService::class);
+        $method = new \ReflectionMethod($service, 'narrateDiscovery');
+        $method->setAccessible(true);
+
+        $leads = [
+            [
+                'name' => 'Strong Co',
+                'title' => 'CEO',
+                'company' => 'Strong Co',
+                'icp_recommended' => true,
+                'low_confidence' => false,
+                'score' => 90,
+            ],
+            [
+                'name' => 'Review Co',
+                'title' => 'Founder',
+                'company' => 'Review Co',
+                'icp_recommended' => false,
+                'low_confidence' => true,
+                'score' => 55,
+            ],
+        ];
+
+        $body = $method->invoke(
+            $service,
+            new Organization(['name' => 'Test Org']),
+            new IcpProfile(['name' => 'My Tech ICP']),
+            '',
+            $leads,
+            'generate_leads',
+            null,
+            [],
+            true,
+        );
+
+        $this->assertStringContainsString('1 strong matches, 1 need review', $body);
     }
 
     public function test_zero_leads_returns_clear_empty_message(): void

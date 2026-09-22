@@ -7,15 +7,17 @@ use App\Services\Discovery\DTO\IcpBrief;
 /**
  * Diversified search strings for Discovery fan-out.
  *
+ * Entity-first: short seeds, LinkedIn company/people bias, capped fan-out.
  * Industry, size, revenue, and roles stay out of search text. Geography is the
  * explicit exception: ICP-brief queries get a primary-country clause via DiscoveryGeo.
  */
 class QueryVariationGenerator
 {
-    public const MAX_QUERIES = 15;
+    /** Hard cap — keep Serper spend bounded and queries diverse, not duplicated. */
+    public const MAX_QUERIES = 8;
 
-    /** Fan-out stays at 20 to limit Serper spend; limit-12 runs geo-bias the primary query instead. */
-    public const FAN_OUT_THRESHOLD = 20;
+    /** Default generate (12) uses a light entity fan-out. */
+    public const FAN_OUT_THRESHOLD = 12;
 
     public function __construct(
         private readonly DiscoveryGeo $discoveryGeo = new DiscoveryGeo,
@@ -24,20 +26,9 @@ class QueryVariationGenerator
     /** @var list<string> */
     private const SIGNAL_MODIFIERS = [
         'hiring',
-        'funded',
         'expanding',
-        'series A OR series B',
+        'funded',
         'partnership',
-        'announcement',
-        'market entry',
-    ];
-
-    /** @var list<string> */
-    private const AUTHORITATIVE_LIST_HINTS = [
-        'Forbes list',
-        'Inc 5000',
-        'Y Combinator companies',
-        'Crunchbase',
     ];
 
     /**
@@ -47,43 +38,45 @@ class QueryVariationGenerator
     {
         $needed = $this->queryBudget($targetCount);
         $variations = [];
+        $rawSeed = $this->searchSeed($brief);
+        $seed = $this->compressSeed($rawSeed);
 
-        $primary = $brief->searchQuery();
-        if ($primary !== '') {
-            $variations[] = $this->withIcpTerritoryBias($brief, $primary);
+        if ($seed === '') {
+            return [];
         }
 
-        foreach ($this->geoSplitVariations($primary !== '' ? $primary : $this->searchSeed($brief)) as $geoQuery) {
-            $variations[] = $this->withIcpTerritoryBias($brief, $geoQuery);
-        }
-
-        $seed = $this->searchSeed($brief);
-        foreach (array_slice(self::SIGNAL_MODIFIERS, 0, 4) as $i => $signal) {
-            $variations[] = $this->withIcpTerritoryBias(
-                $brief,
-                $this->composePeopleOrCompany($brief, $seed.' '.$signal, $i % 2 === 0)
-            );
-        }
-
+        // LinkedIn entity queries first (highest creatability conversion).
         if ($brief->isPeopleSearch() || $brief->isAuthoritativePeopleQuery()) {
-            foreach (array_slice(self::AUTHORITATIVE_LIST_HINTS, 0, 2) as $hint) {
-                $variations[] = $this->withIcpTerritoryBias($brief, trim($seed.' '.$hint));
-            }
+            $variations[] = $this->withIcpTerritoryBias($brief, trim($seed . ' site:linkedin.com/in'));
             $variations[] = $this->withIcpTerritoryBias(
                 $brief,
-                $this->composePeopleOrCompany($brief, $seed, true)
+                $this->composePeopleOrCompany($brief, $seed . ' founders', true)
             );
         } else {
+            $variations[] = $this->withIcpTerritoryBias($brief, trim($seed . ' site:linkedin.com/company'));
             $variations[] = $this->withIcpTerritoryBias(
                 $brief,
-                $this->composePeopleOrCompany($brief, $seed.' companies', true)
+                $this->composePeopleOrCompany($brief, $seed . ' companies', true)
             );
+            if ($brief->isBothSearch()) {
+                $variations[] = $this->withIcpTerritoryBias($brief, trim($seed . ' site:linkedin.com/in'));
+            }
+        }
+
+        // Short open-web primary (geo-biased for ICP brief).
+        $variations[] = $this->withIcpTerritoryBias($brief, $seed);
+
+        // Geo-split on the uncompressed seed so city names are not truncated away.
+        foreach ($this->geoSplitVariations($rawSeed) as $geoQuery) {
+            $variations[] = $this->withIcpTerritoryBias($brief, $this->compressSeed($geoQuery));
+        }
+
+        // At most two signal modifiers, LinkedIn-preferring.
+        foreach (array_slice(self::SIGNAL_MODIFIERS, 0, 2) as $i => $signal) {
             $variations[] = $this->withIcpTerritoryBias(
                 $brief,
-                $this->composePeopleOrCompany($brief, $seed, true)
+                $this->composePeopleOrCompany($brief, $seed . ' ' . $signal, true)
             );
-            $variations[] = $this->withIcpTerritoryBias($brief, trim($seed.' site:linkedin.com/company'));
-            $variations[] = $this->withIcpTerritoryBias($brief, trim('list of '.$seed));
         }
 
         return $this->dedupeAndCap($variations, $needed);
@@ -92,7 +85,7 @@ class QueryVariationGenerator
     public function queryBudget(int $targetCount): int
     {
         $estimated = (int) ceil(max(1, $targetCount) / 5);
-        // Floor 6 when targeting 20+ so geo/channel variants have room.
+        // Floor 6 for default 12+ so LinkedIn + open-web + geo variants fit.
         $floor = $targetCount >= self::FAN_OUT_THRESHOLD ? 6 : 4;
 
         return min(self::MAX_QUERIES, max($floor, $estimated));
@@ -105,38 +98,37 @@ class QueryVariationGenerator
     public function generateBackfill(IcpBrief $brief, int $targetCount, array $excludeQueries = []): array
     {
         $needed = min(self::MAX_QUERIES, max(4, (int) ceil(max(1, $targetCount) / 4)));
-        $seed = $this->searchSeed($brief);
+        $seed = $this->entitySeed($brief);
         $variations = [];
 
-        // Company backfill: LinkedIn company pages first so fan-out stays account-oriented.
-        if ($brief->isCompanySearch()) {
-            $variations[] = $this->withIcpTerritoryBias($brief, trim($seed.' site:linkedin.com/company'));
+        if ($brief->isCompanySearch() || $brief->isBothSearch()) {
+            $variations[] = $this->withIcpTerritoryBias($brief, trim($seed . ' site:linkedin.com/company'));
             $variations[] = $this->withIcpTerritoryBias(
                 $brief,
-                $this->composePeopleOrCompany($brief, $seed.' companies', true)
-            );
-            $variations[] = $this->withIcpTerritoryBias(
-                $brief,
-                $this->composePeopleOrCompany($brief, $seed, true)
+                $this->composePeopleOrCompany($brief, $seed . ' companies', true)
             );
         }
 
-        foreach (['executives', 'founders', 'leadership team', 'decision makers', 'partnerships'] as $hint) {
+        if ($brief->isPeopleSearch() || $brief->isBothSearch()) {
+            $variations[] = $this->withIcpTerritoryBias($brief, trim($seed . ' site:linkedin.com/in'));
             $variations[] = $this->withIcpTerritoryBias(
                 $brief,
-                $this->composePeopleOrCompany($brief, $seed.' '.$hint, false)
+                $this->composePeopleOrCompany($brief, $seed . ' founders executives', true)
             );
         }
 
-        foreach (array_slice(self::SIGNAL_MODIFIERS, 0, 5) as $i => $signal) {
+        foreach (['leadership team', 'decision makers', 'partnerships'] as $hint) {
             $variations[] = $this->withIcpTerritoryBias(
                 $brief,
-                $this->composePeopleOrCompany($brief, $seed.' '.$signal, $i % 2 === 0)
+                $this->composePeopleOrCompany($brief, $seed . ' ' . $hint, true)
             );
         }
 
-        foreach (array_slice(self::AUTHORITATIVE_LIST_HINTS, 0, 3) as $hint) {
-            $variations[] = $this->withIcpTerritoryBias($brief, trim($seed.' '.$hint));
+        foreach (array_slice(self::SIGNAL_MODIFIERS, 0, 3) as $signal) {
+            $variations[] = $this->withIcpTerritoryBias(
+                $brief,
+                $this->composePeopleOrCompany($brief, $seed . ' ' . $signal, true)
+            );
         }
 
         $excluded = [];
@@ -162,6 +154,29 @@ class QueryVariationGenerator
         }
 
         return $out;
+    }
+
+    /**
+     * Short entity-oriented seed — compress long ICP essays so Serper returns companies/people.
+     */
+    private function entitySeed(IcpBrief $brief): string
+    {
+        return $this->compressSeed($this->searchSeed($brief));
+    }
+
+    private function compressSeed(string $seed): string
+    {
+        $seed = trim(preg_replace('/\s+/u', ' ', $seed) ?? $seed);
+        if ($seed === '') {
+            return '';
+        }
+
+        $words = preg_split('/\s+/u', $seed) ?: [];
+        if (count($words) <= 12) {
+            return $seed;
+        }
+
+        return implode(' ', array_slice($words, 0, 10));
     }
 
     private function searchSeed(IcpBrief $brief): string
@@ -199,7 +214,7 @@ class QueryVariationGenerator
         $cities = ['Lagos', 'Abuja', 'Nairobi', 'Accra', 'Kano', 'Port Harcourt', 'Ibadan', 'Johannesburg', 'Cape Town', 'Cairo'];
         $found = [];
         foreach ($cities as $city) {
-            if (preg_match('/\b'.preg_quote($city, '/').'\b/iu', $query)) {
+            if (preg_match('/\b' . preg_quote($city, '/') . '\b/iu', $query)) {
                 $found[mb_strtolower($city)] = $city;
             }
         }
@@ -210,17 +225,16 @@ class QueryVariationGenerator
 
         $variations = [];
         $otherCitiesPattern = implode('|', array_map(
-            fn (string $c): string => preg_quote($c, '/'),
+            fn(string $c): string => preg_quote($c, '/'),
             array_values($found),
         ));
 
         foreach ($found as $city) {
-            // Keep this city; drop the other matched cities from the phrase.
-            $single = preg_replace('/\b('.$otherCitiesPattern.')\b/iu', ' ', $query) ?? $query;
+            $single = preg_replace('/\b(' . $otherCitiesPattern . ')\b/iu', ' ', $query) ?? $query;
             $single = preg_replace('/\s*(?:and|,|\/|&)\s*/iu', ' ', $single) ?? $single;
             $single = trim(preg_replace('/\s+/u', ' ', $single) ?? $single);
-            if ($single !== '' && ! preg_match('/\b'.preg_quote($city, '/').'\b/iu', $single)) {
-                $single = trim($single.' '.$city);
+            if ($single !== '' && ! preg_match('/\b' . preg_quote($city, '/') . '\b/iu', $single)) {
+                $single = trim($single . ' ' . $city);
             }
             if ($single !== '') {
                 $variations[] = $single;
@@ -228,11 +242,11 @@ class QueryVariationGenerator
         }
 
         if (! preg_match('/\bnigeria\b/iu', $query) && $this->looksNigerianCities($found)) {
-            $withoutCities = preg_replace('/\b('.$otherCitiesPattern.')\b/iu', ' ', $query) ?? $query;
+            $withoutCities = preg_replace('/\b(' . $otherCitiesPattern . ')\b/iu', ' ', $query) ?? $query;
             $withoutCities = preg_replace('/\s*(?:and|,|\/|&)\s*/iu', ' ', $withoutCities) ?? $withoutCities;
             $withoutCities = trim(preg_replace('/\s+/u', ' ', $withoutCities) ?? $withoutCities);
             if ($withoutCities !== '') {
-                $variations[] = $withoutCities.' Nigeria';
+                $variations[] = $withoutCities . ' Nigeria';
             }
         }
 
@@ -262,11 +276,11 @@ class QueryVariationGenerator
         }
 
         if ($brief->isPeopleSearch() && $preferLinkedIn) {
-            return trim($query.' site:linkedin.com/in');
+            return trim($query . ' site:linkedin.com/in');
         }
 
         if ($brief->isCompanySearch() && $preferLinkedIn) {
-            return trim($query.' site:linkedin.com/company');
+            return trim($query . ' site:linkedin.com/company');
         }
 
         return $query;

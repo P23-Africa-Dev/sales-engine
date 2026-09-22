@@ -769,17 +769,28 @@ class IcpSearchBriefAlignmentTest extends TestCase
 
         $organic = [];
         $names = [
-            'Northstar Freight', 'Palmridge Warehousing', 'Cedarline 3PL', 'Riverton Haulage',
-            'Oakmont Distribution', 'Silverline Freight', 'Mapleton Logistics', 'Harborline 3PL',
-            'Pinecrest Warehousing', 'Goldridge Freight', 'Lakeshore 3PL', 'Summitline Haulage',
-            'Westbrook Distribution', 'Ashford Freight', 'Brookvale 3PL',
+            'Northstar Freight',
+            'Palmridge Warehousing',
+            'Cedarline 3PL',
+            'Riverton Haulage',
+            'Oakmont Distribution',
+            'Silverline Freight',
+            'Mapleton Logistics',
+            'Harborline 3PL',
+            'Pinecrest Warehousing',
+            'Goldridge Freight',
+            'Lakeshore 3PL',
+            'Summitline Haulage',
+            'Westbrook Distribution',
+            'Ashford Freight',
+            'Brookvale 3PL',
         ];
         foreach ($names as $index => $name) {
             $slug = strtolower(str_replace(' ', '-', $name));
             $organic[] = [
                 'title' => $name,
                 'link' => "https://www.linkedin.com/company/{$slug}",
-                'snippet' => 'Contract logistics and 3PL warehousing for retailers.',
+                'snippet' => 'Contract logistics and 3PL warehousing for retailers in Lagos, Nigeria.',
             ];
         }
 

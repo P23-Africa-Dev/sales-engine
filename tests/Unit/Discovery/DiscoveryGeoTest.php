@@ -98,6 +98,8 @@ class DiscoveryGeoTest extends TestCase
         $this->assertSame('Nigeria', $geo->inferLocationFromTld('https://acme.com.ng/about'));
         $this->assertSame('England', $geo->inferLocationFromTld('https://freight.co.uk/'));
         $this->assertNull($geo->inferLocationFromTld('https://acme.com/about'));
+        $this->assertSame('Nigeria', $geo->inferLocationFromTld('https://ng.linkedin.com/company/kobo360'));
+        $this->assertSame('England', $geo->inferLocationFromTld('https://uk.linkedin.com/in/ada'));
         $this->assertSame('Nigeria', $geo->inferLocationFromText('Visit kobo360.com.ng for freight'));
         $this->assertSame('Nigeria', $geo->inferLocationFromText('HQ country NG'));
         $this->assertSame('England', $geo->inferLocationFromText('registered in GB'));

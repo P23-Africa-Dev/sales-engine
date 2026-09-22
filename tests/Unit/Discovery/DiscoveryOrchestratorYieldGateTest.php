@@ -175,6 +175,76 @@ class DiscoveryOrchestratorYieldGateTest extends TestCase
         ]));
     }
 
+    public function test_strong_geo_proxy_matches_ng_linkedin_for_nigeria_icp(): void
+    {
+        $orchestrator = app(DiscoveryOrchestrator::class);
+        $method = $this->privateMethod($orchestrator, 'hasStrongGeoProxy');
+        $brief = $this->companyBriefNigeria();
+
+        $hit = new RawDiscoveryHit(
+            name: 'Kobo360',
+            source: 'serper',
+            provider: 'serper',
+            url: 'https://ng.linkedin.com/company/kobo360',
+            snippet: 'Logistics platform',
+        );
+
+        $this->assertTrue($method->invoke($orchestrator, $brief, $hit, []));
+    }
+
+    public function test_non_entity_urls_are_filtered(): void
+    {
+        $orchestrator = app(DiscoveryOrchestrator::class);
+        $method = $this->privateMethod($orchestrator, 'isNonEntityLeadUrl');
+
+        $this->assertTrue($method->invoke($orchestrator, 'https://www.linkedin.com/pulse/big-bulky'));
+        $this->assertTrue($method->invoke($orchestrator, 'https://www.linkedin.com/posts/someone_activity-123'));
+        $this->assertFalse($method->invoke($orchestrator, 'https://www.linkedin.com/company/kobo360'));
+        $this->assertFalse($method->invoke($orchestrator, 'https://www.linkedin.com/in/ada-okoye'));
+    }
+
+    public function test_gather_cap_allows_more_candidates_for_default_limit(): void
+    {
+        $orchestrator = app(DiscoveryOrchestrator::class);
+        $method = $this->privateMethod($orchestrator, 'gatherCap');
+
+        $this->assertSame(48, $method->invoke($orchestrator, 12));
+        $this->assertSame(60, $method->invoke($orchestrator, 20));
+    }
+
+    public function test_advisory_cap_keeps_recommended_and_limits_low_confidence(): void
+    {
+        $orchestrator = app(DiscoveryOrchestrator::class);
+        $method = $this->privateMethod($orchestrator, 'applyAdvisoryCap');
+
+        $leads = [];
+        for ($i = 1; $i <= 10; $i++) {
+            $leads[] = [
+                'name' => "Strong {$i}",
+                'icp_recommended' => true,
+                'low_confidence' => false,
+                'score' => 90 - $i,
+            ];
+        }
+        for ($i = 1; $i <= 10; $i++) {
+            $leads[] = [
+                'name' => "Weak {$i}",
+                'icp_recommended' => false,
+                'low_confidence' => true,
+                'score' => 40,
+            ];
+        }
+
+        $capped = $method->invoke($orchestrator, $leads, 12);
+        $this->assertCount(12, $capped);
+        $advisory = array_values(array_filter(
+            $capped,
+            fn (array $l) => (bool) ($l['low_confidence'] ?? false) || ! (bool) ($l['icp_recommended'] ?? false),
+        ));
+        $this->assertLessThanOrEqual(3, count($advisory));
+        $this->assertGreaterThanOrEqual(9, count($capped) - count($advisory));
+    }
+
     private function companyBriefNigeria(): IcpBrief
     {
         return new IcpBrief(

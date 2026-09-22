@@ -15,8 +15,9 @@ class QueryVariationGeneratorTest extends TestCase
 
         $this->assertSame(4, $generator->queryBudget(10));
         $this->assertSame(6, $generator->queryBudget(20));
-        $this->assertSame(10, $generator->queryBudget(50));
-        $this->assertSame(15, $generator->queryBudget(150));
+        $this->assertSame(8, $generator->queryBudget(50));
+        $this->assertSame(8, $generator->queryBudget(150));
+        $this->assertSame(6, $generator->queryBudget(12));
     }
 
     public function test_geo_split_produces_lagos_abuja_and_nigeria_variants(): void
@@ -40,8 +41,8 @@ class QueryVariationGeneratorTest extends TestCase
         $queries = $generator->generate($brief, 20);
         $joined = mb_strtolower(implode("\n", $queries));
 
-        $this->assertNotEmpty($queries);
-        $this->assertGreaterThanOrEqual(6, count($queries));
+        $this->assertGreaterThanOrEqual(5, count($queries));
+        $this->assertLessThanOrEqual(QueryVariationGenerator::MAX_QUERIES, count($queries));
         $this->assertTrue(
             str_contains($joined, 'lagos') && str_contains($joined, 'abuja'),
             'Expected geo-split variants covering Lagos and Abuja'
@@ -227,6 +228,38 @@ class QueryVariationGeneratorTest extends TestCase
         $this->assertTrue(
             collect($queries)->contains(fn(string $q) => str_contains($q, 'QqwertTerritory')),
             'Expected ICP-brief territory geo-bias alongside custom prompt'
+        );
+    }
+
+    public function test_default_limit_fan_out_is_entity_first_and_capped(): void
+    {
+        $generator = new QueryVariationGenerator;
+        $brief = new IcpBrief(
+            name: 'Logistics ICP',
+            description: '',
+            industries: ['Logistics'],
+            territories: ['Nigeria'],
+            companySizes: [],
+            decisionMakers: [],
+            customPrompt: 'E-commerce logistics 3PL warehousing and delivery services for online retailers expanding nationwide',
+            minMatchScore: 60,
+            autoSyncCrm: false,
+            query: '',
+            target: QueryIntentService::TARGET_COMPANIES,
+            requestedLimit: 12,
+        );
+
+        $queries = $generator->generate($brief, 12);
+        $joined = mb_strtolower(implode("\n", $queries));
+
+        $this->assertGreaterThanOrEqual(4, count($queries));
+        $this->assertLessThanOrEqual(QueryVariationGenerator::MAX_QUERIES, count($queries));
+        $this->assertStringContainsString('linkedin.com/company', $joined);
+        $this->assertStringContainsString('nigeria', $joined);
+        // Long essay compressed — should not still contain the full verbose phrase in every query.
+        $this->assertTrue(
+            collect($queries)->contains(fn(string $q) => str_contains(mb_strtolower($q), 'linkedin.com/company')),
+            'Expected LinkedIn company entity query in default-12 fan-out'
         );
     }
 

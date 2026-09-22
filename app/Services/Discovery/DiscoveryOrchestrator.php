@@ -541,7 +541,11 @@ class DiscoveryOrchestrator
                 }
             }
 
-            $leadsPayload = array_slice($this->sortLeadsPayload($leadsPayload), 0, $effectiveLimit);
+            $leadsPayload = array_slice(
+                $this->sortLeadsPayload($this->applyAdvisoryCap($leadsPayload, $effectiveLimit)),
+                0,
+                $effectiveLimit,
+            );
             $unusedHits = $this->unusedHitsForReuse($leadsPayload);
 
             $this->appendStage($run, 'compiling_results');
@@ -930,9 +934,16 @@ class DiscoveryOrchestrator
             }
 
             // Gate junk titles before expensive GLM extract/score.
+            $urlLower = mb_strtolower((string) $hit->url);
+            if ($this->isNonEntityLeadUrl($urlLower)) {
+                $this->gateStats['gather_junk_title']++;
+                continue;
+            }
+
             if (
                 $this->queryIntent->looksLikeContentOrGenericPhrase($hit->name)
-                && ! str_contains(mb_strtolower((string) $hit->url), 'linkedin.com/in/')
+                && ! str_contains($urlLower, 'linkedin.com/in/')
+                && ! str_contains($urlLower, 'linkedin.com/company/')
             ) {
                 $this->gateStats['gather_junk_title']++;
                 continue;
@@ -1025,10 +1036,12 @@ class DiscoveryOrchestrator
         bool $factualQuery,
     ): array {
         $leadsPayload = [];
+        $advisoryPayload = [];
         $secondaryPayload = [];
         $companies = collect();
         $candidatesFound = 0;
         $scoredCandidates = [];
+        $maxAdvisory = (int) floor($effectiveLimit * 0.25);
 
         foreach ($candidates as $candidate) {
             if ($this->pastDeadline()) {
@@ -1069,7 +1082,9 @@ class DiscoveryOrchestrator
         });
 
         foreach ($scoredCandidates as $candidate) {
-            if (count($leadsPayload) + count($secondaryPayload) >= $effectiveLimit || $this->pastDeadline()) {
+            $recommendedCount = count($leadsPayload);
+            $advisoryCount = count($advisoryPayload);
+            if ($recommendedCount + $advisoryCount >= $effectiveLimit || $this->pastDeadline()) {
                 break;
             }
 
@@ -1094,7 +1109,19 @@ class DiscoveryOrchestrator
                 $scores,
             );
 
-            $extractedLocation = trim((string) ($extracted['location'] ?? $extracted['territory'] ?? $extracted['city'] ?? $hit->location ?? ''));
+            // Prefer stamped hit location / inference before treating geo as unknown.
+            if (trim((string) ($extracted['location'] ?? $extracted['territory'] ?? $extracted['city'] ?? '')) === '') {
+                $inferred = trim((string) ($hit->location ?? ''));
+                if ($inferred === '') {
+                    $haystack = trim($hit->name . ' ' . ($hit->snippet ?? '') . ' ' . ($hit->url ?? '') . ' ' . ($hit->website ?? ''));
+                    $inferred = (string) ($this->discoveryGeo->inferLocationFromText($haystack) ?? '');
+                }
+                if ($inferred !== '') {
+                    $extracted['location'] = $inferred;
+                }
+            }
+
+            $extractedLocation = trim((string) ($extracted['location'] ?? $extracted['territory'] ?? $extracted['city'] ?? ''));
             $locationUnknown = $extractedLocation === '';
             $gateResult = $this->icpHardGateResult($brief, $extracted);
             $territoryPassed = (bool) ($gateResult->reasons['territory'] ?? true);
@@ -1110,11 +1137,31 @@ class DiscoveryOrchestrator
             }
 
             if ($enforceTerritory && $locationUnknown) {
-                $icpRecommended = false;
-                $extracted['low_confidence'] = true;
-                $extracted['location_status'] = 'unknown';
-                $this->gateStats['unknown_geo_kept']++;
-                $this->gateStats['kept_advisory_profile']++;
+                if ($this->hasStrongGeoProxy($brief, $hit, $extracted)) {
+                    $proxyLocation = $this->discoveryGeo->inferLocationFromText(
+                        trim($hit->name . ' ' . ($hit->snippet ?? '') . ' ' . ($hit->url ?? '') . ' ' . ($hit->website ?? ''))
+                    );
+                    if ($proxyLocation !== null) {
+                        $extracted['location'] = $proxyLocation;
+                        $extracted['location_status'] = 'inferred_proxy';
+                        $locationUnknown = false;
+                        $gateResult = $this->icpHardGateResult($brief, $extracted);
+                        $territoryPassed = (bool) ($gateResult->reasons['territory'] ?? true);
+                    }
+                } elseif (
+                    $this->hasTrustedEntityProfileUrl($brief, $extracted, $hit)
+                    || $this->hasCompanyHomepageEvidence($hit, $extracted)
+                ) {
+                    // Geo-aimed search + real entity evidence: keep as recommended-eligible, not junk advisory.
+                    $extracted['location_status'] = 'unknown';
+                    $this->gateStats['unknown_geo_kept']++;
+                } else {
+                    $icpRecommended = false;
+                    $extracted['low_confidence'] = true;
+                    $extracted['location_status'] = 'unknown';
+                    $this->gateStats['unknown_geo_kept']++;
+                    $this->gateStats['kept_advisory_profile']++;
+                }
             }
 
             // ICP-brief mode: hard-gate remaining firmographics. Trusted LinkedIn URLs
@@ -1222,6 +1269,28 @@ class DiscoveryOrchestrator
                 );
             }
 
+            // Post-enrichment geo re-check: drop when enrichment stamps a known wrong country.
+            if ($enforceTerritory) {
+                $postLoc = trim((string) ($extracted['location'] ?? $extracted['territory'] ?? $extracted['city'] ?? ''));
+                if ($postLoc !== '') {
+                    $postGate = $this->icpHardGateResult($brief, array_merge($extracted, ['location' => $postLoc]));
+                    if (! (bool) ($postGate->reasons['territory'] ?? true)) {
+                        $this->gateStats['dropped_hard_gate']++;
+                        $this->gateStats['wrong_country_dropped']++;
+                        continue;
+                    }
+                    // Strong geo + trusted entity URL → promote out of fallback low-confidence.
+                    if (
+                        (bool) ($extracted['low_confidence'] ?? false)
+                        && $this->hasTrustedEntityProfileUrl($brief, $extracted, $hit)
+                        && $icpRecommended
+                    ) {
+                        $extracted['low_confidence'] = false;
+                        unset($extracted['location_status']);
+                    }
+                }
+            }
+
             // Prefer a real person name on the card only for people searches.
             // Company/account leads keep the company as Lead.name; DM stays in meta.
             if ($brief->isPeopleSearch()) {
@@ -1236,6 +1305,11 @@ class DiscoveryOrchestrator
                     }
                     $displayName = $contactPerson;
                 }
+            }
+
+            $isAdvisoryLead = ! $icpRecommended || (bool) ($extracted['low_confidence'] ?? false);
+            if ($isAdvisoryLead && ! $isSecondary && $advisoryCount >= $maxAdvisory) {
+                continue;
             }
 
             $leadPayload = $this->createLeadFromExtraction(
@@ -1253,6 +1327,8 @@ class DiscoveryOrchestrator
             $companies->push($leadPayload['company']);
             if ($isSecondary) {
                 $secondaryPayload[] = $leadPayload['payload'];
+            } elseif ($isAdvisoryLead) {
+                $advisoryPayload[] = $leadPayload['payload'];
             } else {
                 $leadsPayload[] = $leadPayload['payload'];
             }
@@ -1260,8 +1336,16 @@ class DiscoveryOrchestrator
             $this->updateProgress($run, 3, $sourcesChecked, $candidatesFound);
         }
 
-        // Qualifying / primary leads first, then below-threshold secondary pool.
-        $combined = array_merge($leadsPayload, $secondaryPayload);
+        // Recommended first, then advisory (capped at 25% of requested limit), then secondary.
+        $recommendedTake = array_slice($leadsPayload, 0, $effectiveLimit);
+        $advisoryRoom = min(
+            $maxAdvisory,
+            max(0, $effectiveLimit - count($recommendedTake)),
+        );
+        $advisoryTake = array_slice($advisoryPayload, 0, $advisoryRoom);
+        $filled = count($recommendedTake) + count($advisoryTake);
+        $secondaryTake = array_slice($secondaryPayload, 0, max(0, $effectiveLimit - $filled));
+        $combined = array_merge($recommendedTake, $advisoryTake, $secondaryTake);
 
         return [$combined, $companies, $candidatesFound];
     }
@@ -1374,7 +1458,125 @@ class DiscoveryOrchestrator
             return $this->hasPersonProfileUrl($extracted);
         }
 
-        return $this->companyNameValidator->isValidCompanyName($displayName, $extracted);
+        return $this->companyNameValidator->isValidCompanyName($displayName, $extracted)
+            || $this->hasCompanyEntityEvidence($displayName, $extracted);
+    }
+
+    /**
+     * Company leads with a clear name plus website or LinkedIn company URL are creatable.
+     *
+     * @param  array<string, mixed>  $extracted
+     */
+    private function hasCompanyEntityEvidence(string $displayName, array $extracted): bool
+    {
+        if ($this->queryIntent->looksLikeContentOrGenericPhrase($displayName)) {
+            return false;
+        }
+
+        $linkedin = mb_strtolower(trim((string) ($extracted['linkedin_url'] ?? '')));
+        if ($linkedin !== '' && str_contains($linkedin, 'linkedin.com/company/')) {
+            return true;
+        }
+
+        $profileUrls = $extracted['profile_urls'] ?? [];
+        if (is_array($profileUrls)) {
+            foreach ($profileUrls as $url) {
+                if (is_string($url) && str_contains(mb_strtolower($url), 'linkedin.com/company/')) {
+                    return true;
+                }
+            }
+        }
+
+        $website = trim((string) ($extracted['website'] ?? ''));
+        if ($website !== '' && ! $this->isProfileOrSocialHost($website)) {
+            return mb_strlen($displayName) >= 3 && mb_strlen($displayName) <= 80;
+        }
+
+        return false;
+    }
+
+    /**
+     * Company homepage / website evidence for geo-aimed unknown-location keep.
+     *
+     * @param  array<string, mixed>  $extracted
+     */
+    private function hasCompanyHomepageEvidence(RawDiscoveryHit $hit, array $extracted): bool
+    {
+        $url = mb_strtolower(trim((string) ($hit->url ?? '')));
+        if ($url !== '' && ! str_contains($url, 'linkedin.com/') && $this->looksLikeCompanyHomepageUrl($url)) {
+            return true;
+        }
+
+        $website = trim((string) ($extracted['website'] ?? $hit->website ?? ''));
+        if ($website !== '' && ! $this->isProfileOrSocialHost($website)) {
+            return true;
+        }
+
+        return false;
+    }
+
+    private function looksLikeCompanyHomepageUrl(string $urlLower): bool
+    {
+        $path = parse_url($urlLower, PHP_URL_PATH) ?? '/';
+        $path = rtrim((string) $path, '/') ?: '/';
+
+        return $path === '/'
+            || (bool) preg_match('#^/(about|about-us|home|index|company|contact)?$#u', $path);
+    }
+
+    /**
+     * Drop LinkedIn posts/pulse and research hosts before expensive extract.
+     */
+    private function isNonEntityLeadUrl(string $urlLower): bool
+    {
+        if ($urlLower === '') {
+            return false;
+        }
+
+        if (preg_match('~linkedin\.com/(pulse|posts|feed|recent-activity)\b~', $urlLower)) {
+            return true;
+        }
+
+        if (preg_match('~activity-\d~', $urlLower)) {
+            return true;
+        }
+
+        return (bool) preg_match(
+            '~(kenresearch|statista\.com|wikipedia\.org|market-research|market-report)~',
+            $urlLower,
+        );
+    }
+
+    /**
+     * Geo proxy from URL/snippet that matches ICP territories (e.g. ng.linkedin.com → Nigeria).
+     *
+     * @param  array<string, mixed>  $extracted
+     */
+    private function hasStrongGeoProxy(IcpBrief $brief, RawDiscoveryHit $hit, array $extracted): bool
+    {
+        if ($brief->territories === []) {
+            return false;
+        }
+
+        $haystack = trim(
+            (string) ($extracted['location'] ?? '') . ' '
+                . $hit->name . ' '
+                . (string) ($hit->snippet ?? '') . ' '
+                . (string) ($hit->url ?? '') . ' '
+                . (string) ($hit->website ?? '')
+        );
+        $inferred = $this->discoveryGeo->inferLocationFromText($haystack);
+        if ($inferred === null || trim($inferred) === '') {
+            return false;
+        }
+
+        $result = $this->icpFilter->passes(
+            $brief,
+            new CandidateCompany(territory: $inferred),
+            ['territory'],
+        );
+
+        return (bool) ($result->reasons['territory'] ?? false);
     }
 
     /**
@@ -1418,8 +1620,9 @@ class DiscoveryOrchestrator
                 array_map(static fn($u) => is_string($u) ? trim($u) : '', $existing),
             )));
 
+            $hitLower = mb_strtolower($hitUrl);
             if (
-                str_contains(mb_strtolower($hitUrl), 'linkedin.com/in/')
+                (str_contains($hitLower, 'linkedin.com/in/') || str_contains($hitLower, 'linkedin.com/company/'))
                 && trim((string) ($extracted['linkedin_url'] ?? '')) === ''
             ) {
                 $extracted['linkedin_url'] = $hitUrl;
@@ -1854,6 +2057,38 @@ class DiscoveryOrchestrator
     }
 
     /**
+     * Recommended-first assembly: advisory/low-confidence at most 25% of the requested batch.
+     *
+     * @param  list<array<string, mixed>>  $leadsPayload
+     * @return list<array<string, mixed>>
+     */
+    private function applyAdvisoryCap(array $leadsPayload, int $effectiveLimit): array
+    {
+        $effectiveLimit = max(1, $effectiveLimit);
+        $maxAdvisory = (int) floor($effectiveLimit * 0.25);
+
+        $recommended = [];
+        $advisory = [];
+        foreach ($leadsPayload as $lead) {
+            $isAdvisory = ! (bool) ($lead['icp_recommended'] ?? false)
+                || (bool) ($lead['low_confidence'] ?? false);
+            if ($isAdvisory) {
+                $advisory[] = $lead;
+            } else {
+                $recommended[] = $lead;
+            }
+        }
+
+        $recommendedTake = array_slice($recommended, 0, $effectiveLimit);
+        $advisoryRoom = min(
+            $maxAdvisory,
+            max(0, $effectiveLimit - count($recommendedTake)),
+        );
+
+        return array_merge($recommendedTake, array_slice($advisory, 0, $advisoryRoom));
+    }
+
+    /**
      * @param  list<array<string, mixed>>  $leadsPayload
      * @return list<array<string, mixed>>
      */
@@ -1864,6 +2099,12 @@ class DiscoveryOrchestrator
             $queryMatchB = ($b['query_match'] ?? false) ? 1 : 0;
             if ($queryMatchA !== $queryMatchB) {
                 return $queryMatchB <=> $queryMatchA;
+            }
+
+            $lowA = (bool) ($a['low_confidence'] ?? false) ? 0 : 1;
+            $lowB = (bool) ($b['low_confidence'] ?? false) ? 0 : 1;
+            if ($lowA !== $lowB) {
+                return $lowB <=> $lowA;
             }
 
             $icpA = ($a['icp_recommended'] ?? false) ? 1 : 0;
@@ -1965,8 +2206,9 @@ class DiscoveryOrchestrator
     private function gatherCap(int $effectiveLimit): int
     {
         $effectiveLimit = max(1, $effectiveLimit);
+        // Process more entity hits before the wall clock so creatability has room to convert.
         if ($effectiveLimit <= 40) {
-            return min(40, max($effectiveLimit * 3, $effectiveLimit));
+            return min(60, max($effectiveLimit * 4, $effectiveLimit));
         }
 
         return max($effectiveLimit, (int) ceil($effectiveLimit * 1.5));
@@ -2003,7 +2245,7 @@ class DiscoveryOrchestrator
             return true;
         }
 
-        $haystack = trim($hit->name.' '.($hit->snippet ?? '').' '.($hit->url ?? '').' '.($hit->website ?? ''));
+        $haystack = trim($hit->name . ' ' . ($hit->snippet ?? '') . ' ' . ($hit->url ?? '') . ' ' . ($hit->website ?? ''));
 
         return $this->discoveryGeo->inferLocationFromText($haystack) !== null;
     }
@@ -2088,10 +2330,10 @@ class DiscoveryOrchestrator
             $url = mb_strtolower(trim((string) ($lead['source_url'] ?? $lead['linkedin_url'] ?? $lead['website'] ?? '')));
             $name = mb_strtolower(trim((string) ($lead['name'] ?? '')));
             if ($url !== '') {
-                $used['url:'.$url] = true;
+                $used['url:' . $url] = true;
             }
             if ($name !== '') {
-                $used['name:'.$name] = true;
+                $used['name:' . $name] = true;
             }
         }
 
@@ -2100,12 +2342,12 @@ class DiscoveryOrchestrator
         foreach ($this->allCollectedHits as $snap) {
             $url = mb_strtolower(trim((string) ($snap['url'] ?? '')));
             $name = mb_strtolower(trim((string) ($snap['name'] ?? '')));
-            $key = $url !== '' ? 'url:'.$url : 'name:'.$name;
+            $key = $url !== '' ? 'url:' . $url : 'name:' . $name;
             if ($key === 'url:' || $key === 'name:' || isset($seen[$key])) {
                 continue;
             }
             $seen[$key] = true;
-            if (isset($used['url:'.$url]) || isset($used['name:'.$name])) {
+            if (isset($used['url:' . $url]) || isset($used['name:' . $name])) {
                 continue;
             }
             $unused[] = $snap;

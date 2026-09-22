@@ -11,7 +11,7 @@ use Tests\TestCase;
 
 class SerperDiscoveryAdapterGeoTest extends TestCase
 {
-    public function test_nigeria_icp_sends_gl_and_location_and_does_not_stamp_hits(): void
+    public function test_nigeria_icp_sends_gl_and_location_and_stamps_inferred_hit_location(): void
     {
         config([
             'services.serper.api_key' => 'test-serper',
@@ -25,6 +25,11 @@ class SerperDiscoveryAdapterGeoTest extends TestCase
                         'title' => 'Pune Logistics Ltd',
                         'link' => 'https://www.linkedin.com/company/pune-logistics',
                         'snippet' => '3PL operator in India.',
+                    ],
+                    [
+                        'title' => 'Market Report',
+                        'link' => 'https://www.linkedin.com/pulse/big-bulky-last-mile',
+                        'snippet' => 'Industry overview in Nigeria.',
                     ],
                 ],
             ], 200),
@@ -48,7 +53,8 @@ class SerperDiscoveryAdapterGeoTest extends TestCase
         $hits = $adapter->search($brief, new SearchContext(1, 1, 12, 'generate_leads'));
 
         $this->assertCount(1, $hits);
-        $this->assertNull($hits[0]->location);
+        $this->assertNotNull($hits[0]->location);
+        $this->assertStringContainsStringIgnoringCase('India', (string) $hits[0]->location);
         $this->assertNull($hits[0]->sector);
 
         Http::assertSent(function ($request) {

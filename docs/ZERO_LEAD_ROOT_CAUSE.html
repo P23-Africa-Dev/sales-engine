@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>Why Generate Prospects Returns Zero Leads</title>
+<style>
+body { font-family: Georgia, serif; max-width: 820px; margin: 2rem auto; padding: 0 1.5rem; line-height: 1.55; color: #111; }
+h1 { font-size: 1.65rem; }
+h2 { font-size: 1.25rem; margin-top: 1.75rem; border-bottom: 1px solid #ccc; padding-bottom: 0.3rem; }
+h3 { font-size: 1.05rem; }
+table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: 0.92rem; }
+th, td { border: 1px solid #bbb; padding: 0.4rem 0.55rem; vertical-align: top; text-align: left; }
+th { background: #f3f3f3; }
+pre { background: #f5f5f5; padding: 1rem; overflow: auto; font-size: 0.82rem; }
+li { margin-left: 1.25rem; }
+@media print { body { max-width: none; margin: 0.5in; } }
+</style>
+</head>
+<body>
+<h1>Why Generate Prospects Returns Zero Leads</h1>
+
+<p><strong>Date:</strong> 2026-09-22  </p>
+<p><strong>Status:</strong> Root cause identified — fix not started (awaiting approval)  </p>
+<p><strong>Audience:</strong> Product, ops, and engineering  </p>
+<p><strong>Evidence:</strong> Production discovery runs #119–#121, live gate checks on the deployed API, and the geo retrieval work shipped in commit `4573d77`</p>
+
+<hr>
+
+<h2>1. Plain-English summary (read this first)</h2>
+
+<p>When you click <strong>Confirm &amp; Generate</strong>, the system does find companies and people on the web. It is <strong>not</strong> “broken” in the sense of crashing or timing out.</p>
+
+<p>What happens instead:</p>
+
+<p>1. Search finds dozens of candidates (often <strong>70–100+</strong>).</p>
+<p>2. Before any of them become a lead card, a <strong>location checklist</strong> runs.</p>
+<p>3. Almost every candidate has <strong>no location written on the record</strong>.</p>
+<p>4. The checklist treats “no location” the same as “wrong country” and <strong>throws them away</strong>.</p>
+<p>5. You see: *“No leads in Nigeria… met your ICP search brief.”*</p>
+
+<p>So the leads are <strong>found</strong>, then <strong>discarded at the final filter</strong>. That is why the user gets nothing.</p>
+
+<hr>
+
+<h2>2. What we checked (so this is not a guess)</h2>
+
+<h3>Production run #121 (Logistics &amp; E-commerce ICP)</h3>
+
+<table>
+<tr><th>What we measured</th><th>Result</th></tr>
+<tr><td>------------------</td><td>--------</td></tr>
+<tr><td>Job status</td><td>`completed` (success, not failed)</td></tr>
+<tr><td>Search hits collected</td><td>**92** (Serper 74 + Hunter 18)</td></tr>
+<tr><td>Leads returned to the user</td><td>**0**</td></tr>
+<tr><td>Dropped by location/firmographic hard gate</td><td>**5** (the few that reached the final check)</td></tr>
+<tr><td>Saved as “advisory” LinkedIn profiles</td><td>**0**</td></tr>
+<tr><td>Dropped by “not a real person/company” at final step</td><td>**0**</td></tr>
+<tr><td>Time used</td><td>~146 seconds (near the hard stop)</td></tr>
+</table>
+
+<p>The chat message for that run said leads in Nigeria / Lagos / Abuja were not found — even though search was aimed at Nigeria.</p>
+
+<h3>Live proof on the production code</h3>
+
+<p>We asked the same checklist the app uses:</p>
+
+<table>
+<tr><th>Candidate’s location field</th><th>Does territory pass?</th></tr>
+<tr><td>----------------------------</td><td>----------------------</td></tr>
+<tr><td>*(empty — nothing written)*</td><td>**No — fail**</td></tr>
+<tr><td>`Lagos, Nigeria`</td><td>**Yes — pass**</td></tr>
+<tr><td>`San Francisco, USA`</td><td>**No — fail**</td></tr>
+</table>
+
+<p><strong>Empty location fails.</strong> That single fact explains the empty UI.</p>
+
+<hr>
+
+<h2>3. How lead generation is supposed to work</h2>
+
+<p>Think of it as a factory line with five stations.</p>
+
+<pre>
+  You confirm generate
+           │
+           ▼
+  ┌─────────────────────┐
+  │ 1. Build the search │  Vague ask → use ICP “What we search for”
+  └──────────┬──────────┘
+             ▼
+  ┌─────────────────────┐
+  │ 2. Search the web   │  Serper (+ Hunter, etc.)
+  │    Aim at country   │  e.g. Nigeria via gl=ng + “Nigeria” in queries
+  └──────────┬──────────┘
+             ▼
+  ┌─────────────────────┐
+  │ 3. Gather / extract │  Turn raw hits into people/companies
+  └──────────┬──────────┘
+             ▼
+  ┌─────────────────────┐
+  │ 4. Quality gates    │  Real name? Real profile? Right country?
+  └──────────┬──────────┘
+             ▼
+  ┌─────────────────────┐
+  │ 5. Show lead cards  │  What the user sees in chat
+  └─────────────────────┘
+</pre>
+
+<p>Stations 1–2 are working. Station 4 is where the batch dies.</p>
+
+<hr>
+
+<h2>4. What recently changed (and why it matters)</h2>
+
+<p>Documented in:</p>
+
+<li>[`docs/backend_implementation_plan.md`](backend_implementation_plan.md) — status line **“Generate Prospects geo retrieval (2026-09-22)”**</li>
+<li>[`docs/frontend_implementation_plan.md`](frontend_implementation_plan.md) — confirm card **“Searching in: {territories}”**</li>
+
+<h3>Intent of that work (good idea)</h3>
+
+<p>Geography should mean something:</p>
+
+<li>**Search** in the right country (Serper `location` / `gl`, plus country words in queries).</li>
+<li>**Reject** candidates that are clearly in another country.</li>
+<li>Do **not** let a LinkedIn profile alone override a failed country check.</li>
+
+<p>That intent is sound for quality.</p>
+
+<h3>What the implementation actually did</h3>
+
+<table>
+<tr><th>Piece</th><th>What it does now</th></tr>
+<tr><td>-------</td><td>------------------</td></tr>
+<tr><td>`DiscoveryGeo`</td><td>Correctly aims Serper at Nigeria (`location=Lagos, Nigeria`, `gl=ng`)</td></tr>
+<tr><td>Serper hit mapping</td><td>Sets each hit’s `location` field to **`null`** (geo is only on the search request, not copied onto the hit)</td></tr>
+<tr><td>Hard gate (`icpHardGateResult`)</td><td>If the ICP has territories, it **always** checks territory — even when the candidate has no location text</td></tr>
+<tr><td>Filter (`IcpFilterService`)</td><td>Empty location = **fail closed**</td></tr>
+<tr><td>Advisory LinkedIn keep</td><td>Only helps when **industry** fails but **territory already passed** — so it cannot save “no location” cases</td></tr>
+</table>
+
+<p>So the product decided: “search in Nigeria, then require Nigeria.”  </p>
+<p>But most candidates never get a Nigeria label written on them → they fail the require step.</p>
+
+<hr>
+
+<h2>5. Root cause (exact)</h2>
+
+<h3>One sentence</h3>
+
+<p><strong>After geo-biased search, candidates usually have a blank location; the territory hard-gate always runs when the ICP lists countries, and blank location is treated as a fail — so every lead is discarded.</strong></p>
+
+<h3>Where in code</h3>
+
+<p>1. <strong>Hits arrive with no location</strong>  </p>
+<p>   `SerperDiscoveryAdapter` builds hits with `location: null`.</p>
+
+<p>2. <strong>Gate always evaluates territory if ICP has territories</strong>  </p>
+<p>   In `DiscoveryOrchestrator::icpHardGateResult`:</p>
+
+<p>   - If `$brief-&gt;territories` is not empty → add `'territory'` to the fields being checked  </p>
+<p>   - Candidate territory is taken from extracted `location` / `territory` / `city` (often still empty)</p>
+
+<p>3. <strong>Empty = fail</strong>  </p>
+<p>   `IcpFilterService` fails closed when the field is checked and the value is empty.</p>
+
+<p>4. <strong>LinkedIn safety net does not apply</strong>  </p>
+<p>   Territory failure is a hard stop. Advisory keep only runs for industry-only failure after territory already passed.</p>
+
+<h3>Why earlier “fixes” did not restore yield</h3>
+
+<table>
+<tr><th>Earlier change</th><th>Why it did not fix #121</th></tr>
+<tr><td>----------------</td><td>-------------------------</td></tr>
+<tr><td>Soft-complete under half quota</td><td>Run still finishes; problem is filters, not early stop</td></tr>
+<tr><td>Keep unknown firmographics if LinkedIn URL</td><td>Superseded: territory miss is always drop</td></tr>
+<tr><td>Keep on hard-gate fail if LinkedIn URL</td><td>Narrowed to **industry-only** fail; territory still drops</td></tr>
+<tr><td>Geo bias on queries (`… Nigeria`)</td><td>Improves *search aiming*; does not fill the *location field* used by the gate</td></tr>
+</table>
+
+<h3>Secondary contributors (real, but not the main switch)</h3>
+
+<p>These explain why only ~5 candidates even hit the hard-gate counter, while ~87 never get that far:</p>
+
+<li>Gather stage drops (junk titles, empty AI extract, creatability) **without** writing counters to `result_summary`</li>
+<li>Wall clock near 150s → gather loop can stop early (`remainingSeconds &lt; 20`)</li>
+<li>Search brief quality (typos like “sipping” / “ecommerence”) reduces hit quality but **does not** explain zero leads when 74 Serper hits already exist</li>
+
+<p><strong>Primary switch = blank location fails territory.</strong> Fix that, and yield can return while still rejecting true foreign locations.</p>
+
+<hr>
+
+<h2>6. Flow of where leads are lost (run #121)</h2>
+
+<pre>
+  92 hits found
+       │
+       ▼
+  Gather / extract
+  (most never become “finalists”
+   — few counters today)
+       │
+       ▼
+  Only ~5 reach final gates
+       │
+       ▼
+  Territory check: location empty?
+       │
+       ├─ Yes → DROP  (counts as dropped_hard_gate)
+       └─ Known wrong country → DROP
+       └─ Known Nigeria → would PASS (almost none have this stamped)
+       │
+       ▼
+  0 leads shown to user
+</pre>
+
+<hr>
+
+<h2>7. Recommended plan (do not implement until approved)</h2>
+
+<h3>Goal</h3>
+
+<p>Keep the good rule: <strong>reject known wrong countries.</strong>  </p>
+<p>Change the bad rule: <strong>do not treat “we don’t know the location yet” as “wrong country.”</strong></p>
+
+<h3>Step A — Fix territory semantics (must-have)</h3>
+
+<p>In the Discovery hard gate:</p>
+
+<li>If location is **missing / unknown** → **do not fail** territory (skip the field, or treat as unknown).</li>
+<li>If location is **known and another country** → **still hard-drop**.</li>
+<li>Optionally, before the gate, try to fill location from title/snippet/URL using `DiscoveryGeo::inferLocationFromText`.</li>
+
+<h3>Step B — Align advisory keep (must-have)</h3>
+
+<li>Trusted LinkedIn `/in/` or `/company/` + **unknown** geo → keep as advisory (not “ICP recommended”).</li>
+<li>Trusted LinkedIn + **proven wrong country** → still drop.</li>
+
+<h3>Step C — Make the next failure obvious (must-have)</h3>
+
+<p>Add gather-stage counters to `result_summary`, for example:</p>
+
+<li>`gather_prefilter`</li>
+<li>`gather_empty_extract`</li>
+<li>`gather_creatability`</li>
+<li>`gather_time_cut`</li>
+
+<p>So “0 leads” always shows *which* station emptied the belt.</p>
+
+<h3>Step D — Optional hygiene (nice-to-have)</h3>
+
+<li>Clean ICP “What we search for” text (fix typos / definition-style phrasing).</li>
+<li>Fylings DNS (`api.fylings.com` unresolved) is separate ops work; it is not why Serper batches go to zero.</li>
+
+<h3>Success criteria after the fix</h3>
+
+<li>Vague Generate on Logistics (Nigeria territories) returns a usable first batch when web hits exist.</li>
+<li>Candidates clearly in the US/UK/etc. still do not appear.</li>
+<li>`result_summary` shows non-zero `candidates_passed_gates` and/or `kept_advisory_profile` when location text is missing but search was geo-aimed at Nigeria.</li>
+<li>Full backend test suite stays green with new unit tests for: empty location ≠ fail; USA location = fail; Nigeria location = pass.</li>
+
+<hr>
+
+<h2>8. What this is not</h2>
+
+<table>
+<tr><th>Not the root cause</th><th>Why we ruled it out</th></tr>
+<tr><td>--------------------</td><td>---------------------</td></tr>
+<tr><td>API / queue job crash</td><td>Runs finish as `completed`</td></tr>
+<tr><td>Serper key missing</td><td>74 organic hits on #121</td></tr>
+<tr><td>“No one in Nigeria exists”</td><td>Search is aimed at Nigeria; gate kills blank labels</td></tr>
+<tr><td>Frontend confirm card</td><td>Backend returns empty lead list; chat narrates zero</td></tr>
+<tr><td>Soft-complete alone</td><td>Soft-complete flag false on #121; filters already emptied the set</td></tr>
+</table>
+
+<hr>
+
+<h2>9. Decision needed</h2>
+
+<p>Please review this root cause and the plan in §7.</p>
+
+<li>**Approve** → implement Steps A–C (and D if you want).  </li>
+<li>**Adjust** → say which rule you prefer if you want missing location to stay fail-closed (that choice will keep producing empty batches until hits carry real location text).</li>
+
+<hr>
+
+<h2>10. Appendix — key files</h2>
+
+<table>
+<tr><th>File</th><th>Role</th></tr>
+<tr><td>------</td><td>------</td></tr>
+<tr><td>`app/Services/Discovery/DiscoveryGeo.php`</td><td>Country aiming for Serper/Hunter</td></tr>
+<tr><td>`app/Services/Discovery/Adapters/SerperDiscoveryAdapter.php`</td><td>Search + hits with `location: null`</td></tr>
+<tr><td>`app/Services/Discovery/DiscoveryOrchestrator.php`</td><td>Gather, `icpHardGateResult`, advisory keep</td></tr>
+<tr><td>`app/Services/IcpFiltering/IcpFilterService.php`</td><td>Fail-closed checklist</td></tr>
+<tr><td>`docs/backend_implementation_plan.md`</td><td>Documents geo retrieval + fail-closed missing location</td></tr>
+<tr><td>`docs/frontend_implementation_plan.md`</td><td>Confirm card “Searching in…”</td></tr>
+</table>
+
+<h3>Related production IDs</h3>
+
+<li>Discovery runs **#119, #120, #121** (Logistics ICP 15)  </li>
+<li>Commit introducing geo fail-closed: **`4573d77`**</li>
+</body>
+</html>

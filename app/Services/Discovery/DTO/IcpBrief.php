@@ -213,20 +213,21 @@ readonly class IcpBrief
      */
     public function searchBrief(): string
     {
-        $interest = trim($this->customPrompt);
-        if ($interest !== '') {
-            return $interest;
-        }
-
-        $description = trim($this->description);
-        if ($description !== '') {
-            return $description;
-        }
-
         $industries = array_values(array_filter(array_map(
             static fn($industry) => is_string($industry) ? trim($industry) : '',
             $this->industries,
         )));
+
+        $interest = trim($this->customPrompt);
+        if ($interest !== '') {
+            return $this->entityOrientedSeed($interest, $industries);
+        }
+
+        $description = trim($this->description);
+        if ($description !== '') {
+            return $this->entityOrientedSeed($description, $industries);
+        }
+
         if ($industries !== []) {
             return implode(' ', $industries) . ' companies';
         }
@@ -234,6 +235,30 @@ readonly class IcpBrief
         return $this->isPeopleSearch()
             ? 'executives founders companies announcements'
             : 'companies announcements partnerships market entry';
+    }
+
+    /**
+     * Compress definition-style ICP essays into short entity search seeds.
+     *
+     * @param  list<string>  $industries
+     */
+    private function entityOrientedSeed(string $text, array $industries): string
+    {
+        $text = trim(preg_replace('/\s+/u', ' ', $text) ?? $text);
+        $words = preg_split('/\s+/u', $text) ?: [];
+        if (count($words) <= 14) {
+            return $text;
+        }
+
+        $nouns = $this->concreteNounsFromText($text, implode(' ', $industries), 6);
+        if ($industries !== []) {
+            $seed = trim(implode(' ', $industries).' '.$nouns);
+            if ($seed !== '') {
+                return $this->isPeopleSearch() ? $seed : trim($seed.' companies');
+            }
+        }
+
+        return implode(' ', array_slice($words, 0, 10));
     }
 
     /**

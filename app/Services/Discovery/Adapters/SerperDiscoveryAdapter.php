@@ -147,16 +147,19 @@ class SerperDiscoveryAdapter implements DiscoverySourceInterface
             ->map(function (array $item) use ($brief) {
                 $title = (string) ($item['title'] ?? 'Unknown');
                 $url = $item['link'] ?? null;
+                $snippet = $item['snippet'] ?? null;
                 $name = $this->resolveHitName($title, $url, $brief);
+                $haystack = trim($title . ' ' . (string) $snippet . ' ' . (string) $url);
+                $inferredLocation = $this->discoveryGeo->inferLocationFromText($haystack);
 
                 return new RawDiscoveryHit(
                     name: trim($name),
                     source: 'web',
                     provider: 'serper',
                     website: isset($item['link']) ? parse_url((string) $item['link'], PHP_URL_HOST) : null,
-                    location: null,
+                    location: $inferredLocation,
                     sector: null,
-                    snippet: $item['snippet'] ?? null,
+                    snippet: $snippet,
                     url: $url,
                     meta: ['title' => $title, 'target' => $brief->target],
                 );
@@ -173,6 +176,13 @@ class SerperDiscoveryAdapter implements DiscoverySourceInterface
 
                 $allowListicle = $brief->isPeopleSearch() || $brief->isListiclePeopleQuery() || $brief->isAuthoritativePeopleQuery();
                 $urlLower = mb_strtolower((string) ($h->url ?? ''));
+
+                // Drop LinkedIn posts/pulse and research hosts before gather.
+                // Listicle / authoritative people searches still need article sources.
+                if ($this->isNonEntityLeadUrl($urlLower) && ! $allowListicle) {
+                    return false;
+                }
+
                 $isCompanyLinkedIn = $brief->isCompanySearch() && str_contains($urlLower, 'linkedin.com/company/');
                 $looksLikeCompanyHomepage = $brief->isCompanySearch() && $this->looksLikeCompanyHomepage($urlLower);
 
@@ -228,6 +238,29 @@ class SerperDiscoveryAdapter implements DiscoverySourceInterface
         return false;
     }
 
+    /**
+     * LinkedIn posts/pulse and research hosts rarely yield creatable company/person leads.
+     */
+    private function isNonEntityLeadUrl(string $urlLower): bool
+    {
+        if ($urlLower === '') {
+            return false;
+        }
+
+        if (preg_match('~linkedin\.com/(pulse|posts|feed|recent-activity)\b~', $urlLower)) {
+            return true;
+        }
+
+        if (preg_match('~activity-\d~', $urlLower)) {
+            return true;
+        }
+
+        return (bool) preg_match(
+            '~(kenresearch|statista\.com|wikipedia\.org|market-research|market-report)~',
+            $urlLower,
+        );
+    }
+
     private function looksLikeCompanyName(string $name): bool
     {
         $trimmed = trim($name);
@@ -266,6 +299,7 @@ class SerperDiscoveryAdapter implements DiscoverySourceInterface
         $desired = match (true) {
             $brief->isAuthoritativePeopleQuery() => max(10, min(20, $ctx->limit)),
             $ctx->limit >= 20 => 20,
+            $ctx->limit >= 12 => 15,
             default => min(10, max(5, $ctx->limit)),
         };
 
@@ -288,7 +322,7 @@ class SerperDiscoveryAdapter implements DiscoverySourceInterface
                 'location' => isset($params['location']) ? trim((string) $params['location']) : '',
                 'gl' => isset($params['gl']) ? trim((string) $params['gl']) : '',
             ],
-            static fn (string $value): bool => $value !== '',
+            static fn(string $value): bool => $value !== '',
         );
     }
 

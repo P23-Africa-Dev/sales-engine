@@ -319,6 +319,20 @@ final class DiscoveryGeo
             return null;
         }
 
+        // Country LinkedIn hosts: ng.linkedin.com, uk.linkedin.com, etc.
+        if (preg_match('/(?:^|[\/\s:@])ng\.linkedin\.com(?:[\/:?#\s]|$)/u', $haystack)) {
+            return 'Nigeria';
+        }
+        if (preg_match('/(?:^|[\/\s:@])(?:uk|gb)\.linkedin\.com(?:[\/:?#\s]|$)/u', $haystack)) {
+            return 'England';
+        }
+        if (preg_match('/(?:^|[\/\s:@])ke\.linkedin\.com(?:[\/:?#\s]|$)/u', $haystack)) {
+            return 'Kenya';
+        }
+        if (preg_match('/(?:^|[\/\s:@])gh\.linkedin\.com(?:[\/:?#\s]|$)/u', $haystack)) {
+            return 'Ghana';
+        }
+
         if (preg_match('/(?:^|[\/\s:@])(?:[\w-]+\.)*[\w-]+\.co\.uk(?:[\/:?#\s]|$)/u', $haystack)
             || preg_match('/(?:^|[\/\s:@])(?:[\w-]+\.)*[\w-]+\.uk(?:[\/:?#\s]|$)/u', $haystack)
         ) {

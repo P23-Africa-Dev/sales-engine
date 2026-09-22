@@ -342,6 +342,9 @@ class ExtractionService
             ];
         }
 
+        $url = mb_strtolower((string) ($hit->url ?? ''));
+        $hasCompanyProfile = str_contains($url, 'linkedin.com/company/');
+
         return [
             'name' => $name,
             'sector' => $hit->sector,
@@ -349,7 +352,9 @@ class ExtractionService
             'summary' => $hit->snippet ?? $hit->name,
             'business_fields' => ['website' => $hit->website],
             'commercial_signals' => [],
-            'low_confidence' => true,
+            'linkedin_url' => $hasCompanyProfile ? $hit->url : null,
+            // Valid company entities are high-confidence by default; advisory is decided in gates.
+            'low_confidence' => false,
         ];
     }
 

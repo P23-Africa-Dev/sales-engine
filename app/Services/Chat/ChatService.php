@@ -746,8 +746,12 @@ class ChatService
             return "No leads met the match threshold for ICP \"{$icp->name}\". Edit \"What we search for\" or loosen qualify filters.";
         }
 
-        $icpRecommendedCount = count(array_filter($leads, fn(array $lead) => (bool) ($lead['icp_recommended'] ?? false)));
-        $advisoryNote = $this->buildIcpAdvisoryNote($icp, $count, $icpRecommendedCount, ! $icpSearchBrief && trim($query) !== '');
+        $icpRecommendedCount = count(array_filter(
+            $leads,
+            fn(array $lead) => (bool) ($lead['icp_recommended'] ?? false) && ! (bool) ($lead['low_confidence'] ?? false),
+        ));
+        $reviewCount = $count - $icpRecommendedCount;
+        $advisoryNote = $this->buildIcpAdvisoryNote($icp, $count, $icpRecommendedCount, $reviewCount);
 
         if ($icpSearchBrief && $count < 3) {
             $advisoryNote .= ' Thin batch after trust gates — try widening qualify filters or refining “What we search for.”';
@@ -814,21 +818,21 @@ class ChatService
         return trim(implode("\n", $lines));
     }
 
-    private function buildIcpAdvisoryNote(IcpProfile $icp, int $total, int $icpRecommendedCount, bool $hasUserQuery): string
+    private function buildIcpAdvisoryNote(IcpProfile $icp, int $total, int $strongCount, int $reviewCount): string
     {
-        if (! $hasUserQuery || $total === 0) {
+        if ($total === 0) {
             return '';
         }
 
-        if ($icpRecommendedCount === $total) {
-            return " All {$total} score strongly against your ICP \"{$icp->name}\".";
+        if ($reviewCount === 0) {
+            return " All {$total} look like strong matches for your ICP \"{$icp->name}\".";
         }
 
-        if ($icpRecommendedCount === 0) {
-            return ' These answer your search; compare the Search / ICP / Intent % on each card to decide what to save.';
+        if ($strongCount === 0) {
+            return " {$total} need review — compare Search / ICP / Intent % on each card before saving.";
         }
 
-        return ' Compare Overall, Search, ICP, and Intent % on each card. Stronger ICP fit is ranked higher when scores are close.';
+        return " {$strongCount} strong matches, {$reviewCount} need review.";
     }
 
     private function freeformReply(
