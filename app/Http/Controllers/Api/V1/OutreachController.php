@@ -99,7 +99,7 @@ class OutreachController extends Controller
             }
 
             try {
-                $this->sendService->sendEmail(
+                $result = $this->sendService->queueEmail(
                     $org,
                     $user,
                     $toEmail,
@@ -111,7 +111,11 @@ class OutreachController extends Controller
                 return response()->json(['message' => $e->getMessage()], 422);
             }
 
-            return response()->json(['data' => array_merge($draft, ['sent' => true])]);
+            return response()->json(['data' => array_merge($draft, [
+                'sent' => false,
+                'queued' => true,
+                'delivery_status' => $result['delivery_status'] ?? 'queued',
+            ])]);
         }
 
         return response()->json(['data' => $draft]);
@@ -197,7 +201,7 @@ class OutreachController extends Controller
         }
 
         try {
-            $result = $this->sendService->sendEmail(
+            $result = $this->sendService->queueEmail(
                 $org,
                 $user,
                 $data['to_email'],

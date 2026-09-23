@@ -18,6 +18,8 @@ class SendGridDomainAuthService
 {
     private const API_BASE = 'https://api.sendgrid.com/v3';
 
+    public function __construct(private readonly DomainIntegrityService $integrity) {}
+
     public function authenticate(Organization $organization, string $domain, string $fromEmail): OutreachDomainAuthentication
     {
         $domain = $this->normalizeDomain($domain);
@@ -138,6 +140,24 @@ class SendGridDomainAuthService
             'verification_status' => $valid ? 'verified' : 'failed',
             'verified_at' => $valid ? now() : $record->verified_at,
             'last_checked_at' => now(),
+            'warmup_started_at' => $valid ? ($record->warmup_started_at ?? now()) : $record->warmup_started_at,
+        ]);
+
+        $record = $record->refresh();
+
+        if ($valid) {
+            return $this->integrity->evaluateAndPersist($record);
+        }
+
+        $record->update([
+            'integrity_status' => 'fail',
+            'integrity_checks' => [[
+                'key' => 'sendgrid_auth',
+                'label' => 'SendGrid domain authentication',
+                'status' => 'fail',
+                'message' => 'DNS records were not detected yet.',
+            ]],
+            'integrity_checked_at' => now(),
         ]);
 
         return $record->refresh();

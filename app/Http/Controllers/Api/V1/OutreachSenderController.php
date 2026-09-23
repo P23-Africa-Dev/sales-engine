@@ -5,12 +5,20 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Controllers\Controller;
 use App\Models\OutreachDomainAuthentication;
 use App\Models\OutreachIdentity;
+use App\Models\OutreachMailbox;
+use App\Services\Outreach\DomainIntegrityService;
+use App\Services\Outreach\OutreachQuotaService;
 use App\Support\OrgContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class OutreachSenderController extends Controller
 {
+    public function __construct(
+        private readonly DomainIntegrityService $integrity,
+        private readonly OutreachQuotaService $quota,
+    ) {}
+
     public function show(Request $request): JsonResponse
     {
         $org = OrgContext::require();
@@ -28,26 +36,40 @@ class OutreachSenderController extends Controller
             ->where('organization_id', $org->id)
             ->first();
 
+        $mailbox = OutreachMailbox::query()
+            ->where('organization_id', $org->id)
+            ->where('user_id', $user->id)
+            ->where('status', 'connected')
+            ->orderByDesc('id')
+            ->first();
+
+        $senderMode = $identity?->sender_mode ?? 'platform';
+
         return response()->json([
             'data' => [
-                'sender_mode' => $identity?->sender_mode ?? 'platform',
+                'sender_mode' => $senderMode,
                 'reply_to_email' => $identity?->reply_to_email ?? $user->email,
                 'org_verified_from_email' => $domainAuth?->from_email,
                 'org_verified_domain' => $domainAuth?->domain,
-                // Legacy field: missing domain used to surface as "pending" and confused the UI.
                 'verification_status' => $domainAuth?->verification_status ?? 'pending',
                 'org_connection_status' => $this->orgConnectionStatus($domainAuth),
+                'integrity_status' => $domainAuth?->integrity_status,
+                'integrity_checks' => $domainAuth?->integrity_checks ?? [],
+                'integrity_checked_at' => $domainAuth?->integrity_checked_at?->toIso8601String(),
                 'platform_from_email' => config('services.sendgrid.platform_from_email'),
+                'connected_mailbox' => $mailbox ? [
+                    'id' => $mailbox->id,
+                    'email' => $mailbox->email,
+                    'provider' => $mailbox->provider,
+                    'status' => $mailbox->status,
+                ] : null,
+                'quota' => $this->quota->snapshot($org, $senderMode === 'organization' && ! $this->integrity->allowsOrganizationSending($domainAuth)
+                    ? 'platform'
+                    : ($senderMode === 'connected_mailbox' && ! $mailbox ? 'platform' : $senderMode)),
             ],
         ]);
     }
 
-    /**
-     * Only `sender_mode` and `reply_to_email` are client-settable. Domain
-     * verification fields are derived exclusively from `OutreachDomainAuthentication`,
-     * which is only ever written by SendGridDomainAuthService after a real
-     * SendGrid API check — never trusted from client input here.
-     */
     public function update(Request $request): JsonResponse
     {
         $org = OrgContext::require();
@@ -57,7 +79,7 @@ class OutreachSenderController extends Controller
         }
 
         $data = $request->validate([
-            'sender_mode' => ['required', 'string', 'in:platform,organization'],
+            'sender_mode' => ['required', 'string', 'in:platform,organization,connected_mailbox'],
             'reply_to_email' => ['nullable', 'email'],
         ]);
 
@@ -66,9 +88,25 @@ class OutreachSenderController extends Controller
                 ->where('organization_id', $org->id)
                 ->first();
 
-            if (! $domainAuth || ! $domainAuth->isVerified()) {
+            if (! $this->integrity->allowsOrganizationSending($domainAuth)) {
                 return response()->json([
-                    'message' => 'Verify your organization domain before switching to organization sending.',
+                    'message' => 'Verify your organization domain and pass the integrity checklist before switching to organization sending.',
+                    'integrity_status' => $domainAuth?->integrity_status,
+                    'integrity_checks' => $domainAuth?->integrity_checks ?? [],
+                ], 422);
+            }
+        }
+
+        if ($data['sender_mode'] === 'connected_mailbox') {
+            $mailbox = OutreachMailbox::query()
+                ->where('organization_id', $org->id)
+                ->where('user_id', $user->id)
+                ->where('status', 'connected')
+                ->exists();
+
+            if (! $mailbox) {
+                return response()->json([
+                    'message' => 'Connect a mailbox before switching to send-as-yourself.',
                 ], 422);
             }
         }
@@ -88,6 +126,10 @@ class OutreachSenderController extends Controller
     {
         if (! $domainAuth) {
             return 'not_connected';
+        }
+
+        if ($domainAuth->verification_status === 'verified' && $domainAuth->integrity_status === 'fail') {
+            return 'failed';
         }
 
         return match ($domainAuth->verification_status) {

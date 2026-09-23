@@ -218,4 +218,25 @@ curl -s -H "Authorization: Bearer $TOKEN" \
 
 3. **Organization ("send as my own domain") sending** requires no extra env vars — an org authenticates their own domain from the Sales Engine UI (Outreach settings → Email sender → Connect your domain). That flow calls SendGrid's Domain Authentication API directly per-organization; there is nothing to configure here beyond the API key already set above.
 
-4. Re-running `outreach:setup-sendgrid` is safe — it reuses the existing ASM group and re-points the Event Webhook URL if it changed.
+   After SendGrid DNS validates, Sales Engine also runs a **domain integrity checklist** (business domain, DMARC, MX). Organization sending is blocked until integrity is `pass` or `warn`. Daily recheck: `php artisan outreach:recheck-domain-integrity` (scheduled at 04:00).
+
+4. **Send quotas** (optional env overrides in `config/outreach.php`):
+
+   - `OUTREACH_PLATFORM_DAILY_CAP` (default 30)
+   - `OUTREACH_ORG_WARMUP_START` (default 50)
+   - `OUTREACH_ORG_DAILY_CEILING` (default 500)
+   - `OUTREACH_MAILBOX_DAILY_CAP` (default 40)
+
+5. **Connected mailbox (send-as-yourself)** — optional OAuth / SMTP. Set provider credentials:
+
+   - Google: `OUTREACH_GOOGLE_CLIENT_ID`, `OUTREACH_GOOGLE_CLIENT_SECRET`, `OUTREACH_GOOGLE_REDIRECT_URI`
+   - Microsoft: `OUTREACH_MICROSOFT_CLIENT_ID`, `OUTREACH_MICROSOFT_CLIENT_SECRET`, `OUTREACH_MICROSOFT_REDIRECT_URI`
+   - Zoho: `OUTREACH_ZOHO_CLIENT_ID`, `OUTREACH_ZOHO_CLIENT_SECRET`, `OUTREACH_ZOHO_REDIRECT_URI`, `OUTREACH_ZOHO_DATACENTER`
+   - Frontend return URL: `OUTREACH_MAILBOX_FRONTEND_CALLBACK` (default `{FRONTEND_URL}/sales-engine/outreach/mailbox-connected`)
+
+   OAuth redirect URIs must point at:
+   `{APP_URL}/api/v1/outreach/mailboxes/oauth/{provider}/callback`
+
+6. Prospect outreach is **queued** (`SendOutreachEmailJob`). Ensure a queue worker is running (`php artisan queue:work`).
+
+7. Re-running `outreach:setup-sendgrid` is safe — it reuses the existing ASM group and re-points the Event Webhook URL if it changed.

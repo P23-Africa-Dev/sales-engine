@@ -72,6 +72,10 @@ class OutreachSenderSettingsTest extends TestCase
             'verification_status' => 'verified',
             'valid' => true,
             'verified_at' => now(),
+            'integrity_status' => 'pass',
+            'integrity_checks' => [
+                ['key' => 'sendgrid_auth', 'label' => 'SendGrid', 'status' => 'pass', 'message' => 'ok'],
+            ],
         ]);
 
         $this->withHeaders($this->orgHeaders($org))
@@ -87,5 +91,30 @@ class OutreachSenderSettingsTest extends TestCase
             'user_id' => $user->id,
             'sender_mode' => 'organization',
         ]);
+    }
+
+    public function test_cannot_switch_to_organization_when_integrity_fails(): void
+    {
+        [$user, $org] = $this->actingAsOrgMember();
+
+        OutreachDomainAuthentication::query()->create([
+            'organization_id' => $org->id,
+            'domain' => 'acme.test',
+            'sendgrid_domain_id' => '99',
+            'from_email' => 'sales@acme.test',
+            'verification_status' => 'verified',
+            'valid' => true,
+            'verified_at' => now(),
+            'integrity_status' => 'fail',
+            'integrity_checks' => [
+                ['key' => 'dmarc', 'label' => 'DMARC', 'status' => 'fail', 'message' => 'missing'],
+            ],
+        ]);
+
+        $this->withHeaders($this->orgHeaders($org))
+            ->putJson('/api/v1/outreach/sender-settings', [
+                'sender_mode' => 'organization',
+            ])
+            ->assertStatus(422);
     }
 }

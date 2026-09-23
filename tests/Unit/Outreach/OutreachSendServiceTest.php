@@ -106,6 +106,9 @@ class OutreachSendServiceTest extends TestCase
             'domain' => 'client.com',
             'from_email' => 'sales@client.com',
             'verification_status' => 'verified',
+            'valid' => true,
+            'integrity_status' => 'pass',
+            'integrity_checks' => [],
         ]);
 
         $identity = app(OutreachIdentityResolver::class)->resolve($org, $user);

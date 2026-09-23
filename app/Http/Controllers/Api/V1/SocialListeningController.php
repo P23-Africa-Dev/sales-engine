@@ -317,7 +317,7 @@ class SocialListeningController extends Controller
                 }
 
                 $activity = \App\Models\OutreachActivity::query()->find($draft['activity_id'] ?? null);
-                $this->outreachSend->sendEmail(
+                $result = $this->outreachSend->queueEmail(
                     $org,
                     $user,
                     $data['to_email'],
@@ -325,7 +325,9 @@ class SocialListeningController extends Controller
                     $draft['body'],
                     $activity,
                 );
-                $draft['sent'] = true;
+                $draft['sent'] = false;
+                $draft['queued'] = true;
+                $draft['delivery_status'] = $result['delivery_status'] ?? 'queued';
             } catch (\Throwable $e) {
                 return response()->json(['message' => $e->getMessage()], 422);
             }

@@ -9,3 +9,4 @@ Artisan::command('inspire', function () {
 })->purpose('Display an inspiring quote');
 
 Schedule::command('social-listening:dispatch-due')->dailyAt('03:00');
+Schedule::command('outreach:recheck-domain-integrity')->dailyAt('04:00');
