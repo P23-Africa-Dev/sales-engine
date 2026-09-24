@@ -38,6 +38,8 @@ Route::prefix('auth')->group(function () {
     Route::post('/register', [AuthController::class, 'register']);
     Route::post('/login', [AuthController::class, 'login']);
     Route::post('/factory23/exchange', [AuthController::class, 'factory23Exchange']);
+    Route::post('/factory23/provision', [AuthController::class, 'factory23Provision']);
+    Route::post('/factory23/login-link', [AuthController::class, 'factory23LoginLink']);
 
     Route::middleware('auth:sanctum')->group(function () {
         Route::post('/logout', [AuthController::class, 'logout']);
