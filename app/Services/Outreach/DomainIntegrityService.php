@@ -2,9 +2,7 @@
 
 namespace App\Services\Outreach;
 
-use App\Models\Organization;
 use App\Models\OutreachDomainAuthentication;
-use App\Models\OutreachIdentity;
 
 class DomainIntegrityService
 {
@@ -35,9 +33,6 @@ class DomainIntegrityService
     {
         $result = $this->evaluate($record);
 
-        $wasAllowing = in_array($record->integrity_status, ['pass', 'warn'], true)
-            || ($record->integrity_status === null && $record->isVerified());
-
         $record->update([
             'integrity_status' => $result['status'],
             'integrity_checks' => $result['checks'],
@@ -48,9 +43,8 @@ class DomainIntegrityService
 
         $record = $record->refresh();
 
-        if ($wasAllowing && $result['status'] === 'fail') {
-            $this->forceIdentitiesToPlatform($record->organization_id);
-        }
+        // On integrity failure, do not switch senders to platform — just leave
+        // status as fail so the send gate blocks until DNS is fixed.
 
         return $record;
     }
@@ -68,12 +62,12 @@ class DomainIntegrityService
         return in_array($record->integrity_status, ['pass', 'warn'], true);
     }
 
+    /**
+     * @deprecated No longer used. Integrity failure blocks send; it does not fall back to platform.
+     */
     public function forceIdentitiesToPlatform(int $organizationId): void
     {
-        OutreachIdentity::query()
-            ->where('organization_id', $organizationId)
-            ->where('sender_mode', 'organization')
-            ->update(['sender_mode' => 'platform']);
+        // Kept as a no-op so older call sites / tests do not explode during deploy.
     }
 
     /**

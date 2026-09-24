@@ -294,6 +294,7 @@ class SocialListeningController extends Controller
         $data = $request->validate([
             'send' => ['nullable', 'boolean'],
             'to_email' => ['nullable', 'email'],
+            'inbox_id' => ['nullable', 'integer'],
         ]);
 
         $org = OrgContext::require();
@@ -324,6 +325,7 @@ class SocialListeningController extends Controller
                     (string) ($draft['subject'] ?? 'Outreach'),
                     $draft['body'],
                     $activity,
+                    isset($data['inbox_id']) ? (int) $data['inbox_id'] : null,
                 );
                 $draft['sent'] = false;
                 $draft['queued'] = true;

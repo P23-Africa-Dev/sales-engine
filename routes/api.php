@@ -13,8 +13,9 @@ use App\Http\Controllers\Api\V1\MetricsController;
 use App\Http\Controllers\Api\V1\OrganizationController;
 use App\Http\Controllers\Api\V1\OutreachController;
 use App\Http\Controllers\Api\V1\OutreachDomainController;
-use App\Http\Controllers\Api\V1\OutreachMailboxController;
+use App\Http\Controllers\Api\V1\OutreachInboxController;
 use App\Http\Controllers\Api\V1\OutreachSenderController;
+use App\Http\Controllers\Api\V1\OutreachSetupRequestController;
 use App\Http\Controllers\Api\V1\SendGridWebhookController;
 use App\Http\Controllers\Api\V1\SocialListeningController;
 use Illuminate\Support\Facades\Route;
@@ -30,9 +31,6 @@ Route::get('/health', HealthController::class);
 // Public: SendGrid posts delivery/open/click/bounce events here. Verified via
 // ECDSA signature inside the controller, not session/token auth.
 Route::post('/webhooks/sendgrid', [SendGridWebhookController::class, 'handle']);
-
-// Public OAuth callbacks for outreach mailbox connect (state is encrypted + single-use).
-Route::get('/outreach/mailboxes/oauth/{provider}/callback', [OutreachMailboxController::class, 'oauthCallback']);
 
 Route::prefix('auth')->group(function () {
     Route::post('/register', [AuthController::class, 'register']);
@@ -99,10 +97,15 @@ Route::middleware(['auth:sanctum', 'org.resolve'])->group(function () {
     Route::post('/outreach/domain/integrity-recheck', [OutreachDomainController::class, 'recheckIntegrity']);
     Route::delete('/outreach/domain', [OutreachDomainController::class, 'destroy']);
 
-    Route::get('/outreach/mailboxes', [OutreachMailboxController::class, 'index']);
-    Route::get('/outreach/mailboxes/oauth/{provider}/authorize', [OutreachMailboxController::class, 'authorizeOAuth']);
-    Route::post('/outreach/mailboxes/smtp', [OutreachMailboxController::class, 'connectSmtp']);
-    Route::delete('/outreach/mailboxes/{id}', [OutreachMailboxController::class, 'destroy']);
+    Route::get('/outreach/inboxes', [OutreachInboxController::class, 'index']);
+    Route::post('/outreach/inboxes', [OutreachInboxController::class, 'store']);
+    Route::post('/outreach/inboxes/{id}/confirm', [OutreachInboxController::class, 'confirm']);
+    Route::post('/outreach/inboxes/{id}/resend', [OutreachInboxController::class, 'resend']);
+    Route::post('/outreach/inboxes/{id}/default', [OutreachInboxController::class, 'setDefault']);
+    Route::delete('/outreach/inboxes/{id}', [OutreachInboxController::class, 'destroy']);
+
+    Route::get('/outreach/setup-request', [OutreachSetupRequestController::class, 'show']);
+    Route::post('/outreach/setup-request', [OutreachSetupRequestController::class, 'store']);
 
     Route::get('/social-listening/signals', [SocialListeningController::class, 'indexSignals']);
     Route::get('/social-listening/signals/{id}', [SocialListeningController::class, 'showSignal']);

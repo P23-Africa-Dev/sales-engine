@@ -7,7 +7,6 @@ use App\Models\Organization;
 use App\Models\OutreachActivity;
 use App\Models\OutreachSuppression;
 use App\Models\User;
-use App\Services\Outreach\Transport\MailboxOutreachTransport;
 use App\Services\Outreach\Transport\SendGridOutreachTransport;
 use InvalidArgumentException;
 use RuntimeException;
@@ -19,7 +18,6 @@ class OutreachSendService
         private readonly OutreachQuotaService $quota,
         private readonly DomainIntegrityService $integrity,
         private readonly SendGridOutreachTransport $sendGrid,
-        private readonly MailboxOutreachTransport $mailbox,
     ) {}
 
     /**
@@ -34,6 +32,7 @@ class OutreachSendService
         string $subject,
         string $body,
         ?OutreachActivity $activity = null,
+        ?int $inboxId = null,
     ): array {
         $toEmail = trim($toEmail);
         if (! filter_var($toEmail, FILTER_VALIDATE_EMAIL)) {
@@ -42,9 +41,9 @@ class OutreachSendService
 
         $this->assertNotSuppressed($organization, $toEmail);
 
-        $identity = $this->identityResolver->resolve($organization, $user);
+        $identity = $this->identityResolver->resolve($organization, $user, $inboxId);
         $this->assertSenderAllowed($organization, $identity);
-        $this->quota->assertCanSend($organization, $identity->senderType);
+        $this->quota->assertCanSend($organization, 'organization');
 
         if ($activity) {
             $activity->update([
@@ -52,9 +51,13 @@ class OutreachSendService
                 'subject' => $subject,
                 'body' => $body,
                 'preview' => mb_substr($body, 0, 160),
-                'sender_type' => $identity->senderType,
+                'sender_type' => 'organization',
                 'delivery_status' => 'queued',
-                'meta' => array_merge($activity->meta ?? [], ['queued' => true]),
+                'meta' => array_merge($activity->meta ?? [], [
+                    'queued' => true,
+                    'inbox_id' => $identity->inboxId,
+                    'from_email' => $identity->fromEmail,
+                ]),
             ]);
         }
 
@@ -65,6 +68,7 @@ class OutreachSendService
             subject: $subject,
             body: $body,
             activityId: $activity?->id,
+            inboxId: $identity->inboxId,
         );
 
         return [
@@ -87,6 +91,7 @@ class OutreachSendService
         string $subject,
         string $body,
         ?OutreachActivity $activity = null,
+        ?int $inboxId = null,
     ): array {
         $toEmail = trim($toEmail);
         if (! filter_var($toEmail, FILTER_VALIDATE_EMAIL)) {
@@ -95,20 +100,29 @@ class OutreachSendService
 
         $this->assertNotSuppressed($organization, $toEmail);
 
-        $identity = $this->identityResolver->resolve($organization, $user);
+        // Prefer inbox stored on the activity when the job retries.
+        if ($inboxId === null && $activity) {
+            $inboxId = isset($activity->meta['inbox_id']) ? (int) $activity->meta['inbox_id'] : null;
+        }
+
+        $identity = $this->identityResolver->resolve($organization, $user, $inboxId);
         $this->assertSenderAllowed($organization, $identity);
-        $this->quota->assertCanSend($organization, $identity->senderType);
+        $this->quota->assertCanSend($organization, 'organization');
+
+        $apiKey = trim((string) config('services.sendgrid.api_key'));
+        if ($apiKey === '') {
+            throw new RuntimeException('SENDGRID_API_KEY is not configured.');
+        }
 
         $customArgs = array_filter([
             'organization_id' => (string) $organization->id,
             'activity_id' => $activity?->id ? (string) $activity->id : null,
-            'sender_type' => $identity->senderType,
+            'sender_type' => 'organization',
+            'inbox_id' => $identity->inboxId ? (string) $identity->inboxId : null,
         ], fn ($v) => $v !== null);
 
-        $transport = $identity->senderType === 'connected_mailbox' ? $this->mailbox : $this->sendGrid;
-
         try {
-            $result = $transport->send($identity, $toEmail, $subject, $body, $customArgs);
+            $result = $this->sendGrid->send($identity, $toEmail, $subject, $body, $customArgs);
         } catch (\Throwable $e) {
             if ($activity) {
                 $activity->update([
@@ -120,7 +134,7 @@ class OutreachSendService
             throw $e;
         }
 
-        $this->quota->recordSend($organization, $identity->senderType);
+        $this->quota->recordSend($organization, 'organization');
 
         if ($activity) {
             $activity->update([
@@ -129,14 +143,14 @@ class OutreachSendService
                 'body' => $body,
                 'preview' => mb_substr($body, 0, 160),
                 'sent_at' => now(),
-                'sendgrid_message_id' => $identity->senderType === 'connected_mailbox'
-                    ? ($activity->sendgrid_message_id)
-                    : ($result['message_id'] ?? null),
-                'sender_type' => $identity->senderType,
+                'sendgrid_message_id' => $result['message_id'] ?? null,
+                'sender_type' => 'organization',
                 'delivery_status' => 'sent',
                 'bounce_reason' => null,
                 'meta' => array_merge($activity->meta ?? [], [
                     'sent' => true,
+                    'inbox_id' => $identity->inboxId,
+                    'from_email' => $identity->fromEmail,
                     'provider_message_id' => $result['message_id'] ?? null,
                 ]),
             ]);
@@ -152,27 +166,20 @@ class OutreachSendService
 
     private function assertSenderAllowed(Organization $organization, OutboundIdentity $identity): void
     {
-        if ($identity->senderType === 'organization') {
-            $domain = \App\Models\OutreachDomainAuthentication::query()
-                ->where('organization_id', $organization->id)
-                ->first();
-
-            if (! $this->integrity->allowsOrganizationSending($domain)) {
-                throw new InvalidArgumentException(
-                    'Organization domain does not meet integrity requirements. Fix the checklist in email settings or switch to platform sending.'
-                );
-            }
+        if ($identity->senderType !== 'organization' || ! $identity->inboxId) {
+            throw new InvalidArgumentException(
+                'Confirm an organization inbox and pass domain integrity before sending outreach.'
+            );
         }
 
-        if ($identity->senderType === 'connected_mailbox' && ! $identity->mailboxId) {
-            throw new InvalidArgumentException('Connect a mailbox before sending as yourself.');
-        }
+        $domain = \App\Models\OutreachDomainAuthentication::query()
+            ->where('organization_id', $organization->id)
+            ->first();
 
-        if ($identity->senderType !== 'connected_mailbox') {
-            $apiKey = trim((string) config('services.sendgrid.api_key'));
-            if ($apiKey === '') {
-                throw new RuntimeException('SENDGRID_API_KEY is not configured.');
-            }
+        if (! $this->integrity->allowsOrganizationSending($domain)) {
+            throw new InvalidArgumentException(
+                'Organization domain does not meet integrity requirements. Fix the checklist in email settings.'
+            );
         }
     }
 

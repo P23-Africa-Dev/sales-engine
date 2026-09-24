@@ -23,6 +23,7 @@ class SendOutreachEmailJob implements ShouldQueue
         public string $subject,
         public string $body,
         public ?int $activityId = null,
+        public ?int $inboxId = null,
     ) {}
 
     public function handle(OutreachSendService $sendService): void
@@ -50,6 +51,7 @@ class SendOutreachEmailJob implements ShouldQueue
                 $this->subject,
                 $this->body,
                 $activity,
+                $this->inboxId,
             );
         } catch (\Throwable $e) {
             Log::warning('SendOutreachEmailJob failed', [

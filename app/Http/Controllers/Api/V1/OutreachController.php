@@ -53,6 +53,7 @@ class OutreachController extends Controller
             'contact_id' => ['nullable', 'integer'],
             'send' => ['nullable', 'boolean'],
             'to_email' => ['nullable', 'email'],
+            'inbox_id' => ['nullable', 'integer'],
         ]);
 
         $org = OrgContext::require();
@@ -106,6 +107,7 @@ class OutreachController extends Controller
                     (string) ($draft['subject'] ?? 'Outreach'),
                     $draft['body'],
                     $primaryActivity,
+                    isset($data['inbox_id']) ? (int) $data['inbox_id'] : null,
                 );
             } catch (\Throwable $e) {
                 return response()->json(['message' => $e->getMessage()], 422);
@@ -184,6 +186,7 @@ class OutreachController extends Controller
             'to_email' => ['required', 'email'],
             'subject' => ['nullable', 'string', 'max:255'],
             'body' => ['required', 'string', 'max:20000'],
+            'inbox_id' => ['nullable', 'integer'],
         ]);
 
         $org = OrgContext::require();
@@ -208,6 +211,7 @@ class OutreachController extends Controller
                 (string) ($data['subject'] ?? 'Outreach'),
                 $data['body'],
                 $activity,
+                isset($data['inbox_id']) ? (int) $data['inbox_id'] : null,
             );
         } catch (\Throwable $e) {
             return response()->json(['message' => $e->getMessage()], 422);

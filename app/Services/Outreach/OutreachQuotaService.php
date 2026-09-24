@@ -16,7 +16,7 @@ class OutreachQuotaService
 
         if ($used >= $limit) {
             throw new InvalidArgumentException(
-                "Daily outreach send limit reached ({$used}/{$limit}) for {$senderType} sending. Try again tomorrow or switch sender mode."
+                "Daily outreach send limit reached ({$used}/{$limit}). Try again tomorrow."
             );
         }
     }
@@ -62,11 +62,8 @@ class OutreachQuotaService
 
     public function dailyLimit(Organization $organization, string $senderType): int
     {
-        return match ($senderType) {
-            'organization' => $this->organizationLimit($organization),
-            'connected_mailbox' => (int) config('outreach.quota.mailbox_daily', 40),
-            default => (int) config('outreach.quota.platform_daily', 30),
-        };
+        // Customer outreach is always organization-domain SendGrid.
+        return $this->organizationLimit($organization);
     }
 
     public function snapshot(Organization $organization, string $senderType): array

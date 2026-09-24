@@ -5,8 +5,10 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Controllers\Controller;
 use App\Models\OutreachDomainAuthentication;
 use App\Models\OutreachIdentity;
-use App\Models\OutreachMailbox;
+use App\Models\OutreachInbox;
+use App\Models\OutreachSetupRequest;
 use App\Services\Outreach\DomainIntegrityService;
+use App\Services\Outreach\OutreachIdentityResolver;
 use App\Services\Outreach\OutreachQuotaService;
 use App\Support\OrgContext;
 use Illuminate\Http\JsonResponse;
@@ -17,6 +19,7 @@ class OutreachSenderController extends Controller
     public function __construct(
         private readonly DomainIntegrityService $integrity,
         private readonly OutreachQuotaService $quota,
+        private readonly OutreachIdentityResolver $identityResolver,
     ) {}
 
     public function show(Request $request): JsonResponse
@@ -36,40 +39,56 @@ class OutreachSenderController extends Controller
             ->where('organization_id', $org->id)
             ->first();
 
-        $mailbox = OutreachMailbox::query()
+        $defaultInbox = OutreachInbox::query()
             ->where('organization_id', $org->id)
-            ->where('user_id', $user->id)
-            ->where('status', 'connected')
+            ->where('status', 'confirmed')
+            ->orderByDesc('is_default')
+            ->orderBy('id')
+            ->first();
+
+        $setup = $this->identityResolver->setupStatus($org);
+        $openSupport = OutreachSetupRequest::query()
+            ->where('organization_id', $org->id)
+            ->whereIn('status', ['open', 'in_progress'])
             ->orderByDesc('id')
             ->first();
 
-        $senderMode = $identity?->sender_mode ?? 'platform';
-
         return response()->json([
             'data' => [
-                'sender_mode' => $senderMode,
-                'reply_to_email' => $identity?->reply_to_email ?? $user->email,
-                'org_verified_from_email' => $domainAuth?->from_email,
+                // Legacy field kept for older clients; customer send is always organization when ready.
+                'sender_mode' => 'organization',
+                'reply_to_email' => $defaultInbox?->email ?? $identity?->reply_to_email ?? $user->email,
+                'org_verified_from_email' => $defaultInbox?->email ?? $domainAuth?->from_email,
                 'org_verified_domain' => $domainAuth?->domain,
                 'verification_status' => $domainAuth?->verification_status ?? 'pending',
                 'org_connection_status' => $this->orgConnectionStatus($domainAuth),
                 'integrity_status' => $domainAuth?->integrity_status,
                 'integrity_checks' => $domainAuth?->integrity_checks ?? [],
                 'integrity_checked_at' => $domainAuth?->integrity_checked_at?->toIso8601String(),
-                'platform_from_email' => config('services.sendgrid.platform_from_email'),
-                'connected_mailbox' => $mailbox ? [
-                    'id' => $mailbox->id,
-                    'email' => $mailbox->email,
-                    'provider' => $mailbox->provider,
-                    'status' => $mailbox->status,
+                'platform_from_email' => null,
+                'connected_mailbox' => null,
+                'default_inbox' => $defaultInbox ? [
+                    'id' => $defaultInbox->id,
+                    'email' => $defaultInbox->email,
+                    'display_name' => $defaultInbox->display_name,
+                    'status' => $defaultInbox->status,
+                    'is_default' => (bool) $defaultInbox->is_default,
                 ] : null,
-                'quota' => $this->quota->snapshot($org, $senderMode === 'organization' && ! $this->integrity->allowsOrganizationSending($domainAuth)
-                    ? 'platform'
-                    : ($senderMode === 'connected_mailbox' && ! $mailbox ? 'platform' : $senderMode)),
+                'setup' => $setup,
+                'support_request' => $openSupport ? [
+                    'id' => $openSupport->id,
+                    'status' => $openSupport->status,
+                    'domain' => $openSupport->domain,
+                    'created_at' => $openSupport->created_at?->toIso8601String(),
+                ] : null,
+                'quota' => $this->quota->snapshot($org, 'organization'),
             ],
         ]);
     }
 
+    /**
+     * Customers no longer choose platform/mailbox modes. Optional default inbox only.
+     */
     public function update(Request $request): JsonResponse
     {
         $org = OrgContext::require();
@@ -79,45 +98,41 @@ class OutreachSenderController extends Controller
         }
 
         $data = $request->validate([
-            'sender_mode' => ['required', 'string', 'in:platform,organization,connected_mailbox'],
+            'default_inbox_id' => ['nullable', 'integer'],
             'reply_to_email' => ['nullable', 'email'],
         ]);
 
-        if ($data['sender_mode'] === 'organization') {
-            $domainAuth = OutreachDomainAuthentication::query()
+        if (! empty($data['default_inbox_id'])) {
+            $inbox = OutreachInbox::query()
                 ->where('organization_id', $org->id)
-                ->first();
+                ->where('status', 'confirmed')
+                ->find($data['default_inbox_id']);
 
-            if (! $this->integrity->allowsOrganizationSending($domainAuth)) {
-                return response()->json([
-                    'message' => 'Verify your organization domain and pass the integrity checklist before switching to organization sending.',
-                    'integrity_status' => $domainAuth?->integrity_status,
-                    'integrity_checks' => $domainAuth?->integrity_checks ?? [],
-                ], 422);
+            if (! $inbox) {
+                return response()->json(['message' => 'Confirmed inbox not found.'], 422);
             }
-        }
 
-        if ($data['sender_mode'] === 'connected_mailbox') {
-            $mailbox = OutreachMailbox::query()
+            OutreachInbox::query()
                 ->where('organization_id', $org->id)
-                ->where('user_id', $user->id)
-                ->where('status', 'connected')
-                ->exists();
+                ->update(['is_default' => false]);
+            $inbox->update(['is_default' => true]);
 
-            if (! $mailbox) {
-                return response()->json([
-                    'message' => 'Connect a mailbox before switching to send-as-yourself.',
-                ], 422);
-            }
+            OutreachIdentity::query()->updateOrCreate(
+                ['organization_id' => $org->id, 'user_id' => $user->id],
+                [
+                    'sender_mode' => 'organization',
+                    'reply_to_email' => $inbox->email,
+                ]
+            );
+        } elseif (array_key_exists('reply_to_email', $data)) {
+            OutreachIdentity::query()->updateOrCreate(
+                ['organization_id' => $org->id, 'user_id' => $user->id],
+                [
+                    'sender_mode' => 'organization',
+                    'reply_to_email' => $data['reply_to_email'] ?? $user->email,
+                ]
+            );
         }
-
-        OutreachIdentity::query()->updateOrCreate(
-            ['organization_id' => $org->id, 'user_id' => $user->id],
-            [
-                'sender_mode' => $data['sender_mode'],
-                'reply_to_email' => $data['reply_to_email'] ?? $user->email,
-            ]
-        );
 
         return $this->show($request);
     }

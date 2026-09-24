@@ -5,75 +5,106 @@ namespace App\Services\Outreach;
 use App\Models\Organization;
 use App\Models\OutreachDomainAuthentication;
 use App\Models\OutreachIdentity;
-use App\Models\OutreachMailbox;
+use App\Models\OutreachInbox;
 use App\Models\User;
+use InvalidArgumentException;
 
 class OutreachIdentityResolver
 {
-    public function resolve(Organization $organization, User $user): OutboundIdentity
+    public function __construct(private readonly OutreachInboxService $inboxes) {}
+
+    /**
+     * Resolve From/Reply-To for customer outreach. Always uses a confirmed inbox
+     * on an integrity-passing organization domain. Never falls back to platform
+     * or send-through-mailbox for bulk outreach.
+     */
+    public function resolve(Organization $organization, User $user, ?int $inboxId = null): OutboundIdentity
     {
+        $domainAuth = OutreachDomainAuthentication::query()
+            ->where('organization_id', $organization->id)
+            ->first();
+
+        if (! app(DomainIntegrityService::class)->allowsOrganizationSending($domainAuth)) {
+            throw new InvalidArgumentException(
+                'Authenticate your organization domain and pass the integrity checklist before sending outreach.'
+            );
+        }
+
+        $inbox = $this->inboxes->resolveForSend($organization, $inboxId);
+
         $identity = OutreachIdentity::query()
             ->where('organization_id', $organization->id)
             ->where('user_id', $user->id)
             ->first();
 
-        $senderMode = $identity?->sender_mode ?? 'platform';
-        $replyTo = $identity?->reply_to_email ?? $user->email;
-
-        if ($senderMode === 'connected_mailbox') {
-            $mailbox = OutreachMailbox::query()
-                ->where('organization_id', $organization->id)
-                ->where('user_id', $user->id)
-                ->where('status', 'connected')
-                ->orderByDesc('id')
-                ->first();
-
-            if ($mailbox) {
-                return new OutboundIdentity(
-                    fromEmail: $mailbox->email,
-                    fromName: $user->name,
-                    replyTo: $mailbox->email,
-                    senderType: 'connected_mailbox',
-                    mailboxId: $mailbox->id,
-                );
-            }
+        // Persist preferred default inbox for this user when they pick one.
+        if ($inboxId && $identity) {
+            $identity->update([
+                'sender_mode' => 'organization',
+                'reply_to_email' => $inbox->email,
+            ]);
+        } elseif (! $identity) {
+            OutreachIdentity::query()->create([
+                'organization_id' => $organization->id,
+                'user_id' => $user->id,
+                'sender_mode' => 'organization',
+                'reply_to_email' => $inbox->email,
+            ]);
         }
 
+        return new OutboundIdentity(
+            fromEmail: $inbox->email,
+            fromName: $inbox->display_name ?: $user->name,
+            replyTo: $inbox->email,
+            senderType: 'organization',
+            mailboxId: null,
+            inboxId: $inbox->id,
+        );
+    }
+
+    public function setupStatus(Organization $organization): array
+    {
         $domainAuth = OutreachDomainAuthentication::query()
             ->where('organization_id', $organization->id)
             ->first();
 
-        if ($senderMode === 'organization' && $domainAuth?->isVerified() && $domainAuth->passesIntegrity()) {
-            return new OutboundIdentity(
-                fromEmail: $domainAuth->from_email,
-                fromName: $user->name,
-                replyTo: $replyTo,
-                senderType: 'organization',
-            );
+        $confirmedCount = OutreachInbox::query()
+            ->where('organization_id', $organization->id)
+            ->where('status', 'confirmed')
+            ->count();
+
+        $canSend = app(DomainIntegrityService::class)->allowsOrganizationSending($domainAuth)
+            && $confirmedCount > 0;
+
+        return [
+            'can_send' => $canSend,
+            'domain_connected' => (bool) $domainAuth,
+            'domain_verified' => (bool) $domainAuth?->isVerified(),
+            'integrity_status' => $domainAuth?->integrity_status,
+            'confirmed_inbox_count' => $confirmedCount,
+            'blocking_reasons' => $this->blockingReasons($domainAuth, $confirmedCount),
+        ];
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function blockingReasons(?OutreachDomainAuthentication $domainAuth, int $confirmedCount): array
+    {
+        $reasons = [];
+
+        if (! $domainAuth) {
+            $reasons[] = 'Connect your organization domain.';
+        } elseif (! $domainAuth->isVerified()) {
+            $reasons[] = 'Verify your domain DNS records with SendGrid.';
+        } elseif (! in_array($domainAuth->integrity_status, ['pass', 'warn'], true)) {
+            $reasons[] = 'Fix domain integrity checks (DMARC, MX, business domain).';
         }
 
-        // Org mode chosen but integrity failed / unverified: fall back to platform.
-        if ($senderMode === 'organization' && $domainAuth?->isVerified() && $domainAuth->integrity_status === null) {
-            // Lazy evaluate once so first send after verify still works if checklist not yet stored.
-            $integrity = app(DomainIntegrityService::class);
-            $domainAuth = $integrity->evaluateAndPersist($domainAuth);
-            if ($domainAuth->passesIntegrity()) {
-                return new OutboundIdentity(
-                    fromEmail: $domainAuth->from_email,
-                    fromName: $user->name,
-                    replyTo: $replyTo,
-                    senderType: 'organization',
-                );
-            }
+        if ($confirmedCount < 1) {
+            $reasons[] = 'Confirm at least one inbox on your domain.';
         }
 
-        $platformFrom = (string) config('services.sendgrid.platform_from_email', 'outreach@thefactory23.com');
-
-        return new OutboundIdentity(
-            fromEmail: $platformFrom,
-            fromName: $user->name,
-            replyTo: $replyTo,
-            senderType: 'platform',
-        );
+        return $reasons;
     }
 }
