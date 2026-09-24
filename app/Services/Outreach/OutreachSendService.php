@@ -51,6 +51,7 @@ class OutreachSendService
                 'subject' => $subject,
                 'body' => $body,
                 'preview' => mb_substr($body, 0, 160),
+                'occurred_at' => now(),
                 'sender_type' => 'organization',
                 'delivery_status' => 'queued',
                 'meta' => array_merge($activity->meta ?? [], [
@@ -142,6 +143,7 @@ class OutreachSendService
                 'subject' => $subject,
                 'body' => $body,
                 'preview' => mb_substr($body, 0, 160),
+                'occurred_at' => now(),
                 'sent_at' => now(),
                 'sendgrid_message_id' => $result['message_id'] ?? null,
                 'sender_type' => 'organization',

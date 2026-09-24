@@ -25,7 +25,8 @@ class OutreachController extends Controller
     {
         $items = OutreachActivity::query()
             ->where('organization_id', OrgContext::require()->id)
-            ->orderByDesc('occurred_at')
+            // Latest modification / send / delivery event first (not draft creation time).
+            ->orderByDesc('updated_at')
             ->orderByDesc('id')
             ->limit(20)
             ->get()
@@ -37,6 +38,7 @@ class OutreachController extends Controller
                 'accentBg' => $a->accent_bg,
                 'accentIcon' => $a->accent_icon,
                 'occurred_at' => $a->occurred_at?->toIso8601String(),
+                'updated_at' => $a->updated_at?->toIso8601String(),
                 'delivery_status' => $a->delivery_status ?? (filled($a->sent_at) ? 'sent' : null),
                 'last_event_at' => $a->last_event_at?->toIso8601String(),
                 'bounce_reason' => $a->bounce_reason,
