@@ -116,16 +116,16 @@ Contact enrichment runs as a cost waterfall during lead profile enrichment:
 2. **Tier 2 (free/low-cost)** — Bytemine, then Cleanlist, when Tier 1 is incomplete.
 3. **Tier 3 (paid fallback)** — Apollo, then Hunter, only for remaining gaps.
 
-| Variable                                                          | Adapter / role                        |
-| ----------------------------------------------------------------- | ------------------------------------- |
-| `BYTEMINE_API_KEY` / `BYTEMINE_BASE_URL`                          | Tier 2 contact enricher (recommended) |
-| `CLEANLIST_API_KEY` / `CLEANLIST_BASE_URL`                        | Tier 2 fallback enricher              |
-| `APOLLO_API_KEY`                                                  | Tier 3 Apollo person enricher (not used for freemium discovery) |
+| Variable                                                          | Adapter / role                                                                        |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `BYTEMINE_API_KEY` / `BYTEMINE_BASE_URL`                          | Tier 2 contact enricher (recommended)                                                 |
+| `CLEANLIST_API_KEY` / `CLEANLIST_BASE_URL`                        | Tier 2 fallback enricher                                                              |
+| `APOLLO_API_KEY`                                                  | Tier 3 Apollo person enricher (not used for freemium discovery)                       |
 | `HUNTER_API_KEY`                                                  | Discovery: Hunter Discover (free). Enrichment: Domain Search / Email Finder (credits) |
-| `YOUTUBE_API_KEY`                                                 | YouTube discovery (stub until keyed)  |
-| `X_BEARER_TOKEN`                                                  | X discovery (stub until keyed)        |
-| `REDDIT_CLIENT_ID` / `REDDIT_CLIENT_SECRET` / `REDDIT_USER_AGENT` | Reddit discovery (stub until keyed)   |
-| `META_ACCESS_TOKEN` / `META_APP_ID` / `META_APP_SECRET`           | Meta Pages social listening           |
+| `YOUTUBE_API_KEY`                                                 | YouTube discovery (stub until keyed)                                                  |
+| `X_BEARER_TOKEN`                                                  | X discovery (stub until keyed)                                                        |
+| `REDDIT_CLIENT_ID` / `REDDIT_CLIENT_SECRET` / `REDDIT_USER_AGENT` | Reddit discovery (stub until keyed)                                                   |
+| `META_ACCESS_TOKEN` / `META_APP_ID` / `META_APP_SECRET`           | Meta Pages social listening                                                           |
 
 ### Tier 2 signup tips
 
@@ -204,28 +204,28 @@ curl -s -H "Authorization: Bearer $TOKEN" \
 
 1. Run the one-time setup command against the environment whose API key is configured (it hits SendGrid's API, not the local DB):
 
-   ```bash
-   php artisan outreach:setup-sendgrid https://api.salesengine.thefactory23.com/api/v1/webhooks/sendgrid
-   ```
+    ```bash
+    php artisan outreach:setup-sendgrid https://api.salesengine.thefactory23.com/api/v1/webhooks/sendgrid
+    ```
 
 2. It prints `SENDGRID_WEBHOOK_PUBLIC_KEY` and `SENDGRID_UNSUBSCRIBE_GROUP_ID`. Put the public key in `k8s/secret.yaml` and the group id in `k8s/configmap.yaml`, then:
 
-   ```bash
-   kubectl apply -f k8s/configmap.yaml -n sales-engine
-   kubectl apply -f k8s/secret.yaml -n sales-engine
-   kubectl rollout restart deployment/sales-engine-api -n sales-engine
-   ```
+    ```bash
+    kubectl apply -f k8s/configmap.yaml -n sales-engine
+    kubectl apply -f k8s/secret.yaml -n sales-engine
+    kubectl rollout restart deployment/sales-engine-api -n sales-engine
+    ```
 
 3. **Organization ("send as my own domain") sending** requires no extra env vars — an org authenticates their own domain from the Sales Engine UI (Outreach settings → Email sender → Connect your domain). That flow calls SendGrid's Domain Authentication API directly per-organization; there is nothing to configure here beyond the API key already set above.
 
-   After SendGrid DNS validates, Sales Engine also runs a **domain integrity checklist** (business domain, DMARC, MX). Organization sending is blocked until integrity is `pass` or `warn` **and** at least one inbox on that domain is confirmed via email code. Leave the customer’s MX and provider SPF/DKIM unchanged. Daily recheck: `php artisan outreach:recheck-domain-integrity` (scheduled at 04:00).
+    After SendGrid DNS validates, Sales Engine also runs a **domain integrity checklist** (business domain, DMARC, MX). Organization sending is blocked until integrity is `pass` or `warn` **and** at least one inbox on that domain is confirmed via email code. Leave the customer’s MX and provider SPF/DKIM unchanged. Daily recheck: `php artisan outreach:recheck-domain-integrity` (scheduled at 04:00).
 
-4. **Send quotas** (optional env overrides in `config/outreach.php`):
+4. **Send quotas** (optional env overrides in `config/outreach.php` / `k8s/configmap.yaml`):
+    - `OUTREACH_PLATFORM_DAILY_CAP` (default 30) — shared platform From fallback
+    - `OUTREACH_ORG_WARMUP_START` (default 50)
+    - `OUTREACH_ORG_DAILY_CEILING` (default 500)
 
-   - `OUTREACH_ORG_WARMUP_START` (default 50)
-   - `OUTREACH_ORG_DAILY_CEILING` (default 500)
-
-   Caps are per organization domain, not per inbox. Platform From is used only for inbox confirmation emails and internal reminders.
+    Organization domain sending is recommended. Platform From remains available (Reply-To = user email) until an org finishes domain + inbox setup. Org caps are per organization domain, not per inbox.
 
 5. Prospect outreach is **queued** (`SendOutreachEmailJob`). Ensure a queue worker is running (`php artisan queue:work`).
 

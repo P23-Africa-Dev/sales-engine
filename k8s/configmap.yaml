@@ -79,3 +79,8 @@ data:
   SENDGRID_PLATFORM_FROM_NAME: "Sales Engine"
   # Filled by `php artisan outreach:setup-sendgrid <webhook-url>` during rollout.
   SENDGRID_UNSUBSCRIBE_GROUP_ID: "53250"
+
+  # Platform From is available as a fallback; org-domain sending is recommended.
+  OUTREACH_PLATFORM_DAILY_CAP: "30"
+  OUTREACH_ORG_WARMUP_START: "50"
+  OUTREACH_ORG_DAILY_CEILING: "500"
