@@ -16,7 +16,11 @@ class OutreachSenderSettingsTest extends TestCase
             ->getJson('/api/v1/outreach/sender-settings')
             ->assertOk()
             ->assertJsonPath('data.org_connection_status', 'not_connected')
-            ->assertJsonPath('data.setup.can_send', false);
+            ->assertJsonPath('data.setup.can_send', true)
+            ->assertJsonPath('data.setup.can_send_platform', true)
+            ->assertJsonPath('data.setup.can_send_organization', false)
+            ->assertJsonPath('data.sender_mode', 'platform')
+            ->assertJsonPath('data.platform_from_email', config('services.sendgrid.platform_from_email'));
     }
 
     public function test_sender_settings_reports_pending_when_domain_awaiting_dns(): void
@@ -37,7 +41,8 @@ class OutreachSenderSettingsTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.org_connection_status', 'pending')
             ->assertJsonPath('data.org_verified_domain', 'acme.test')
-            ->assertJsonPath('data.setup.can_send', false);
+            ->assertJsonPath('data.setup.can_send', true)
+            ->assertJsonPath('data.setup.can_send_organization', false);
     }
 
     public function test_setup_can_send_when_domain_and_inbox_ready(): void
@@ -71,6 +76,7 @@ class OutreachSenderSettingsTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.org_connection_status', 'verified')
             ->assertJsonPath('data.setup.can_send', true)
+            ->assertJsonPath('data.setup.can_send_organization', true)
             ->assertJsonPath('data.default_inbox.email', 'sales@acme.test');
     }
 

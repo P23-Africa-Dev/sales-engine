@@ -224,14 +224,19 @@ class SocialListeningTest extends TestCase
             ->assertJsonPath('data.signals_detected', 1);
     }
 
-    public function test_outreach_identity_resolver_requires_domain_and_inbox(): void
+    public function test_outreach_identity_resolver_falls_back_to_platform_without_domain(): void
     {
         [, $org] = $this->actingAsOrgMember();
+        $user = \App\Models\User::query()->first();
+
+        config(['services.sendgrid.platform_from_email' => 'outreach@thefactory23.com']);
 
         $resolver = app(\App\Services\Outreach\OutreachIdentityResolver::class);
+        $identity = $resolver->resolve($org, $user);
 
-        $this->expectException(\InvalidArgumentException::class);
-        $resolver->resolve($org, \App\Models\User::query()->first());
+        $this->assertSame('platform', $identity->senderType);
+        $this->assertSame('outreach@thefactory23.com', $identity->fromEmail);
+        $this->assertSame($user->email, $identity->replyTo);
     }
 
     public function test_signals_list_supports_filters_and_pagination(): void
