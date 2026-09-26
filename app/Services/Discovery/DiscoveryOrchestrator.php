@@ -80,6 +80,7 @@ class DiscoveryOrchestrator
         'gather_time_cut' => 0,
         'unknown_geo_kept' => 0,
         'wrong_country_dropped' => 0,
+        'dropped_unverified_country' => 0,
     ];
 
     /** Compact raw hits from this run, used to persist leftover URLs for Generate more. */
@@ -104,6 +105,7 @@ class DiscoveryOrchestrator
         private readonly LeadQueryNormalizer $leadQueryNormalizer,
         private readonly IcpFilterService $icpFilter = new IcpFilterService,
         private readonly DiscoveryGeo $discoveryGeo = new DiscoveryGeo,
+        private readonly DiscoveryProviderHealth $providerHealth = new DiscoveryProviderHealth,
     ) {}
 
     public function setQualityThreshold(string $threshold): self
@@ -189,7 +191,9 @@ class DiscoveryOrchestrator
                 'gather_time_cut' => 0,
                 'unknown_geo_kept' => 0,
                 'wrong_country_dropped' => 0,
+                'dropped_unverified_country' => 0,
             ];
+            $this->providerHealth->reset();
             $this->enrichment->setDeferContactWaterfall($deferContactEnrichment);
             if (in_array($intent, ['generate_more_leads'], true)) {
                 $this->seedHits = $this->loadUnusedHitsFromSession($chatSessionId, $run->id, $excludeLeadNames);
@@ -258,7 +262,7 @@ class DiscoveryOrchestrator
 
             $peoplePassCompleted = ! $brief->isBothSearch();
 
-            foreach ($targetPasses as $targetPass) {
+            foreach ($targetPasses as $passIndex => $targetPass) {
                 if ($this->pastDeadline() || count($leadsPayload) >= $effectiveLimit) {
                     break;
                 }
@@ -266,6 +270,12 @@ class DiscoveryOrchestrator
                 /** @var IcpBrief $passBrief */
                 $passBrief = $targetPass['brief'];
                 $passLimit = (int) $targetPass['limit'];
+                if (count($targetPasses) > 1 && $passIndex === count($targetPasses) - 1) {
+                    // An earlier pass may have found nothing (the people pass is web-only, so it
+                    // returns zero when web search is down). Hand its unused quota to this pass
+                    // instead of returning half of what the user asked for.
+                    $passLimit = max($passLimit, $effectiveLimit - count($leadsPayload));
+                }
                 $isAuthoritativePass = $passBrief->isAuthoritativePeopleQuery();
                 $isPeoplePass = ($targetPass['stage'] ?? null) === 'people_pass'
                     || ($passBrief->isPeopleSearch() && ! $brief->isBothSearch());
@@ -300,6 +310,12 @@ class DiscoveryOrchestrator
                         // Keep backfilling while under the requested limit until the hard deadline.
                         // Soft deadline alone must not stop when yield is still below what the user asked for.
                         if ($passYield >= $passLimit) {
+                            break;
+                        }
+
+                        if ($isPeoplePass && $this->providerHealth->isWebSearchDown()) {
+                            // People retrieval has no database fallback; retrying a dead
+                            // provider only burns the clock the company pass needs.
                             break;
                         }
 
@@ -596,6 +612,10 @@ class DiscoveryOrchestrator
                         'kept_advisory_profile' => $this->gateStats['kept_advisory_profile'],
                         'unknown_geo_kept' => $this->gateStats['unknown_geo_kept'],
                         'wrong_country_dropped' => $this->gateStats['wrong_country_dropped'],
+                        'dropped_unverified_country' => $this->gateStats['dropped_unverified_country'],
+                        'provider_failures' => $this->providerHealth->snapshot(),
+                        'retrieval_degraded' => $this->providerHealth->isWebSearchDown(),
+                        'retrieval_degraded_reason' => $this->providerHealth->webSearchReason(),
                         'gather_junk_title' => $this->gateStats['gather_junk_title'],
                         'gather_invalid_name' => $this->gateStats['gather_invalid_name'],
                         'gather_empty_extract' => $this->gateStats['gather_empty_extract'],
@@ -1247,6 +1267,12 @@ class DiscoveryOrchestrator
                         $gateResult = $this->icpHardGateResult($brief, $extracted);
                         $territoryPassed = (bool) ($gateResult->reasons['territory'] ?? true);
                     }
+                } elseif ($this->isDatabaseProviderHit($hit)) {
+                    // Company databases return brand rows with no city or country. Without
+                    // location evidence they cannot be shown against a territory-scoped ICP.
+                    $this->gateStats['dropped_hard_gate']++;
+                    $this->gateStats['dropped_unverified_country']++;
+                    continue;
                 } elseif (
                     $this->hasTrustedEntityProfileUrl($brief, $extracted, $hit)
                     || $this->hasCompanyHomepageEvidence($hit, $extracted)
@@ -1326,6 +1352,12 @@ class DiscoveryOrchestrator
                     'location' => $extracted['location'] ?? $hit->location,
                 ]);
                 $hunterLocation = trim((string) ($hunterExtracted['location'] ?? ''));
+                if ($hunterLocation === '' && $brief->territories !== []) {
+                    // Unverifiable country on a database row: drop rather than imply a match.
+                    $this->gateStats['dropped_hard_gate']++;
+                    $this->gateStats['dropped_unverified_country']++;
+                    continue;
+                }
                 if ($hunterLocation !== '' && ! $this->passesIcpHardGate($brief, $hunterExtracted)) {
                     $this->gateStats['dropped_hard_gate']++;
                     $this->gateStats['wrong_country_dropped']++;
@@ -1651,6 +1683,25 @@ class DiscoveryOrchestrator
      *
      * @param  array<string, mixed>  $extracted
      */
+    /**
+     * Company databases (Hunter Discover, registries) answer a topical query with
+     * brand rows and frequently omit city/country. Web hits carry a URL and snippet
+     * that geography can still be inferred from; database rows do not.
+     */
+    private function isDatabaseProviderHit(RawDiscoveryHit $hit): bool
+    {
+        $source = mb_strtolower(trim((string) ($hit->source ?? '')));
+        if (in_array($source, ['database', 'registry'], true)) {
+            return true;
+        }
+
+        return in_array(
+            mb_strtolower(trim((string) ($hit->provider ?? ''))),
+            ['hunter', 'apollo', 'fylings', 'mono'],
+            true,
+        );
+    }
+
     private function hasStrongGeoProxy(IcpBrief $brief, RawDiscoveryHit $hit, array $extracted): bool
     {
         if ($brief->territories === []) {

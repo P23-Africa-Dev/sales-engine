@@ -5,6 +5,7 @@ namespace App\Services\Discovery\Adapters;
 use App\Models\ApiUsage;
 use App\Services\Discovery\Contracts\DiscoverySourceInterface;
 use App\Services\Discovery\DiscoveryGeo;
+use App\Services\Discovery\DiscoveryProviderHealth;
 use App\Services\Discovery\DTO\IcpBrief;
 use App\Services\Discovery\DTO\RawDiscoveryHit;
 use App\Services\Discovery\DTO\SearchContext;
@@ -21,7 +22,13 @@ class SerperDiscoveryAdapter implements DiscoverySourceInterface
         private readonly QueryIntentService $queryIntent,
         private readonly PersonNameValidator $personNameValidator,
         private readonly DiscoveryGeo $discoveryGeo = new DiscoveryGeo,
+        private readonly ?DiscoveryProviderHealth $health = null,
     ) {}
+
+    private function health(): DiscoveryProviderHealth
+    {
+        return $this->health ?? app(DiscoveryProviderHealth::class);
+    }
 
     public function key(): string
     {
@@ -118,10 +125,13 @@ class SerperDiscoveryAdapter implements DiscoverySourceInterface
                 }
 
                 if (! $response->successful()) {
+                    $this->health()->recordFailure('serper', $response->status(), $response->body());
                     Log::warning('Serper search failed', ['status' => $response->status(), 'body' => $response->body()]);
 
                     continue;
                 }
+
+                $this->health()->recordSuccess('serper');
 
                 $variantBrief = $brief->withSearchQueryOverride($activeQuery);
                 $hits = $hits->merge($this->mapOrganicHits($response->json('organic') ?? [], $variantBrief, $ctx));

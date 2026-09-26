@@ -22,6 +22,9 @@ class AppServiceProvider extends ServiceProvider
 {
     public function register(): void
     {
+        // Shared per-run retrieval health: adapters record, the orchestrator reports.
+        $this->app->singleton(\App\Services\Discovery\DiscoveryProviderHealth::class);
+
         $this->app->singleton(DiscoveryOrchestrator::class, function ($app) {
             return new DiscoveryOrchestrator(
                 sources: [
@@ -46,6 +49,7 @@ class AppServiceProvider extends ServiceProvider
                 queryVariationGenerator: $app->make(\App\Services\Discovery\QueryVariationGenerator::class),
                 profileUrlValidator: $app->make(\App\Services\Enrichment\ProfileUrlValidator::class),
                 leadQueryNormalizer: $app->make(\App\Services\Discovery\LeadQueryNormalizer::class),
+                providerHealth: $app->make(\App\Services\Discovery\DiscoveryProviderHealth::class),
             );
         });
 

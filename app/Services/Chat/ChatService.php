@@ -10,6 +10,7 @@ use App\Models\Organization;
 use App\Models\User;
 use App\Services\Discovery\DTO\IcpBrief;
 use App\Services\Discovery\DiscoveryOrchestrator;
+use App\Services\Discovery\DiscoveryProviderHealth;
 use App\Services\Discovery\QueryIntentService;
 use App\Services\Icp\IcpProfileService;
 use App\Services\Llm\GlmClient;
@@ -340,6 +341,8 @@ class ChatService
                 $leads,
                 $brief->requestedLimit,
             ));
+            $degradedMeta = $this->retrievalDegradedMeta($result['run']);
+            $meta = array_merge($meta, $degradedMeta);
             $assistantBody = $this->narrateDiscovery(
                 $organization,
                 $icp,
@@ -350,6 +353,13 @@ class ChatService
                 $historySlice,
                 $icpSearchBrief,
             );
+            $gateNotice = $this->retrievalGateNotice($result['run'], $leads);
+            if ($gateNotice !== '') {
+                $assistantBody = $assistantBody."\n\n".$gateNotice;
+            }
+            if ($degradedMeta !== []) {
+                $assistantBody = $degradedMeta['retrieval_degraded']['notice']."\n\n".$assistantBody;
+            }
         } elseif ($intent === 'create_outreach' && $icp) {
             $draft = $this->outreach->draftFromPrompt(
                 $organization,
@@ -540,6 +550,8 @@ class ChatService
                     $leads,
                     $brief->requestedLimit,
                 ));
+                $degradedMeta = $this->retrievalDegradedMeta($result['run']);
+                $meta = array_merge($meta, $degradedMeta);
                 $assistantBody = $this->narrateDiscovery(
                     $organization,
                     $icp,
@@ -550,6 +562,13 @@ class ChatService
                     $historySlice,
                     $icpSearchBrief,
                 );
+                $gateNotice = $this->retrievalGateNotice($result['run'], $leads);
+                if ($gateNotice !== '') {
+                    $assistantBody = $assistantBody."\n\n".$gateNotice;
+                }
+                if ($degradedMeta !== []) {
+                    $assistantBody = $degradedMeta['retrieval_degraded']['notice']."\n\n".$assistantBody;
+                }
             } else {
                 $run->update(['status' => 'failed', 'error' => 'Unsupported async intent.', 'finished_at' => now()]);
 
@@ -714,6 +733,67 @@ class ChatService
     }
 
     /**
+     * Web search refused every call (expired key, exhausted credits, rate limit).
+     * The run still completes from database providers, so the reply must say so.
+     *
+     * @return array{retrieval_degraded?: array{web_search: bool, reason: string, notice: string}}
+     */
+    private function retrievalDegradedMeta(\App\Models\DiscoveryRun $run): array
+    {
+        $summary = is_array($run->result_summary) ? $run->result_summary : [];
+        if (! ($summary['retrieval_degraded'] ?? false)) {
+            return [];
+        }
+
+        $reason = (string) ($summary['retrieval_degraded_reason'] ?? DiscoveryProviderHealth::REASON_ERROR);
+
+        return [
+            'retrieval_degraded' => [
+                'web_search' => true,
+                'reason' => $reason,
+                'notice' => $this->retrievalDegradedNotice($reason),
+            ],
+        ];
+    }
+
+    /**
+     * Explain an empty batch that was caused by gates, not by empty retrieval.
+     *
+     * @param  list<array<string, mixed>>  $leads
+     */
+    private function retrievalGateNotice(\App\Models\DiscoveryRun $run, array $leads): string
+    {
+        if ($leads !== []) {
+            return '';
+        }
+
+        $summary = is_array($run->result_summary) ? $run->result_summary : [];
+        $gates = is_array($summary['gate_stats'] ?? null) ? $summary['gate_stats'] : [];
+        $unverified = (int) ($summary['dropped_unverified_country'] ?? ($gates['dropped_unverified_country'] ?? 0));
+        if ($unverified < 1) {
+            return '';
+        }
+
+        $retrieved = (int) ($summary['candidates_extracted'] ?? 0);
+        $retrievedText = $retrieved > 0 ? "We retrieved {$retrieved} companies" : 'We retrieved companies';
+
+        return "{$retrievedText}, and dropped {$unverified} because their country could not be confirmed. "
+            .'Company databases often omit location, so they were not shown against your territories.';
+    }
+
+    private function retrievalDegradedNotice(string $reason): string
+    {
+        $cause = match ($reason) {
+            DiscoveryProviderHealth::REASON_CREDITS => 'the web search plan is out of credits',
+            DiscoveryProviderHealth::REASON_UNAUTHORIZED => 'the web search key was rejected',
+            DiscoveryProviderHealth::REASON_RATE_LIMITED => 'web search hit its rate limit',
+            default => 'web search failed on every query',
+        };
+
+        return "Heads up: {$cause}, so nothing below came from a live web search — only the company database, which cannot confirm location or match your search brief closely. Treat these as unverified until web search is restored.";
+    }
+
+    /**
      * Suggest tightening the ICP when yield is weak relative to the request.
      *
      * @param  list<array<string, mixed>>  $leads
@@ -724,17 +804,27 @@ class ChatService
         $summary = is_array($run->result_summary) ? $run->result_summary : [];
         $leadCount = count($leads);
         $requested = max(1, $requestedLimit > 0 ? $requestedLimit : (int) ($summary['requested_lead_count'] ?? 12));
-        $wrongCountry = (int) ($summary['wrong_country_dropped'] ?? ($summary['gate_stats']['wrong_country_dropped'] ?? 0));
-        $threshold = max(3, (int) ceil($requested * 0.4));
+        $gates = is_array($summary['gate_stats'] ?? null) ? $summary['gate_stats'] : [];
+        $wrongCountry = (int) ($summary['wrong_country_dropped'] ?? ($gates['wrong_country_dropped'] ?? 0));
+        $unverifiedCountry = (int) ($summary['dropped_unverified_country'] ?? ($gates['dropped_unverified_country'] ?? 0));
+        $degraded = (bool) ($summary['retrieval_degraded'] ?? false);
 
-        $suggested = $leadCount < $threshold || ($wrongCountry > 0 && $wrongCountry >= $leadCount);
+        // Any batch short of what was asked for is worth a tightening hint — waiting for
+        // it to fall below 40% let half-empty batches pass silently.
+        $suggested = $leadCount < $requested
+            || $degraded
+            || ($wrongCountry > 0 && $wrongCountry >= $leadCount)
+            || ($unverifiedCountry > 0 && $unverifiedCountry >= max(1, $leadCount));
         if (! $suggested) {
             return [];
         }
 
-        $reason = $wrongCountry > 0 && $wrongCountry >= max(1, $leadCount)
-            ? 'Many hits were outside your ICP countries. Tighten territories or the search brief.'
-            : 'Few usable leads matched this ICP. Refine “What we search for” so discovery can find better fits.';
+        $reason = match (true) {
+            $degraded => 'Live web search was unavailable for this run, so coverage was thin. Retry, or tighten “What we search for” before the next run.',
+            $unverifiedCountry > 0 && $unverifiedCountry >= max(1, $leadCount) => 'Most hits had no confirmable country, so they were dropped. Tighten the search brief so it names what these companies do.',
+            $wrongCountry > 0 && $wrongCountry >= max(1, $leadCount) => 'Many hits were outside your ICP countries. Tighten territories or the search brief.',
+            default => 'Few usable leads matched this ICP. Refine “What we search for” so discovery can find better fits.',
+        };
 
         return [
             'icp_tighten' => [

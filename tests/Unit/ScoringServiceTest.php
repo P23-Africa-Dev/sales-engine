@@ -117,6 +117,63 @@ class ScoringServiceTest extends TestCase
         $this->assertStringNotContainsString('Fits your', $scores['icp_relevance_reason']);
     }
 
+    public function test_industry_match_alone_does_not_verify_fit_or_claim_territory(): void
+    {
+        $brief = IcpBrief::fromIcpProfile(new IcpProfile([
+            'name' => 'Lagos FinTech',
+            'config' => array_merge(IcpProfile::defaultConfig(), [
+                'industries' => ['Financial Services'],
+                'territories' => ['Lagos, NG'],
+                'customPrompt' => 'fintech companies expanding into emerging markets',
+                'minMatchScore' => 60,
+            ]),
+        ]), 'generate leads');
+
+        $payload = [
+            'name' => 'Global Bank Holdings',
+            'industry' => 'Financial Services',
+        ];
+
+        $fit = app(ScoringService::class)->assessFirmographicFit($payload, $brief);
+        $this->assertFalse($fit['verified_match']);
+        $this->assertFalse($fit['territory_verified']);
+
+        $scores = app(ScoringService::class)->heuristicScore($payload, $brief);
+        $this->assertLessThan(60, $scores['icp_fit_score']);
+        $this->assertStringNotContainsString('in Lagos', $scores['icp_relevance_reason']);
+        $this->assertStringContainsString('not confirmed', mb_strtolower($scores['icp_relevance_reason']));
+    }
+
+    public function test_brief_words_lift_a_relevant_lead_above_a_brand_name_match(): void
+    {
+        $brief = IcpBrief::fromIcpProfile(new IcpProfile([
+            'name' => 'Lagos FinTech',
+            'config' => array_merge(IcpProfile::defaultConfig(), [
+                'industries' => ['Financial Services'],
+                'territories' => ['Lagos, NG'],
+                'customPrompt' => 'fintech payment companies expanding into emerging markets',
+                'minMatchScore' => 60,
+            ]),
+        ]), 'generate leads');
+
+        $scoring = app(ScoringService::class);
+
+        $relevant = $scoring->heuristicScore([
+            'name' => 'NovaPay',
+            'industry' => 'Financial Services',
+            'location' => 'Lagos, NG',
+            'summary' => 'Fintech payment rails for merchants expanding into emerging markets.',
+        ], $brief);
+
+        $brandOnly = $scoring->heuristicScore([
+            'name' => 'Global Bank Holdings',
+            'industry' => 'Financial Services',
+        ], $brief);
+
+        $this->assertGreaterThan($brandOnly['priority_score'], $relevant['priority_score']);
+        $this->assertGreaterThanOrEqual(60, $relevant['icp_fit_score']);
+    }
+
     public function test_brief_noun_overlap_preferred_in_relevance_reason(): void
     {
         $brief = IcpBrief::fromIcpProfile(new IcpProfile([

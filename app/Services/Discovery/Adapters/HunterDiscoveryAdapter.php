@@ -5,6 +5,7 @@ namespace App\Services\Discovery\Adapters;
 use App\Models\ApiUsage;
 use App\Services\Discovery\Contracts\DiscoverySourceInterface;
 use App\Services\Discovery\DiscoveryGeo;
+use App\Services\Discovery\DiscoveryProviderHealth;
 use App\Services\Discovery\DTO\IcpBrief;
 use App\Services\Discovery\DTO\RawDiscoveryHit;
 use App\Services\Discovery\DTO\SearchContext;
@@ -19,7 +20,13 @@ class HunterDiscoveryAdapter implements DiscoverySourceInterface
 {
     public function __construct(
         private readonly DiscoveryGeo $discoveryGeo = new DiscoveryGeo,
+        private readonly ?DiscoveryProviderHealth $health = null,
     ) {}
+
+    private function health(): DiscoveryProviderHealth
+    {
+        return $this->health ?? app(DiscoveryProviderHealth::class);
+    }
 
     public function key(): string
     {
@@ -69,6 +76,7 @@ class HunterDiscoveryAdapter implements DiscoverySourceInterface
             }
 
             if (! $response->successful()) {
+                $this->health()->recordFailure('hunter', $response->status(), $response->body());
                 Log::warning('Hunter Discover failed', [
                     'status' => $response->status(),
                     'body' => mb_substr($response->body(), 0, 400),
@@ -76,6 +84,8 @@ class HunterDiscoveryAdapter implements DiscoverySourceInterface
 
                 return collect();
             }
+
+            $this->health()->recordSuccess('hunter');
 
             $items = $response->json('data') ?? [];
             if (! is_array($items)) {

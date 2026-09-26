@@ -20,9 +20,11 @@ class ScoringService
     {
         $hasUserQuery = $brief->hasUserQuery();
         $isFactualQuery = $brief->isAuthoritativePeopleQuery();
+        // ICP-brief runs have no user query. Score against the brief itself, otherwise
+        // any company in the right industry scores the same as one that sells what we search for.
         $queryScore = $hasUserQuery
             ? $this->heuristicQueryRelevance($companyPayload, $brief->query)
-            : 55.0;
+            : $this->heuristicQueryRelevance($companyPayload, $brief->searchBrief());
 
         $fit = $this->assessFirmographicFit($companyPayload, $brief);
         $icpBase = 55.0;
@@ -37,9 +39,22 @@ class ScoringService
             ? min(58, $icpBase)
             : min(92, $icpBase);
 
+        if (
+            ! $hasUserQuery
+            && ! $this->isPersonPayload($companyPayload)
+            && ! $this->hasIcpEvidence($fit)
+            && $this->briefNounOverlap($brief, $companyPayload) === []
+        ) {
+            // A company row in ICP-brief mode with nothing tying it to the ICP — no matching
+            // industry, no confirmed territory, no brief wording — may not be recommended.
+            // People are exempt: their qualification is a trusted profile, not firmographics.
+            $icpFit = min($icpFit, max(0, $brief->minMatchScore - 1));
+        }
+
         $priority = $hasUserQuery
             ? min(95, ($queryScore * 0.55) + ($icpFit * 0.45))
-            : min(92, $icpFit);
+            // Brief relevance lifts ranking but never demotes a verified firmographic fit.
+            : min(92, max($icpFit, ($queryScore * 0.4) + ($icpFit * 0.6)));
 
         return [
             'icp_fit_score' => $icpFit,
@@ -110,8 +125,21 @@ class ScoringService
                 }
             }
 
+            $fit = $this->assessFirmographicFit($companyPayload, $brief);
+            if (
+                ! $hasUserQuery
+                && ! $this->isPersonPayload($companyPayload)
+                && ! $this->hasIcpEvidence($fit)
+                && $this->briefNounOverlap($brief, $companyPayload) === []
+            ) {
+                // Same truth floor as the heuristic path: the model may not promote a lead
+                // whose only evidence is an industry label.
+                $icpFit = min($icpFit, max(0, $brief->minMatchScore - 1));
+                $priority = min($priority, $icpFit);
+            }
+
             $reason = trim((string) ($result['icp_relevance_reason'] ?? ''));
-            if ($reason === '') {
+            if ($reason === '' || $this->reasonClaimsUnverifiedTerritory($reason, $brief, $fit)) {
                 $reason = $this->buildIcpRelevanceReason($brief, $icpFit, $isFactualQuery, $companyPayload);
             }
 
@@ -166,6 +194,9 @@ class ScoringService
 
         $fit = $this->assessFirmographicFit($companyPayload, $brief);
         $matchesIcp = $fit['verified_match'] && $icpFit >= $brief->minMatchScore;
+        // Only name a territory the lead actually evidenced. Claiming "in Lagos / London"
+        // for a row with no country is the bug this guard exists to prevent.
+        $canClaimTerritory = $territories !== [] && ($fit['territory_verified'] ?? false);
         $leadName = trim((string) ($companyPayload['name'] ?? $companyPayload['person_name'] ?? ''));
         $queryHint = trim($brief->query);
         if ($queryHint === '') {
@@ -195,7 +226,7 @@ class ScoringService
                     static fn(string $n): string => mb_convert_case($n, MB_CASE_TITLE, 'UTF-8'),
                     $briefNouns,
                 ))];
-                if ($territories !== []) {
+                if ($canClaimTerritory) {
                     $parts[] = "in {$territoryLabel}";
                 }
 
@@ -203,7 +234,7 @@ class ScoringService
             }
 
             $parts = ["Fits your {$industryLabel} focus"];
-            if ($territories !== []) {
+            if ($canClaimTerritory) {
                 $parts[] = "in {$territoryLabel}";
             }
             if ($buyerLabel !== null) {
@@ -216,13 +247,65 @@ class ScoringService
         $hasNicheBrief = trim($brief->customPrompt) !== '' || trim($brief->description) !== '';
         $briefNouns = $hasNicheBrief ? $this->briefNounOverlap($brief, $companyPayload) : [];
         if ($briefNouns !== []) {
+            $suffix = $canClaimTerritory
+                ? '; limited firmographic overlap with your ICP filters.'
+                : '; location not confirmed against your territories.';
+
             return 'Matches your search for ' . implode(' / ', array_map(
                 static fn(string $n): string => mb_convert_case($n, MB_CASE_TITLE, 'UTF-8'),
                 $briefNouns,
-            )) . '; limited firmographic overlap with your ICP filters.';
+            )) . $suffix;
+        }
+
+        if ($territories !== [] && ! $canClaimTerritory) {
+            return "Location not confirmed against {$territoryLabel}, so ICP fit is unproven. Still answers the search request.";
         }
 
         return "Limited overlap with your {$industryLabel} focus in {$territoryLabel}. Still answers the search request.";
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     */
+    private function isPersonPayload(array $payload): bool
+    {
+        return ($payload['entity_type'] ?? null) === 'person'
+            || filled($payload['person_name'] ?? null);
+    }
+
+    /**
+     * Any confirmed tie to the ICP: a matching industry, or a matching territory.
+     *
+     * @param  array{unknown: bool, verified_match: bool, bonus: float, territory_verified: bool}  $fit
+     */
+    private function hasIcpEvidence(array $fit): bool
+    {
+        return $fit['verified_match'] || $fit['bonus'] > 0 || ($fit['territory_verified'] ?? false);
+    }
+
+    /**
+     * A generated reason may not place a lead in an ICP territory the lead never evidenced.
+     *
+     * @param  array{unknown: bool, verified_match: bool, bonus: float, territory_verified: bool}  $fit
+     */
+    private function reasonClaimsUnverifiedTerritory(string $reason, IcpBrief $brief, array $fit): bool
+    {
+        if ($brief->territories === [] || ($fit['territory_verified'] ?? false)) {
+            return false;
+        }
+
+        $haystack = mb_strtolower($reason);
+        foreach ($brief->territories as $territory) {
+            if (! is_string($territory)) {
+                continue;
+            }
+            $needle = mb_strtolower(trim($territory));
+            if ($needle !== '' && str_contains($haystack, $needle)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -297,7 +380,7 @@ class ScoringService
 
     /**
      * @param  array<string, mixed>  $payload
-     * @return array{unknown: bool, verified_match: bool, bonus: float}
+     * @return array{unknown: bool, verified_match: bool, bonus: float, territory_verified: bool}
      */
     public function assessFirmographicFit(array $payload, IcpBrief $brief): array
     {
@@ -312,21 +395,24 @@ class ScoringService
         $needsTerritory = $brief->territories !== [];
 
         if (! $needsIndustry && ! $needsTerritory) {
-            return ['unknown' => false, 'verified_match' => true, 'bonus' => 0.0];
+            return ['unknown' => false, 'verified_match' => true, 'bonus' => 0.0, 'territory_verified' => false];
         }
 
         $hasAnySignal = ($needsIndustry && $industry !== '') || ($needsTerritory && $territory !== '');
         if (! $hasAnySignal) {
-            return ['unknown' => true, 'verified_match' => false, 'bonus' => 0.0];
+            return ['unknown' => true, 'verified_match' => false, 'bonus' => 0.0, 'territory_verified' => false];
         }
 
         $bonus = 0.0;
         $matchedAny = false;
         $failedConstrained = false;
+        $missingTerritory = false;
+        $territoryVerified = false;
 
         if ($needsIndustry) {
             if ($industry === '') {
-                // Industry constrained but missing — do not claim fit from territory alone.
+                // Industry labels are frequently absent, and a confirmed location still
+                // carries the constraint that matters most. Not a blocker on its own.
             } elseif ($this->valueMatchesAllowed($brief->industries, $industry)) {
                 $bonus += 12;
                 $matchedAny = true;
@@ -337,29 +423,39 @@ class ScoringService
 
         if ($needsTerritory) {
             if ($territory === '') {
-                // Territory constrained but missing.
+                // Territory constrained but unknown: an industry label alone may not
+                // stand in for a country the lead never evidenced.
+                $missingTerritory = true;
             } elseif ($this->valueMatchesAllowed($brief->territories, $territory)) {
                 $bonus += 8;
                 $matchedAny = true;
+                $territoryVerified = true;
             } else {
                 $failedConstrained = true;
             }
         }
 
         if ($failedConstrained && ! $matchedAny) {
-            return ['unknown' => false, 'verified_match' => false, 'bonus' => 0.0];
+            return ['unknown' => false, 'verified_match' => false, 'bonus' => 0.0, 'territory_verified' => false];
         }
 
-        if ($matchedAny && ! $failedConstrained) {
-            return ['unknown' => false, 'verified_match' => true, 'bonus' => $bonus];
+        // Nothing contradicted the ICP and the location (when constrained) was confirmed.
+        if ($matchedAny && ! $failedConstrained && ! $missingTerritory) {
+            return ['unknown' => false, 'verified_match' => true, 'bonus' => $bonus, 'territory_verified' => $territoryVerified];
         }
 
         if ($matchedAny) {
-            // Partial evidence — credit bonus but do not claim full ICP fit.
-            return ['unknown' => false, 'verified_match' => false, 'bonus' => $bonus * 0.5];
+            // Partial evidence (e.g. industry matched, country unknown). Credit half the
+            // bonus but never claim ICP fit — an industry label alone is not a match.
+            return [
+                'unknown' => false,
+                'verified_match' => false,
+                'bonus' => $bonus * 0.5,
+                'territory_verified' => $territoryVerified,
+            ];
         }
 
-        return ['unknown' => true, 'verified_match' => false, 'bonus' => 0.0];
+        return ['unknown' => true, 'verified_match' => false, 'bonus' => 0.0, 'territory_verified' => false];
     }
 
     /**
