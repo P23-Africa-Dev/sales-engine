@@ -44,6 +44,12 @@ class DiscoveryOrchestrator
     /** Stop discovering and complete with whatever we have (seconds). */
     public const HARD_DEADLINE_SECONDS = 150;
 
+    /** Extended hard stop when filling more than a first page. */
+    public const HARD_DEADLINE_CONTINUATION_SECONDS = 300;
+
+    /** First page size shown while the same job keeps filling. */
+    public const FIRST_PAGE_SIZE = 20;
+
     private string $qualityThreshold = self::QUALITY_STRICT;
 
     private float $deadlineAt = 0.0;
@@ -51,6 +57,13 @@ class DiscoveryOrchestrator
     private float $startedAt = 0.0;
 
     private bool $deferContactEnrichment = true;
+
+    private int $requestedLeadLimit = 20;
+
+    /** @var list<string> */
+    private array $selectedCountryLabels = [];
+
+    private bool $firstPagePublished = false;
 
     /** @var array<string, Collection<int, RawDiscoveryHit>> */
     private array $registryHitCache = [];
@@ -151,7 +164,16 @@ class DiscoveryOrchestrator
 
         try {
             $this->startedAt = microtime(true);
-            $this->deadlineAt = $this->startedAt + self::HARD_DEADLINE_SECONDS;
+            $brief = $briefSeed;
+            $hasUserQuery = $brief->hasUserQuery();
+            $effectiveLimit = min(self::MAX_LEAD_LIMIT, max(1, $limit > 0 ? $limit : $brief->requestedLimit));
+            $this->requestedLeadLimit = $effectiveLimit;
+            $this->selectedCountryLabels = $this->discoveryGeo->selectedCountryLabels($brief);
+            $this->firstPagePublished = false;
+            $hardSeconds = $effectiveLimit > self::FIRST_PAGE_SIZE
+                ? self::HARD_DEADLINE_CONTINUATION_SECONDS
+                : self::HARD_DEADLINE_SECONDS;
+            $this->deadlineAt = $this->startedAt + $hardSeconds;
             $this->deferContactEnrichment = $deferContactEnrichment;
             $this->registryHitCache = [];
             $this->allCollectedHits = [];
@@ -173,9 +195,6 @@ class DiscoveryOrchestrator
                 $this->seedHits = $this->loadUnusedHitsFromSession($chatSessionId, $run->id, $excludeLeadNames);
             }
 
-            $brief = $briefSeed;
-            $hasUserQuery = $brief->hasUserQuery();
-            $effectiveLimit = min(self::MAX_LEAD_LIMIT, max(1, $limit > 0 ? $limit : $brief->requestedLimit));
             $this->qualityThreshold = $this->resolveQualityThreshold($effectiveLimit);
             $ctx = new SearchContext($organization->id, $user?->id, $effectiveLimit, $intent);
 
@@ -397,6 +416,7 @@ class DiscoveryOrchestrator
                     }
                     $companies = $companies->merge($passCompanies);
                     $candidatesFound += $passFound;
+                    $this->publishPartialProgress($run, $leadsPayload, $effectiveLimit);
 
                     $passYield = count($leadsPayload) - $passStartCount;
                     if ($passYield >= $passLimit || count($leadsPayload) >= $effectiveLimit) {
@@ -478,6 +498,7 @@ class DiscoveryOrchestrator
                     }
                     $companies = $companies->merge($passCompanies);
                     $candidatesFound += $passFound;
+                    $this->publishPartialProgress($run, $leadsPayload, $effectiveLimit);
                 }
             }
 
@@ -538,6 +559,7 @@ class DiscoveryOrchestrator
                     }
                     $companies = $companies->merge($passCompanies);
                     $candidatesFound += $passFound;
+                    $this->publishPartialProgress($run, $leadsPayload, $effectiveLimit);
                 }
             }
 
@@ -673,7 +695,84 @@ class DiscoveryOrchestrator
      * @param  list<string>|null  $overrideQueries  When set, run these queries instead of generating a fresh fan-out set.
      * @return array{0: Collection<int, RawDiscoveryHit>, 1: int, 2: array{queries_executed: list<string>, sources_hit_count: array<string, int>, fan_out_strategy_used: bool, candidates_extracted?: int}}
      */
+    /**
+     * @param  list<string>|null  $overrideQueries  When set, run these queries instead of generating a fresh fan-out set.
+     * @return array{0: Collection<int, RawDiscoveryHit>, 1: int, 2: array{queries_executed: list<string>, sources_hit_count: array<string, int>, fan_out_strategy_used: bool, candidates_extracted?: int}}
+     */
     private function collectHits(
+        IcpBrief $brief,
+        SearchContext $ctx,
+        int $effectiveLimit,
+        ?array $overrideQueries = null,
+    ): array {
+        $regions = $this->discoveryGeo->selectedRegions($brief);
+        if (count($regions) <= 1) {
+            return $this->collectHitsForTerritory($brief, $ctx, $effectiveLimit, $overrideQueries);
+        }
+
+        $hits = collect();
+        $sourcesChecked = 0;
+        $queriesExecuted = [];
+        $sourcesHitCount = [];
+        $fanOutUsed = false;
+
+        foreach ($regions as $region) {
+            if ($this->pastDeadline()) {
+                break;
+            }
+
+            $scopedTerritories = $this->territoriesForRegion($brief, $region);
+            $scopedBrief = $brief->withTerritories($scopedTerritories);
+
+            [$batch, $checked, $meta] = $this->collectHitsForTerritory(
+                $scopedBrief,
+                $ctx,
+                $effectiveLimit,
+                $overrideQueries,
+            );
+            $hits = $hits->merge($batch);
+            $sourcesChecked = max($sourcesChecked, $checked);
+            $queriesExecuted = array_values(array_unique(array_merge(
+                $queriesExecuted,
+                $meta['queries_executed'] ?? [],
+            )));
+            foreach ($meta['sources_hit_count'] ?? [] as $key => $count) {
+                $sourcesHitCount[$key] = ($sourcesHitCount[$key] ?? 0) + (int) $count;
+            }
+            $fanOutUsed = $fanOutUsed || (bool) ($meta['fan_out_strategy_used'] ?? false);
+        }
+
+        $hits = $this->preferLinkedInHits($this->dedupeHits($hits), $brief);
+
+        return [
+            $hits,
+            max(1, $sourcesChecked),
+            [
+                'queries_executed' => $queriesExecuted,
+                'sources_hit_count' => $sourcesHitCount,
+                'fan_out_strategy_used' => $fanOutUsed || count($regions) > 1,
+                'candidates_extracted' => $hits->count(),
+            ],
+        ];
+    }
+
+    /**
+     * @param  array{label: string, gl: string, hunterCountry: string, aliases: list<string>, cities: array<string, string>}  $region
+     * @return list<string>
+     */
+    private function territoriesForRegion(IcpBrief $brief, array $region): array
+    {
+        $kept = [];
+        foreach ($brief->territories as $territory) {
+            $resolved = $this->discoveryGeo->regionFromValue((string) $territory);
+            if ($resolved !== null && $resolved['gl'] === $region['gl']) {
+                $kept[] = (string) $territory;
+            }
+        }
+
+        return $kept !== [] ? $kept : [$region['label']];
+    }
+    private function collectHitsForTerritory(
         IcpBrief $brief,
         SearchContext $ctx,
         int $effectiveLimit,
@@ -736,7 +835,7 @@ class DiscoveryOrchestrator
                 continue;
             }
 
-            $cacheKey = $source->key() . '|' . mb_strtolower(trim($primaryBrief->searchQuery())) . '|' . $effectiveLimit;
+            $cacheKey = $source->key() . '|' . mb_strtolower(trim($primaryBrief->searchQuery())) . '|' . $effectiveLimit . '|' . mb_strtolower($this->discoveryGeo->primaryLabel($brief));
             if (isset($this->registryHitCache[$cacheKey])) {
                 $batch = $this->registryHitCache[$cacheKey];
             } else {
@@ -2151,6 +2250,85 @@ class DiscoveryOrchestrator
 
         $summary['progress'] = $progress;
         $run->update(['result_summary' => $summary]);
+    }
+
+    /**
+     * Persist first-page (and growing) leads so the chat poll can show them while search continues.
+     *
+     * @param  list<array<string, mixed>>  $leadsPayload
+     */
+    private function publishPartialProgress(DiscoveryRun $run, array $leadsPayload, int $effectiveLimit): void
+    {
+        $count = count($leadsPayload);
+        if ($count < 1) {
+            return;
+        }
+
+        $showCount = min($count, max(self::FIRST_PAGE_SIZE, $count));
+        $partial = array_slice($leadsPayload, 0, $showCount);
+        $countries = $this->selectedCountryLabels;
+        $countryText = $countries === []
+            ? 'selected markets'
+            : (count($countries) === 1
+                ? $countries[0]
+                : $countries[0] . ' and ' . $countries[1] . (count($countries) > 2 ? ' (+' . (count($countries) - 2) . ')' : ''));
+
+        $stillSearching = $count < $effectiveLimit;
+        $progressMessage = $stillSearching
+            ? sprintf('%d of %d — still searching %s.', min($count, $effectiveLimit), $effectiveLimit, $countryText)
+            : sprintf('%d of %d — search complete.', min($count, $effectiveLimit), $effectiveLimit);
+
+        $summary = is_array($run->result_summary) ? $run->result_summary : [];
+        $summary['partial_leads'] = $partial;
+        $summary['partial_lead_count'] = $count;
+        $summary['requested_lead_count'] = $effectiveLimit;
+        $summary['progress_message'] = $progressMessage;
+        $summary['searching_countries'] = $countries;
+        $run->update(['result_summary' => $summary]);
+
+        if ($count >= min(self::FIRST_PAGE_SIZE, $effectiveLimit) || $this->firstPagePublished) {
+            $this->firstPagePublished = true;
+            $this->syncPartialLeadsToChat($run, $partial, $progressMessage, $stillSearching);
+        }
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $partial
+     */
+    private function syncPartialLeadsToChat(
+        DiscoveryRun $run,
+        array $partial,
+        string $progressMessage,
+        bool $stillSearching,
+    ): void {
+        if (! $run->chat_session_id) {
+            return;
+        }
+
+        $placeholder = \App\Models\ChatMessage::query()
+            ->where('chat_session_id', $run->chat_session_id)
+            ->where('role', 'assistant')
+            ->orderByDesc('id')
+            ->get()
+            ->first(function ($message) use ($run) {
+                return (int) ($message->meta['discovery_run_id'] ?? 0) === (int) $run->id
+                    && (bool) ($message->meta['pending'] ?? false);
+            });
+
+        if (! $placeholder) {
+            return;
+        }
+
+        $meta = is_array($placeholder->meta) ? $placeholder->meta : [];
+        $meta['pending'] = true;
+        $meta['partial'] = $stillSearching;
+        $meta['progress_message'] = $progressMessage;
+
+        $placeholder->update([
+            'body' => $progressMessage,
+            'leads' => $partial,
+            'meta' => $meta,
+        ]);
     }
 
     /**

@@ -105,6 +105,16 @@ class IcpFilterServiceTest extends TestCase
         $this->assertFalse($filter->passes($brief, new CandidateCompany(territory: 'Lagos, Nigeria'))->reasons['territory']);
     }
 
+    public function test_netherland_misspelling_matches_netherlands(): void
+    {
+        $brief = $this->brief(['territories' => ['Netherland']]);
+        $filter = new IcpFilterService;
+
+        $this->assertTrue($filter->passes($brief, new CandidateCompany(territory: 'Netherlands'))->reasons['territory']);
+        $this->assertTrue($filter->passes($brief, new CandidateCompany(territory: 'Amsterdam, NL'))->reasons['territory']);
+        $this->assertFalse($filter->passes($brief, new CandidateCompany(territory: 'Berlin, Germany'))->reasons['territory']);
+    }
+
     public function test_fails_overall_when_any_single_field_fails(): void
     {
         $brief = $this->brief([

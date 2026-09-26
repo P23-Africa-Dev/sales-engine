@@ -51,6 +51,7 @@ Route::middleware(['auth:sanctum', 'org.resolve'])->group(function () {
     Route::get('/organizations/current', [OrganizationController::class, 'current']);
 
     Route::get('/signal-types', [\App\Http\Controllers\Api\V1\SignalTypeController::class, 'index']);
+    Route::get('/geo/places', [\App\Http\Controllers\Api\V1\GeoController::class, 'places']);
     Route::post('/icp-profiles/suggest-search-brief', [IcpProfileController::class, 'suggestSearchBrief'])
         ->middleware('throttle:20,1');
     Route::get('/icp-profiles/active', [IcpProfileController::class, 'active']);

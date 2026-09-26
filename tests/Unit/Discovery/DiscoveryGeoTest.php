@@ -114,6 +114,40 @@ class DiscoveryGeoTest extends TestCase
         $this->assertSame('uk', $geo->serperParams($brief)['gl'] ?? null);
     }
 
+    public function test_netherland_alias_and_european_cctlds(): void
+    {
+        $geo = new DiscoveryGeo;
+
+        $this->assertSame('Netherlands', $geo->primaryLabel($this->brief(['territories' => ['Netherland']])));
+        $this->assertSame('nl', $geo->serperParams($this->brief(['territories' => ['Netherland']]))['gl'] ?? null);
+        $this->assertSame('Germany', $geo->inferLocationFromTld('https://acme.de/about'));
+        $this->assertSame('Netherlands', $geo->inferLocationFromTld('https://shop.nl/'));
+        $this->assertSame('Denmark', $geo->inferLocationFromTld('https://corp.dk/'));
+        $this->assertSame('Sweden', $geo->inferLocationFromTld('https://ab.se/'));
+    }
+
+    public function test_selected_regions_preserve_order_across_countries(): void
+    {
+        $geo = new DiscoveryGeo;
+        $brief = $this->brief(['territories' => ['Germany', 'Netherland', 'Denmark']]);
+        $labels = $geo->selectedCountryLabels($brief);
+
+        $this->assertSame(['Germany', 'Netherlands', 'Denmark'], $labels);
+        $this->assertSame('Germany', $geo->primaryLabel($brief));
+    }
+
+    public function test_search_places_returns_catalog_matches_only(): void
+    {
+        $geo = new DiscoveryGeo;
+        $places = $geo->searchPlaces('nether', 10);
+        $labels = array_column($places, 'label');
+
+        $this->assertTrue(
+            collect($labels)->contains(fn (string $label) => str_contains(mb_strtolower($label), 'netherland')),
+            'Expected Netherlands in place search'
+        );
+    }
+
     /**
      * @param  array<string, mixed>  $overrides
      */

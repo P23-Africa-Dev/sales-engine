@@ -15,8 +15,8 @@ class QueryVariationGeneratorTest extends TestCase
 
         $this->assertSame(4, $generator->queryBudget(10));
         $this->assertSame(6, $generator->queryBudget(20));
-        $this->assertSame(8, $generator->queryBudget(50));
-        $this->assertSame(8, $generator->queryBudget(150));
+        $this->assertSame(10, $generator->queryBudget(50));
+        $this->assertSame(12, $generator->queryBudget(150));
         $this->assertSame(6, $generator->queryBudget(12));
     }
 

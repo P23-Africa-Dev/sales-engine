@@ -142,6 +142,15 @@ class IcpFilterService
         ['egypt', 'cairo'],
         ['united states', 'usa', 'u.s.', 'u.s.a.', 'america', 'us'],
         ['india', 'bharat', 'mumbai', 'delhi', 'bangalore', 'bengaluru', 'hyderabad', 'chennai', 'pune', 'kolkata', 'in'],
+        ['germany', 'deutschland', 'de', 'berlin', 'munich', 'hamburg', 'frankfurt'],
+        ['netherlands', 'netherland', 'holland', 'nl', 'amsterdam', 'rotterdam', 'the hague', 'utrecht'],
+        ['denmark', 'danmark', 'dk', 'copenhagen', 'aarhus'],
+        ['sweden', 'sverige', 'se', 'stockholm', 'gothenburg', 'malmo'],
+        ['france', 'fr', 'paris', 'lyon', 'marseille'],
+        ['united arab emirates', 'uae', 'u.a.e.', 'dubai', 'abu dhabi'],
+        ['canada', 'ca', 'toronto', 'vancouver', 'montreal'],
+        ['australia', 'au', 'sydney', 'melbourne'],
+        ['rwanda', 'kigali', 'rw'],
     ];
 
     /**

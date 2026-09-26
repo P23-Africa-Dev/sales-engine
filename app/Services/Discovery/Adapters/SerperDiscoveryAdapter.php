@@ -298,6 +298,7 @@ class SerperDiscoveryAdapter implements DiscoverySourceInterface
 
         $desired = match (true) {
             $brief->isAuthoritativePeopleQuery() => max(10, min(20, $ctx->limit)),
+            $ctx->limit > 20 => min(30, max(20, (int) ceil($ctx->limit / 2))),
             $ctx->limit >= 20 => 20,
             $ctx->limit >= 12 => 15,
             default => min(10, max(5, $ctx->limit)),

@@ -88,6 +88,32 @@ readonly class IcpBrief
     }
 
     /**
+     * Clone scoped to one country (or city) for a per-country retrieval pass.
+     *
+     * @param  list<string>  $territories
+     */
+    public function withTerritories(array $territories): self
+    {
+        return new self(
+            name: $this->name,
+            description: $this->description,
+            industries: $this->industries,
+            territories: array_values($territories),
+            companySizes: $this->companySizes,
+            decisionMakers: $this->decisionMakers,
+            customPrompt: $this->customPrompt,
+            minMatchScore: $this->minMatchScore,
+            autoSyncCrm: $this->autoSyncCrm,
+            query: $this->query,
+            target: $this->target,
+            requestedLimit: $this->requestedLimit,
+            searchQueryOverride: $this->searchQueryOverride,
+            revenueRanges: $this->revenueRanges,
+            signalTypePacks: $this->signalTypePacks,
+        );
+    }
+
+    /**
      * Clone with a raw search-query override (used by multi-query fan-out).
      */
     public function withSearchQueryOverride(string $searchQuery): self
@@ -210,6 +236,7 @@ readonly class IcpBrief
      *
      * Priority: customPrompt → description → industries (soft) → neutral fallback.
      * Territory, size, revenue, and personas stay out of this string (gates only).
+     * Full brief is kept (up to 40 words from the UI). Short Serper queries come from searchQueries().
      */
     public function searchBrief(): string
     {
@@ -220,12 +247,12 @@ readonly class IcpBrief
 
         $interest = trim($this->customPrompt);
         if ($interest !== '') {
-            return $this->entityOrientedSeed($interest, $industries);
+            return $this->normalizeBriefText($interest);
         }
 
         $description = trim($this->description);
         if ($description !== '') {
-            return $this->entityOrientedSeed($description, $industries);
+            return $this->normalizeBriefText($description);
         }
 
         if ($industries !== []) {
@@ -238,131 +265,62 @@ readonly class IcpBrief
     }
 
     /**
-     * Compress definition-style ICP essays into short entity search seeds.
+     * Short web-search clauses (6–12 words each). Longer briefs are split on
+     * commas / semicolons / newlines / " or ", not silently truncated to 10 words.
      *
-     * @param  list<string>  $industries
+     * @return list<string>
      */
-    private function entityOrientedSeed(string $text, array $industries): string
+    public function searchQueries(int $maxClauses = 6, int $maxWords = 12): array
     {
-        $text = trim(preg_replace('/\s+/u', ' ', $text) ?? $text);
-        $words = preg_split('/\s+/u', $text) ?: [];
-        if (count($words) <= 14) {
-            return $text;
+        $brief = $this->searchBrief();
+        if ($brief === '') {
+            return [];
         }
 
-        $nouns = $this->concreteNounsFromText($text, implode(' ', $industries), 6);
-        if ($industries !== []) {
-            $seed = trim(implode(' ', $industries).' '.$nouns);
-            if ($seed !== '') {
-                return $this->isPeopleSearch() ? $seed : trim($seed.' companies');
-            }
+        $words = preg_split('/\s+/u', $brief) ?: [];
+        if (count($words) <= $maxWords) {
+            return [$brief];
         }
 
-        return implode(' ', array_slice($words, 0, 10));
-    }
-
-    /**
-     * Pull a few concrete nouns from description that are not already in the seed.
-     * Generic — no vertical dictionary.
-     */
-    private function concreteNounsFromText(string $source, string $alreadyPresent, int $limit = 4): string
-    {
-        if ($source === '' || $limit < 1) {
-            return '';
-        }
-
-        $stop = [
-            'and',
-            'the',
-            'for',
-            'with',
-            'from',
-            'into',
-            'that',
-            'this',
-            'your',
-            'our',
-            'companies',
-            'company',
-            'business',
-            'businesses',
-            'focus',
-            'looking',
-            'signs',
-            'showing',
-            'any',
-            'all',
-            'to',
-            'of',
-            'in',
-            'on',
-            'or',
-            'a',
-            'an',
-            'profile',
-            'description',
-            'fallback',
-            'about',
-            'their',
-            'these',
-            'those',
-            'where',
-            'when',
-            'what',
-            'which',
-            'whom',
-            'whose',
-            'have',
-            'has',
-            'been',
-            'will',
-            'would',
-            'could',
-            'should',
-            'also',
-            'such',
-            'than',
-            'then',
-            'them',
-            'sell',
-            'sells',
-            'sold',
-            'buy',
-            'buys',
-            'buying',
-            'solutions',
-            'solution',
-            'unused',
-            'customprompt',
-            'prompt',
-            'set',
-        ];
-        $present = mb_strtolower($alreadyPresent);
-        $tokens = preg_split('/[^\p{L}\p{N}\-&]+/u', mb_strtolower($source)) ?: [];
-        $picked = [];
-        foreach ($tokens as $token) {
-            $token = trim($token);
-            if (mb_strlen($token) < 4 || in_array($token, $stop, true)) {
+        $parts = preg_split('/\s*(?:,|;|\n|\bor\b)\s*/iu', $brief) ?: [];
+        $clauses = [];
+        foreach ($parts as $part) {
+            $part = trim(preg_replace('/\s+/u', ' ', (string) $part) ?? '');
+            if ($part === '') {
                 continue;
             }
-            if (str_contains($present, $token) || isset($picked[$token])) {
-                continue;
+            $clauseWords = preg_split('/\s+/u', $part) ?: [];
+            if (count($clauseWords) > $maxWords) {
+                $part = implode(' ', array_slice($clauseWords, 0, $maxWords));
             }
-            $picked[$token] = $token;
-            if (count($picked) >= $limit) {
+            if ($part !== '' && ! in_array($part, $clauses, true)) {
+                $clauses[] = $part;
+            }
+            if (count($clauses) >= $maxClauses) {
                 break;
             }
         }
 
-        return implode(' ', array_values($picked));
+        if ($clauses === []) {
+            return [implode(' ', array_slice($words, 0, $maxWords))];
+        }
+
+        return $clauses;
+    }
+
+    private function normalizeBriefText(string $text): string
+    {
+        return trim(preg_replace('/\s+/u', ' ', $text) ?? $text);
     }
 
     /**
-     * Interest language for search — delegates to searchBrief().
+     * Interest language for search — first short clause from searchQueries().
      * Firmographic gates (territory / size / revenue / personas) are never part of this string.
      */
     public function interestSearchSeed(): string
     {
-        return $this->searchBrief();
+        $queries = $this->searchQueries();
+
+        return $queries[0] ?? $this->searchBrief();
     }
 }

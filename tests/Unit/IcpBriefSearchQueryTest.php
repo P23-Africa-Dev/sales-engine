@@ -180,4 +180,36 @@ class IcpBriefSearchQueryTest extends TestCase
         $this->assertFalse($brief->hasUserQuery());
         $this->assertSame(25, $brief->requestedLimit);
     }
+
+    public function test_long_custom_prompt_is_kept_in_search_brief_and_split_into_short_queries(): void
+    {
+        $prompt = 'cold chain logistics providers hiring ops leads, warehouse automation vendors, or last mile delivery fleets expanding abroad';
+        $profile = new IcpProfile([
+            'name' => 'Niche ICP',
+            'config' => array_merge(IcpProfile::defaultConfig(), [
+                'customPrompt' => $prompt,
+            ]),
+        ]);
+
+        $brief = IcpBrief::fromIcpProfile($profile, 'give me prospects');
+        $this->assertSame($prompt, $brief->searchBrief());
+
+        $queries = $brief->searchQueries();
+        $this->assertGreaterThan(1, count($queries));
+        foreach ($queries as $query) {
+            $words = preg_split('/\s+/u', $query) ?: [];
+            $this->assertLessThanOrEqual(12, count($words));
+        }
+        $this->assertTrue(collect($queries)->contains(fn (string $q) => str_contains(mb_strtolower($q), 'cold chain')));
+        $this->assertTrue(collect($queries)->contains(fn (string $q) => str_contains(mb_strtolower($q), 'last mile')));
+
+        $variations = app(\App\Services\Discovery\QueryVariationGenerator::class)->generate($brief, 25);
+        $joined = mb_strtolower(implode(' | ', $variations));
+        $this->assertStringContainsString('cold chain', $joined);
+        // Fan-out is capped; later clauses may be omitted — at least one extra clause must appear.
+        $this->assertTrue(
+            str_contains($joined, 'warehouse') || str_contains($joined, 'last mile'),
+            'Expected at least one additional brief clause in fan-out variations'
+        );
+    }
 }

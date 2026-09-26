@@ -12,7 +12,7 @@ use Illuminate\Support\Facades\Log;
 
 class LeadProfileEnrichmentService
 {
-    private const MAX_SERPER_CALLS_PER_RUN = 12;
+    private const MAX_SERPER_CALLS_PER_RUN = 24;
 
     private const CACHE_TTL_SECONDS = 604800; // 7 days
 

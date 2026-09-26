@@ -316,7 +316,7 @@ class ChatService
             if ($searchQueryOverride !== null) {
                 $brief = $brief->withSearchQueryOverride($searchQueryOverride);
             }
-            $result = $this->discovery->run(
+                $result = $this->discovery->run(
                 $organization,
                 $icp,
                 $user,
@@ -326,7 +326,7 @@ class ChatService
                 $brief->requestedLimit,
                 null,
                 $excludeLeadNames,
-                $intent !== 'generate_more_leads',
+                false,
                 $searchQueryOverride,
             );
             $leads = $result['leads'];
@@ -520,7 +520,7 @@ class ChatService
                     $brief->requestedLimit,
                     $run,
                     $excludeLeadNames,
-                    $intent !== 'generate_more_leads',
+                    false,
                     $searchQueryOverride,
                 );
                 $leads = $result['leads'];
