@@ -41,10 +41,10 @@ final class DiscoveryGeo
             return self::$regionsCache;
         }
 
-        $path = __DIR__.'/data/geo-regions.php';
+        $path = __DIR__ . '/data/geo-regions.php';
         $loaded = is_file($path) ? require $path : [];
         if (! is_array($loaded) || $loaded === []) {
-            throw new \RuntimeException('Discovery geo catalog missing or empty at '.$path);
+            throw new \RuntimeException('Discovery geo catalog missing or empty at ' . $path);
         }
 
         /** @var list<array{label: string, gl: string, hunterCountry: string, aliases: list<string>, cities: array<string, string>}> $loaded */
@@ -109,7 +109,7 @@ final class DiscoveryGeo
     public function selectedCountryLabels(IcpBrief $brief): array
     {
         return array_values(array_map(
-            static fn (array $region): string => $region['label'],
+            static fn(array $region): string => $region['label'],
             $this->selectedRegions($brief),
         ));
     }
@@ -158,7 +158,7 @@ final class DiscoveryGeo
 
         $city = $this->firstCityFromTerritories($brief, $region);
         $location = $city !== null
-            ? $city.', '.$region['label']
+            ? $city . ', ' . $region['label']
             : $region['label'];
 
         return [
@@ -213,11 +213,11 @@ final class DiscoveryGeo
             return $query;
         }
 
-        if (preg_match('/\b'.preg_quote($label, '/').'\b/iu', $query)) {
+        if (preg_match('/\b' . preg_quote($label, '/') . '\b/iu', $query)) {
             return $query;
         }
 
-        return trim($query.' '.$label);
+        return trim($query . ' ' . $label);
     }
 
     public function userNamedDifferentCountry(IcpBrief $brief): bool
@@ -272,15 +272,41 @@ final class DiscoveryGeo
 
         foreach ($this->regions() as $region) {
             foreach ($region['cities'] as $cityKey => $cityLabel) {
-                if (preg_match('/\b'.preg_quote($cityKey, '/').'\b/u', $haystack)) {
-                    return $cityLabel.', '.$region['label'];
+                if (preg_match('/\b' . preg_quote($cityKey, '/') . '\b/u', $haystack)) {
+                    return $cityLabel . ', ' . $region['label'];
                 }
             }
             $iso = mb_strtolower($region['hunterCountry']);
-            // Match HQ codes like NG/GB; skip US/IN which collide with English words.
+            // Match HQ codes like NG/GB; skip codes that collide with English words / abbreviations.
+            $ambiguousIso = [
+                'us',
+                'in',
+                'co', // company / Colombia
+                'or',
+                'no',
+                'so',
+                'do',
+                'to',
+                'me',
+                'be',
+                'by',
+                'as',
+                'at',
+                'if',
+                'it',
+                'on',
+                'an',
+                'am',
+                'id', // Indonesia vs identifier
+                'al',
+                're',
+                'is',
+                'my',
+                'ok',
+            ];
             if (
-                ! in_array($iso, ['us', 'in'], true)
-                && preg_match('/\b'.preg_quote($iso, '/').'\b/u', $haystack)
+                ! in_array($iso, $ambiguousIso, true)
+                && preg_match('/\b' . preg_quote($iso, '/') . '\b/u', $haystack)
             ) {
                 return $region['label'];
             }
@@ -288,7 +314,7 @@ final class DiscoveryGeo
                 if (mb_strlen($alias) < 3) {
                     continue;
                 }
-                if (preg_match('/\b'.preg_quote($alias, '/').'\b/u', $haystack)) {
+                if (preg_match('/\b' . preg_quote($alias, '/') . '\b/u', $haystack)) {
                     return $region['label'];
                 }
             }
@@ -311,13 +337,14 @@ final class DiscoveryGeo
         foreach ($this->regions() as $region) {
             $gl = preg_quote($region['gl'], '/');
             $iso = preg_quote(mb_strtolower($region['hunterCountry']), '/');
-            if (preg_match('/(?:^|[\/\s:@])(?:'.$gl.'|'.$iso.')\.linkedin\.com(?:[\/:?#\s]|$)/u', $haystack)) {
+            if (preg_match('/(?:^|[\/\s:@])(?:' . $gl . '|' . $iso . ')\.linkedin\.com(?:[\/:?#\s]|$)/u', $haystack)) {
                 return $region['label'];
             }
         }
 
         // Special UK compound TLD.
-        if (preg_match('/(?:^|[\/\s:@])(?:[\w-]+\.)*[\w-]+\.co\.uk(?:[\/:?#\s]|$)/u', $haystack)
+        if (
+            preg_match('/(?:^|[\/\s:@])(?:[\w-]+\.)*[\w-]+\.co\.uk(?:[\/:?#\s]|$)/u', $haystack)
             || preg_match('/(?:^|[\/\s:@])(?:[\w-]+\.)*[\w-]+\.uk(?:[\/:?#\s]|$)/u', $haystack)
         ) {
             return 'England';
@@ -325,8 +352,34 @@ final class DiscoveryGeo
 
         // Skip generic / multi-letter TLDs and ambiguous 2-letter codes that collide with words or gTLDs.
         $skipTlds = [
-            'com', 'net', 'org', 'io', 'ai', 'app', 'dev', 'co', 'info', 'biz', 'edu', 'gov', 'mil', 'int',
-            'xyz', 'online', 'site', 'store', 'tech', 'cloud', 'me', 'tv', 'fm', 'cc', 'ws', 'to', 'in', 'us',
+            'com',
+            'net',
+            'org',
+            'io',
+            'ai',
+            'app',
+            'dev',
+            'co',
+            'info',
+            'biz',
+            'edu',
+            'gov',
+            'mil',
+            'int',
+            'xyz',
+            'online',
+            'site',
+            'store',
+            'tech',
+            'cloud',
+            'me',
+            'tv',
+            'fm',
+            'cc',
+            'ws',
+            'to',
+            'in',
+            'us',
         ];
 
         foreach ($this->regions() as $region) {
@@ -335,7 +388,7 @@ final class DiscoveryGeo
                 continue;
             }
             // Avoid matching .in inside .info etc. by requiring end or path boundary.
-            if (preg_match('/(?:^|[\/\s:@])(?:[\w-]+\.)*[\w-]+\.'.preg_quote($gl, '/').'(?:[\/:?#\s]|$)/u', $haystack)) {
+            if (preg_match('/(?:^|[\/\s:@])(?:[\w-]+\.)*[\w-]+\.' . preg_quote($gl, '/') . '(?:[\/:?#\s]|$)/u', $haystack)) {
                 return $region['label'];
             }
         }
@@ -357,7 +410,7 @@ final class DiscoveryGeo
                 [mb_strtolower($region['label']), mb_strtolower($region['gl']), mb_strtolower($region['hunterCountry'])],
                 $region['aliases'],
                 array_keys($region['cities']),
-                array_map(static fn (string $label): string => mb_strtolower($label), array_values($region['cities'])),
+                array_map(static fn(string $label): string => mb_strtolower($label), array_values($region['cities'])),
             );
             foreach ($candidates as $token) {
                 $token = trim((string) $token);
@@ -404,7 +457,7 @@ final class DiscoveryGeo
             foreach ($region['cities'] as $cityKey => $cityLabel) {
                 if (str_contains($cityKey, $q) || str_starts_with(mb_strtolower($cityLabel), $q)) {
                     $matches[] = [
-                        'label' => $cityLabel.', '.$countryLabel,
+                        'label' => $cityLabel . ', ' . $countryLabel,
                         'type' => 'city',
                         'country' => $countryLabel,
                         'gl' => $region['gl'],
@@ -467,7 +520,7 @@ final class DiscoveryGeo
                 return $region;
             }
 
-            if (preg_match('/\b'.preg_quote(mb_strtolower($region['label']), '/').'\b/u', $normalized)) {
+            if (preg_match('/\b' . preg_quote(mb_strtolower($region['label']), '/') . '\b/u', $normalized)) {
                 return $region;
             }
 
@@ -475,13 +528,13 @@ final class DiscoveryGeo
                 if (mb_strlen($alias) < 3) {
                     continue;
                 }
-                if (preg_match('/\b'.preg_quote($alias, '/').'\b/u', $normalized)) {
+                if (preg_match('/\b' . preg_quote($alias, '/') . '\b/u', $normalized)) {
                     return $region;
                 }
             }
 
             foreach ($region['cities'] as $cityKey => $cityLabel) {
-                if (preg_match('/\b'.preg_quote($cityKey, '/').'\b/u', $normalized)) {
+                if (preg_match('/\b' . preg_quote($cityKey, '/') . '\b/u', $normalized)) {
                     return $region;
                 }
             }
@@ -512,7 +565,7 @@ final class DiscoveryGeo
     {
         $haystack = mb_strtolower(implode(' ', $brief->territories));
         foreach ($region['cities'] as $cityKey => $cityLabel) {
-            if (preg_match('/\b'.preg_quote($cityKey, '/').'\b/u', $haystack)) {
+            if (preg_match('/\b' . preg_quote($cityKey, '/') . '\b/u', $haystack)) {
                 return $cityLabel;
             }
         }
@@ -549,7 +602,7 @@ final class DiscoveryGeo
                 if (mb_strlen($alias) < 3) {
                     continue;
                 }
-                if (preg_match('/\b'.preg_quote($alias, '/').'\b/u', $lower)) {
+                if (preg_match('/\b' . preg_quote($alias, '/') . '\b/u', $lower)) {
                     $found[$region['gl']] = $region['gl'];
                     break;
                 }
@@ -557,13 +610,13 @@ final class DiscoveryGeo
             if (isset($found[$region['gl']])) {
                 continue;
             }
-            if (preg_match('/\b'.preg_quote(mb_strtolower($region['label']), '/').'\b/u', $lower)) {
+            if (preg_match('/\b' . preg_quote(mb_strtolower($region['label']), '/') . '\b/u', $lower)) {
                 $found[$region['gl']] = $region['gl'];
 
                 continue;
             }
             foreach ($region['cities'] as $cityKey => $cityLabel) {
-                if (preg_match('/\b'.preg_quote($cityKey, '/').'\b/u', $lower)) {
+                if (preg_match('/\b' . preg_quote($cityKey, '/') . '\b/u', $lower)) {
                     $found[$region['gl']] = $region['gl'];
                     break;
                 }
