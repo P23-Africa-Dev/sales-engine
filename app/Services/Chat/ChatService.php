@@ -335,6 +335,11 @@ class ChatService
             if ($intent === 'generate_more_leads') {
                 $meta['generate_more'] = true;
             }
+            $meta = array_merge($meta, $this->icpTightenMeta(
+                $result['run'],
+                $leads,
+                $brief->requestedLimit,
+            ));
             $assistantBody = $this->narrateDiscovery(
                 $organization,
                 $icp,
@@ -530,6 +535,11 @@ class ChatService
                 if ($icpSearchBrief) {
                     $meta['icp_search_brief'] = true;
                 }
+                $meta = array_merge($meta, $this->icpTightenMeta(
+                    $result['run'],
+                    $leads,
+                    $brief->requestedLimit,
+                ));
                 $assistantBody = $this->narrateDiscovery(
                     $organization,
                     $icp,
@@ -701,6 +711,37 @@ class ChatService
         $meta = is_array($message->meta) ? $message->meta : [];
 
         return (bool) ($meta['icp_search_brief'] ?? false);
+    }
+
+    /**
+     * Suggest tightening the ICP when yield is weak relative to the request.
+     *
+     * @param  list<array<string, mixed>>  $leads
+     * @return array{icp_tighten?: array{suggested: bool, reason: string}}
+     */
+    private function icpTightenMeta(\App\Models\DiscoveryRun $run, array $leads, int $requestedLimit): array
+    {
+        $summary = is_array($run->result_summary) ? $run->result_summary : [];
+        $leadCount = count($leads);
+        $requested = max(1, $requestedLimit > 0 ? $requestedLimit : (int) ($summary['requested_lead_count'] ?? 12));
+        $wrongCountry = (int) ($summary['wrong_country_dropped'] ?? ($summary['gate_stats']['wrong_country_dropped'] ?? 0));
+        $threshold = max(3, (int) ceil($requested * 0.4));
+
+        $suggested = $leadCount < $threshold || ($wrongCountry > 0 && $wrongCountry >= $leadCount);
+        if (! $suggested) {
+            return [];
+        }
+
+        $reason = $wrongCountry > 0 && $wrongCountry >= max(1, $leadCount)
+            ? 'Many hits were outside your ICP countries. Tighten territories or the search brief.'
+            : 'Few usable leads matched this ICP. Refine “What we search for” so discovery can find better fits.';
+
+        return [
+            'icp_tighten' => [
+                'suggested' => true,
+                'reason' => $reason,
+            ],
+        ];
     }
 
     /**

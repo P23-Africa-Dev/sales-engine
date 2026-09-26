@@ -82,4 +82,41 @@ class IcpSearchBriefSuggesterTest extends TestCase
         $this->assertStringContainsString('3PL', $result['brief']);
         $this->assertStringNotContainsStringIgnoringCase('nigeria', $result['brief']);
     }
+
+    public function test_improve_empty_box_falls_back_to_generate_from_description(): void
+    {
+        $suggester = app(IcpSearchBriefSuggester::class);
+
+        $result = $suggester->deterministic([
+            'mode' => 'improve',
+            'customPrompt' => '',
+            'profileName' => 'Cold chain ICP',
+            'description' => 'Cold-chain storage providers hiring operations leads',
+            'industries' => ['Logistics & Fleet'],
+            'territories' => ['Nigeria'],
+        ]);
+
+        $this->assertNotSame('', $result['brief']);
+        $this->assertStringNotContainsStringIgnoringCase('nigeria', $result['brief']);
+        $this->assertGreaterThanOrEqual(4, count($result['keywords']));
+    }
+
+    public function test_improve_keeps_user_niche_nouns(): void
+    {
+        $suggester = app(IcpSearchBriefSuggester::class);
+
+        $result = $suggester->deterministic([
+            'mode' => 'improve',
+            'customPrompt' => 'cold chain storage providers exclude brokers',
+            'industries' => ['Logistics & Fleet'],
+            'territories' => ['Germany'],
+        ]);
+
+        $brief = mb_strtolower($result['brief']);
+        $this->assertTrue(
+            str_contains($brief, 'cold') || str_contains($brief, 'chain') || str_contains($brief, 'storage'),
+            'Improve should keep user niche nouns'
+        );
+        $this->assertStringNotContainsStringIgnoringCase('germany', $result['brief']);
+    }
 }

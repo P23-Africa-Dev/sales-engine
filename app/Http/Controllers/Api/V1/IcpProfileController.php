@@ -131,6 +131,7 @@ class IcpProfileController extends Controller
     {
         $data = $request->validate([
             'mode' => ['nullable', 'string', 'in:generate,improve,regenerate'],
+            'profileName' => ['nullable', 'string', 'max:255'],
             'customPrompt' => ['nullable', 'string', 'max:5000'],
             'description' => ['nullable', 'string', 'max:2000'],
             'industries' => ['nullable', 'array'],
