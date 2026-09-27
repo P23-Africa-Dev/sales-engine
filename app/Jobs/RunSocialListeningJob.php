@@ -39,7 +39,26 @@ class RunSocialListeningJob implements ShouldQueue
             $orchestrator->run($run->organization, $run->icpProfile, $settings, null, $run);
         } catch (\Throwable $e) {
             Log::error('Social listening job failed', ['run_id' => $this->runId, 'error' => $e->getMessage()]);
-            $run->update(['status' => 'failed', 'error' => $e->getMessage(), 'finished_at' => now()]);
+            $this->markFailed($e->getMessage());
         }
+    }
+
+    public function failed(?\Throwable $exception): void
+    {
+        $this->markFailed($exception?->getMessage() ?: 'Social listening run failed.');
+    }
+
+    private function markFailed(string $message): void
+    {
+        $run = SocialListeningRun::query()->find($this->runId);
+        if (! $run || in_array($run->status, ['completed', 'failed'], true)) {
+            return;
+        }
+
+        $run->update([
+            'status' => 'failed',
+            'error' => mb_substr($message, 0, 1000),
+            'finished_at' => now(),
+        ]);
     }
 }

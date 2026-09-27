@@ -30,7 +30,7 @@ class SocialListeningOrchestrator
      * Size/revenue are evaluated per-candidate when the extractor actually
      * populated them — never fail-closed on fields the pipeline cannot fill.
      */
-    private const HIT_CAP = 40;
+    private const HIT_CAP = 12;
 
     private const PER_SOURCE_CAP = 10;
 
