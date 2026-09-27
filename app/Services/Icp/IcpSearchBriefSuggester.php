@@ -73,7 +73,7 @@ class IcpSearchBriefSuggester
      *     territories?: list<string>,
      *     decisionMakers?: list<string>
      * }  $input
-     * @return array{brief: string, keywords: list<string>, source: string}
+     * @return array{brief: string, keywords: list<string>, source: string, industries: list<string>, decisionMakers: list<string>, companySizes: list<string>, exclusions: list<string>, minMatchScore: int}
      */
     public function suggest(Organization $organization, array $input): array
     {
@@ -89,7 +89,7 @@ class IcpSearchBriefSuggester
         $heuristic = $this->deterministic($input);
 
         if (! $this->glm->isConfigured()) {
-            return $heuristic + ['source' => 'heuristic'];
+            return $this->withProposal($heuristic + ['source' => 'heuristic'], $input);
         }
 
         try {
@@ -109,24 +109,24 @@ class IcpSearchBriefSuggester
             ];
             $clean = $this->sanitize($draft, $input);
             if ($clean['brief'] === '') {
-                return $heuristic + ['source' => 'heuristic'];
+                return $this->withProposal($heuristic + ['source' => 'heuristic'], $input);
             }
 
             // Improve must stay grounded in the user's draft when they typed something.
             if ($mode === 'improve' && $existing !== '' && ! $this->sharesConcreteNouns($existing, $clean['brief'])) {
                 $fallback = $this->sanitize(['brief' => $this->tightenExisting($existing, $input), 'keywords' => $clean['keywords']], $input);
                 if ($fallback['brief'] !== '') {
-                    return $fallback + ['source' => 'heuristic'];
+                    return $this->withProposal($fallback + ['source' => 'heuristic'], $input);
                 }
             }
 
-            return $clean + ['source' => 'glm'];
+            return $this->withProposal($clean + ['source' => 'glm'], $input);
         } catch (\Throwable $e) {
             Log::debug('ICP search-brief suggest fell back to heuristic', [
                 'error' => $e->getMessage(),
             ]);
 
-            return $heuristic + ['source' => 'heuristic'];
+            return $this->withProposal($heuristic + ['source' => 'heuristic'], $input);
         }
     }
 
@@ -153,7 +153,7 @@ class IcpSearchBriefSuggester
             $seed = 'B2B product companies buyers';
         }
 
-        return $this->sanitize(['brief' => $seed, 'keywords' => []], $input);
+        return $this->withProposal($this->sanitize(['brief' => $seed, 'keywords' => []], $input), $input);
     }
 
     /**
@@ -206,6 +206,168 @@ class IcpSearchBriefSuggester
         }
 
         return ['brief' => $brief, 'keywords' => $keywords];
+    }
+
+    /**
+     * Fill empty ICP fields from catalogs so Strengthen upgrades the whole profile,
+     * not just the search box. Geography is never invented.
+     *
+     * @param  array{brief: string, keywords: list<string>, source?: string}  $draft
+     * @param  array<string, mixed>  $input
+     * @return array{brief: string, keywords: list<string>, source: string, industries: list<string>, decisionMakers: list<string>, companySizes: list<string>, exclusions: list<string>, minMatchScore: int}
+     */
+    public function withProposal(array $draft, array $input): array
+    {
+        $industries = $this->intersectCatalog($this->stringList($input['industries'] ?? []), self::CATALOG_INDUSTRIES);
+        if ($industries === []) {
+            $industries = $this->inferCatalogIndustries(
+                trim(($draft['brief'] ?? '').' '.($input['description'] ?? '').' '.($input['profileName'] ?? ''))
+            );
+        }
+
+        $decisionMakers = $this->intersectCatalog($this->stringList($input['decisionMakers'] ?? []), self::CATALOG_DECISION_MAKERS);
+        if ($decisionMakers === []) {
+            $decisionMakers = $this->defaultDecisionMakers($industries);
+        }
+
+        $companySizes = $this->intersectCatalog($this->stringList($input['companySizes'] ?? []), self::CATALOG_COMPANY_SIZES);
+        if ($companySizes === []) {
+            $companySizes = ['51-200'];
+        }
+
+        $minMatchScore = (int) ($input['minMatchScore'] ?? 60);
+        if ($minMatchScore < 40 || $minMatchScore > 95) {
+            $minMatchScore = 60;
+        }
+
+        return [
+            'brief' => (string) ($draft['brief'] ?? ''),
+            'keywords' => array_values($draft['keywords'] ?? []),
+            'source' => (string) ($draft['source'] ?? 'heuristic'),
+            'industries' => $industries,
+            'decisionMakers' => $decisionMakers,
+            'companySizes' => $companySizes,
+            'exclusions' => $this->exclusionsFromBrief((string) ($draft['brief'] ?? '')),
+            'minMatchScore' => $minMatchScore,
+        ];
+    }
+
+    private const CATALOG_INDUSTRIES = [
+        'FMCG & Retail',
+        'Logistics & Fleet',
+        'Agro & Commodities',
+        'Fintech & Payments',
+        'Health & Pharma',
+        'Manufacturing',
+        'Energy & Utilities',
+        'Construction & Real Estate',
+    ];
+
+    private const CATALOG_DECISION_MAKERS = [
+        'Head of Sales',
+        'Chief Commercial Officer',
+        'Supply Chain Director',
+        'Procurement Manager',
+        'Managing Director / CEO',
+        'Operations Director',
+        'Head of Growth',
+    ];
+
+    private const CATALOG_COMPANY_SIZES = [
+        '1-10',
+        '11-50',
+        '51-200',
+        '201-500',
+        '500+',
+    ];
+
+    /**
+     * @param  list<string>  $values
+     * @param  list<string>  $catalog
+     * @return list<string>
+     */
+    private function intersectCatalog(array $values, array $catalog): array
+    {
+        $out = [];
+        foreach ($values as $value) {
+            foreach ($catalog as $option) {
+                if (mb_strtolower($value) === mb_strtolower($option) && ! in_array($option, $out, true)) {
+                    $out[] = $option;
+                }
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function inferCatalogIndustries(string $haystack): array
+    {
+        $hay = mb_strtolower($haystack);
+        $map = [
+            'Fintech & Payments' => ['fintech', 'payment', 'lending', 'bank', 'insur'],
+            'Logistics & Fleet' => ['logistics', '3pl', 'fleet', 'freight', 'warehous'],
+            'FMCG & Retail' => ['fmcg', 'retail', 'wholesale', 'supermarket'],
+            'Health & Pharma' => ['health', 'pharma', 'clinic', 'hospital'],
+            'Manufacturing' => ['manufactur', 'industrial', 'plant'],
+            'Energy & Utilities' => ['energy', 'utilit', 'power'],
+            'Construction & Real Estate' => ['construction', 'earthmoving', 'real estate', 'property'],
+            'Agro & Commodities' => ['agro', 'agri', 'commodit', 'farming'],
+        ];
+
+        $out = [];
+        foreach ($map as $label => $needles) {
+            foreach ($needles as $needle) {
+                if (str_contains($hay, $needle)) {
+                    $out[] = $label;
+                    break;
+                }
+            }
+        }
+
+        return $out === [] ? ['Fintech & Payments'] : array_values(array_unique($out));
+    }
+
+    /**
+     * @param  list<string>  $industries
+     * @return list<string>
+     */
+    private function defaultDecisionMakers(array $industries): array
+    {
+        $joined = mb_strtolower(implode(' ', $industries));
+        if (str_contains($joined, 'fintech') || str_contains($joined, 'tech') || str_contains($joined, 'software')) {
+            return ['Head of Growth', 'Managing Director / CEO'];
+        }
+        if (str_contains($joined, 'logistics') || str_contains($joined, 'fmcg') || str_contains($joined, 'agro')) {
+            return ['Head of Sales', 'Operations Director', 'Procurement Manager'];
+        }
+
+        return ['Head of Sales', 'Managing Director / CEO'];
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function exclusionsFromBrief(string $brief): array
+    {
+        if (! preg_match_all('/\b(?:not|except|excluding|exclude)\s+([a-z0-9][\w\-\/ ]{2,40})/iu', $brief, $matches)) {
+            return [];
+        }
+
+        $out = [];
+        foreach ($matches[1] as $raw) {
+            $cleaned = trim((string) $raw, " \t\n\r,.;");
+            if ($cleaned !== '' && ! in_array($cleaned, $out, true)) {
+                $out[] = $cleaned;
+            }
+            if (count($out) >= 4) {
+                break;
+            }
+        }
+
+        return $out;
     }
 
     /**

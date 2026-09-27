@@ -25,6 +25,10 @@ class IcpSearchBriefSuggesterTest extends TestCase
         $this->assertStringNotContainsStringIgnoringCase('lagos', $result['brief']);
         $this->assertStringNotContainsStringIgnoringCase('ceo', $result['brief']);
         $this->assertNotEmpty($result['keywords']);
+        $this->assertContains('Logistics & Fleet', $result['industries']);
+        $this->assertNotEmpty($result['decisionMakers']);
+        $this->assertContains('51-200', $result['companySizes']);
+        $this->assertSame(60, $result['minMatchScore']);
     }
 
     public function test_sanitize_strips_glm_geo_and_persona_leak(): void

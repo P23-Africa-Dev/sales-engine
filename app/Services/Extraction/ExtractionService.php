@@ -11,11 +11,245 @@ use App\Services\Llm\GlmClient;
 
 class ExtractionService
 {
+    /** Hits per model call. Larger batches save latency but blur attention per row. */
+    private const BATCH_SIZE = 10;
+
     public function __construct(
         private readonly GlmClient $glm,
         private readonly QueryIntentService $queryIntent,
         private readonly DiscoveryGeo $discoveryGeo = new DiscoveryGeo,
     ) {}
+
+    /**
+     * Extract a whole page of hits with one model call per chunk, chunks running
+     * concurrently. One call per hit was what limited a run to ~19 candidates.
+     *
+     * @param  list<RawDiscoveryHit>  $hits
+     * @return array<int, list<array<string, mixed>>>  Keyed by the input index.
+     */
+    public function extractManyBatch(array $hits, IcpBrief $brief, Organization $organization): array
+    {
+        if ($hits === []) {
+            return [];
+        }
+
+        $isPeople = $brief->isPeopleSearch();
+        $extracted = [];
+        $pending = [];
+
+        foreach ($hits as $index => $hit) {
+            // Listicles expand one hit into many people; keep that on the single-hit path.
+            if ($brief->isListiclePeopleQuery()) {
+                $extracted[$index] = $this->extractMany($hit, $brief, $organization);
+
+                continue;
+            }
+
+            if ($isPeople) {
+                $heuristic = $this->fallbackPerson($hit, $brief);
+                $hasName = filled($heuristic['person_name'] ?? null);
+                if (($hasName && ! ($heuristic['low_confidence'] ?? true))
+                    || ($hasName && $this->isLinkedInProfileUrl($hit->url))
+                ) {
+                    $extracted[$index] = $this->wrapExtractedRow($heuristic);
+
+                    continue;
+                }
+            }
+
+            $pending[$index] = $hit;
+        }
+
+        if ($pending === []) {
+            ksort($extracted);
+
+            return $extracted;
+        }
+
+        if (! $this->glm->isConfigured()) {
+            foreach ($pending as $index => $hit) {
+                $extracted[$index] = $this->wrapExtractedRow($this->fallbackRow($hit, $brief, $isPeople));
+            }
+            ksort($extracted);
+
+            return $extracted;
+        }
+
+        $chunks = array_chunk($pending, self::BATCH_SIZE, true);
+        $requests = [];
+        foreach ($chunks as $chunkIndex => $chunk) {
+            $requests[$chunkIndex] = [
+                'messages' => $isPeople
+                    ? $this->personBatchMessages($chunk, $brief)
+                    : $this->companyBatchMessages($chunk, $brief),
+                'options' => ['timeout' => 45, 'max_tokens' => 2600],
+            ];
+        }
+
+        $responses = $this->glm->chatJsonPool($requests, 'extract', $organization);
+
+        foreach ($chunks as $chunkIndex => $chunk) {
+            $rows = $this->indexBatchRows($responses[$chunkIndex] ?? null, array_keys($chunk));
+
+            foreach ($chunk as $index => $hit) {
+                $row = $rows[$index] ?? null;
+                $fallback = $this->fallbackRow($hit, $brief, $isPeople);
+
+                if ($row === null) {
+                    $extracted[$index] = $this->wrapExtractedRow($fallback);
+
+                    continue;
+                }
+
+                $extracted[$index] = $this->wrapExtractedRow($isPeople
+                    ? $this->normalizePersonRow($row, $hit, $brief, $fallback)
+                    : $this->normalizeCompanyRow($row, $hit, $brief));
+            }
+        }
+
+        ksort($extracted);
+
+        return $extracted;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function fallbackRow(RawDiscoveryHit $hit, IcpBrief $brief, bool $isPeople): array
+    {
+        return $isPeople ? $this->fallbackPerson($hit, $brief) : $this->fallbackCompany($hit);
+    }
+
+    /**
+     * Mirror extractMany's contract: a row with no usable name yields nothing.
+     *
+     * @param  array<string, mixed>  $row
+     * @return list<array<string, mixed>>
+     */
+    private function wrapExtractedRow(array $row): array
+    {
+        $name = trim((string) ($row['person_name'] ?? $row['name'] ?? ''));
+
+        return $name === '' ? [] : [$row];
+    }
+
+    /**
+     * @param  array<int, RawDiscoveryHit>  $chunk
+     * @return list<array{role: string, content: string}>
+     */
+    private function companyBatchMessages(array $chunk, IcpBrief $brief): array
+    {
+        $hits = [];
+        foreach ($chunk as $index => $hit) {
+            $hits[] = [
+                'index' => $index,
+                'name' => $hit->name,
+                'snippet' => $hit->snippet,
+                'url' => $hit->url,
+                'website' => $hit->website,
+                'location' => $hit->location,
+                'sector' => $hit->sector,
+                'source' => $hit->source,
+                'provider' => $hit->provider,
+            ];
+        }
+
+        return [
+            [
+                'role' => 'system',
+                'content' => 'Extract structured company intelligence for EVERY hit in hits[]. Return JSON: {"results":[{"index":<the hit index>,"name":"","sector":"","location":"","summary":"","contact_email":"","contact_phone":"","business_fields":{},"commercial_signals":[]}]}. One result per hit, echoing its index. The name must be a real company/organization name — never an article title, tip list, award, requirement phrase, blog post, or generic advice headline. If a hit is not a real company, set its name to an empty string. Never use the ICP profile name as the company name unless the hit explicitly refers to that exact company. Extract location and sector only from that hit\'s title, snippet, URL, or website — never copy ICP territories or industries, and never borrow another hit\'s location. If a hit does not name a place, set location to an empty string. Contact fields only when explicitly present in that hit; never invent; reject generic info@/contact@. No markdown.',
+            ],
+            [
+                'role' => 'user',
+                'content' => json_encode([
+                    'user_query' => $brief->query,
+                    'icp' => [
+                        'industries' => $brief->industries,
+                        'territories' => $brief->territories,
+                    ],
+                    'hits' => $hits,
+                ], JSON_UNESCAPED_UNICODE),
+            ],
+        ];
+    }
+
+    /**
+     * @param  array<int, RawDiscoveryHit>  $chunk
+     * @return list<array{role: string, content: string}>
+     */
+    private function personBatchMessages(array $chunk, IcpBrief $brief): array
+    {
+        $hits = [];
+        foreach ($chunk as $index => $hit) {
+            $hits[] = [
+                'index' => $index,
+                'name' => $hit->name,
+                'snippet' => $hit->snippet,
+                'url' => $hit->url,
+            ];
+        }
+
+        return [
+            [
+                'role' => 'system',
+                'content' => 'Extract person lead data for EVERY hit in hits[]. Return JSON: {"results":[{"index":<the hit index>,"person_name":"","title":"","company":"","linkedin_url":"","location":"","summary":"","email":"","phone":""}]}. One result per hit, echoing its index. Never use the ICP profile name as person_name. If a hit is an article/listicle with no identifiable person, set its person_name to an empty string. Location only from that hit; never borrow another hit\'s location. Email and phone only when explicitly present in that hit; never invent; reject generic info@/contact@. No markdown.',
+            ],
+            [
+                'role' => 'user',
+                'content' => json_encode([
+                    'user_query' => $brief->query,
+                    'hits' => $hits,
+                ], JSON_UNESCAPED_UNICODE),
+            ],
+        ];
+    }
+
+    /**
+     * Map a batch response back onto input indexes, trusting an echoed index when
+     * present and falling back to response order.
+     *
+     * @param  array<string, mixed>|null  $response
+     * @param  list<int>  $keys
+     * @return array<int, array<string, mixed>>
+     */
+    private function indexBatchRows(?array $response, array $keys): array
+    {
+        if ($response === null) {
+            return [];
+        }
+
+        $rows = $response['results'] ?? $response['hits'] ?? $response['people'] ?? [];
+        if (! is_array($rows)) {
+            return [];
+        }
+
+        $mapped = [];
+        $position = 0;
+
+        foreach ($rows as $row) {
+            if (! is_array($row)) {
+                $position++;
+
+                continue;
+            }
+
+            $index = null;
+            if (isset($row['index']) && is_numeric($row['index']) && in_array((int) $row['index'], $keys, true)) {
+                $index = (int) $row['index'];
+            } elseif (isset($keys[$position])) {
+                $index = $keys[$position];
+            }
+
+            if ($index !== null && ! isset($mapped[$index])) {
+                unset($row['index']);
+                $mapped[$index] = $row;
+            }
+
+            $position++;
+        }
+
+        return $mapped;
+    }
 
     /**
      * @return list<array{name?: string, sector?: string, location?: string, summary?: string, business_fields?: array, commercial_signals?: array, person_name?: string, title?: string, company?: string, linkedin_url?: string, low_confidence?: bool, from_listicle?: bool}>
@@ -80,41 +314,52 @@ class ExtractionService
                 ],
             ], 'extract', $organization);
 
-            if (($result['name'] ?? '') === $brief->name) {
-                $result['name'] = $hit->name;
-            }
-
-            $companyName = trim((string) ($result['name'] ?? ''));
-            if ($companyName === '' || $this->queryIntent->looksLikeContentOrGenericPhrase($companyName)) {
-                return [
-                    'name' => '',
-                    'sector' => $result['sector'] ?? $hit->sector,
-                    'location' => $this->honestLocation($hit, $result['location'] ?? null),
-                    'summary' => $result['summary'] ?? ($hit->snippet ?? ''),
-                    'business_fields' => $result['business_fields'] ?? ['website' => $hit->website],
-                    'commercial_signals' => $result['commercial_signals'] ?? [],
-                    'low_confidence' => true,
-                ];
-            }
-
-            $contactEmail = trim((string) ($result['contact_email'] ?? $result['email'] ?? ''));
-            $contactPhone = trim((string) ($result['contact_phone'] ?? $result['phone'] ?? ''));
-            if ($contactEmail !== '' && filter_var($contactEmail, FILTER_VALIDATE_EMAIL)) {
-                $result['email'] = $contactEmail;
-            }
-            if ($contactPhone !== '') {
-                $digits = preg_replace('/\D+/', '', $contactPhone) ?? '';
-                if (strlen($digits) >= 7 && strlen($digits) <= 15) {
-                    $result['phone'] = $contactPhone;
-                }
-            }
-
-            $result['location'] = $this->honestLocation($hit, $result['location'] ?? null);
-
-            return $result;
+            return $this->normalizeCompanyRow($result, $hit, $brief);
         } catch (\Throwable) {
             return $this->fallbackCompany($hit);
         }
+    }
+
+    /**
+     * Shared post-processing for a model-extracted company row, single or batched.
+     *
+     * @param  array<string, mixed>  $result
+     * @return array<string, mixed>
+     */
+    private function normalizeCompanyRow(array $result, RawDiscoveryHit $hit, IcpBrief $brief): array
+    {
+        if (($result['name'] ?? '') === $brief->name) {
+            $result['name'] = $hit->name;
+        }
+
+        $companyName = trim((string) ($result['name'] ?? ''));
+        if ($companyName === '' || $this->queryIntent->looksLikeContentOrGenericPhrase($companyName)) {
+            return [
+                'name' => '',
+                'sector' => $result['sector'] ?? $hit->sector,
+                'location' => $this->honestLocation($hit, $result['location'] ?? null),
+                'summary' => $result['summary'] ?? ($hit->snippet ?? ''),
+                'business_fields' => $result['business_fields'] ?? ['website' => $hit->website],
+                'commercial_signals' => $result['commercial_signals'] ?? [],
+                'low_confidence' => true,
+            ];
+        }
+
+        $contactEmail = trim((string) ($result['contact_email'] ?? $result['email'] ?? ''));
+        $contactPhone = trim((string) ($result['contact_phone'] ?? $result['phone'] ?? ''));
+        if ($contactEmail !== '' && filter_var($contactEmail, FILTER_VALIDATE_EMAIL)) {
+            $result['email'] = $contactEmail;
+        }
+        if ($contactPhone !== '') {
+            $digits = preg_replace('/\D+/', '', $contactPhone) ?? '';
+            if (strlen($digits) >= 7 && strlen($digits) <= 15) {
+                $result['phone'] = $contactPhone;
+            }
+        }
+
+        $result['location'] = $this->honestLocation($hit, $result['location'] ?? null);
+
+        return $result;
     }
 
     /**
@@ -274,53 +519,65 @@ class ExtractionService
                 ],
             ], 'extract', $organization, ['timeout' => 12, 'max_tokens' => 400]);
 
-            $personName = trim((string) ($result['person_name'] ?? ''));
-            if ($personName === '' || mb_strtolower($personName) === mb_strtolower($brief->name)) {
-                return $heuristic;
-            }
+            return $this->normalizePersonRow($result, $hit, $brief, $heuristic);
+        } catch (\Throwable) {
+            return $heuristic;
+        }
+    }
 
-            $summary = (string) ($result['summary'] ?? $hit->snippet ?? $hit->name);
-            $title = trim((string) ($result['title'] ?? ''));
-            $company = trim((string) ($result['company'] ?? ''));
-            $email = trim((string) ($result['email'] ?? ''));
-            $phone = trim((string) ($result['phone'] ?? ''));
-            if ($email !== '' && ! filter_var($email, FILTER_VALIDATE_EMAIL)) {
-                $email = '';
-            }
-            if ($phone !== '') {
-                $digits = preg_replace('/\D+/', '', $phone) ?? '';
-                if (strlen($digits) < 7 || strlen($digits) > 15) {
-                    $phone = '';
-                }
-            }
+    /**
+     * Shared post-processing for a model-extracted person row, single or batched.
+     *
+     * @param  array<string, mixed>  $result
+     * @param  array<string, mixed>  $heuristic
+     * @return array<string, mixed>
+     */
+    private function normalizePersonRow(array $result, RawDiscoveryHit $hit, IcpBrief $brief, array $heuristic): array
+    {
+        $personName = trim((string) ($result['person_name'] ?? ''));
+        if ($personName === '' || mb_strtolower($personName) === mb_strtolower($brief->name)) {
+            return $heuristic;
+        }
 
-            if ($title !== '' && $company !== '') {
-                $summary = "{$title} at {$company}. {$summary}";
+        $summary = (string) ($result['summary'] ?? $hit->snippet ?? $hit->name);
+        $title = trim((string) ($result['title'] ?? ''));
+        $company = trim((string) ($result['company'] ?? ''));
+        $email = trim((string) ($result['email'] ?? ''));
+        $phone = trim((string) ($result['phone'] ?? ''));
+        if ($email !== '' && ! filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            $email = '';
+        }
+        if ($phone !== '') {
+            $digits = preg_replace('/\D+/', '', $phone) ?? '';
+            if (strlen($digits) < 7 || strlen($digits) > 15) {
+                $phone = '';
             }
+        }
 
-            return array_filter([
-                'person_name' => $personName,
-                'name' => $personName,
+        if ($title !== '' && $company !== '') {
+            $summary = "{$title} at {$company}. {$summary}";
+        }
+
+        return array_filter([
+            'person_name' => $personName,
+            'name' => $personName,
+            'title' => $title,
+            'company' => $company,
+            'email' => $email !== '' ? $email : null,
+            'phone' => $phone !== '' ? $phone : null,
+            'linkedin_url' => $this->resolvePersonUrl($result['linkedin_url'] ?? null, $hit->url),
+            'location' => $this->honestLocation($hit, $result['location'] ?? null),
+            'summary' => $summary,
+            'business_fields' => array_filter([
+                'linkedin_url' => $this->resolvePersonUrl($result['linkedin_url'] ?? null, $hit->url),
                 'title' => $title,
                 'company' => $company,
                 'email' => $email !== '' ? $email : null,
                 'phone' => $phone !== '' ? $phone : null,
-                'linkedin_url' => $this->resolvePersonUrl($result['linkedin_url'] ?? null, $hit->url),
-                'location' => $this->honestLocation($hit, $result['location'] ?? null),
-                'summary' => $summary,
-                'business_fields' => array_filter([
-                    'linkedin_url' => $this->resolvePersonUrl($result['linkedin_url'] ?? null, $hit->url),
-                    'title' => $title,
-                    'company' => $company,
-                    'email' => $email !== '' ? $email : null,
-                    'phone' => $phone !== '' ? $phone : null,
-                ]),
-                'commercial_signals' => [],
-                'low_confidence' => false,
-            ], fn($v) => $v !== null && $v !== '');
-        } catch (\Throwable) {
-            return $heuristic;
-        }
+            ]),
+            'commercial_signals' => [],
+            'low_confidence' => false,
+        ], fn($v) => $v !== null && $v !== '');
     }
 
     /**

@@ -178,4 +178,67 @@ class IcpLeadTruthTest extends TestCase
         $names = array_column($response->json('data.leads') ?? [], 'name');
         $this->assertNotEmpty($names, 'A Hunter row with a confirmed Lagos address must survive the geo gate');
     }
+
+    public function test_multi_country_icp_issues_serper_queries_for_each_country(): void
+    {
+        config([
+            'services.serper.api_key' => 'test-serper',
+            'services.hunter.api_key' => '',
+            'services.glm.api_key' => '',
+        ]);
+
+        [, $org] = $this->actingAsOrgMember();
+
+        IcpProfile::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'Four markets',
+            'is_active' => true,
+            'config' => array_merge(IcpProfile::defaultConfig(), [
+                'industries' => ['Fintech & Payments'],
+                'territories' => ['Lagos, Nigeria', 'London, England', 'Berlin, Germany', 'Paris, France'],
+                'customPrompt' => 'fintech payment companies',
+                'minMatchScore' => 1,
+                'enrichContactDetails' => false,
+            ]),
+        ]);
+
+        Http::fake([
+            'google.serper.dev/*' => Http::response([
+                'organic' => [
+                    [
+                        'title' => 'NovaPay | Company',
+                        'link' => 'https://www.linkedin.com/company/novapay',
+                        'snippet' => 'Fintech payment company.',
+                    ],
+                ],
+            ], 200),
+        ]);
+
+        $response = $this->withHeaders($this->orgHeaders($org))
+            ->postJson('/api/v1/discovery/runs', [
+                'query' => 'generate leads (companies only)',
+                'intent' => 'generate_leads',
+                'limit' => 8,
+            ]);
+
+        $response->assertCreated()->assertJsonPath('data.status', 'completed');
+
+        $gls = [];
+        Http::assertSent(function ($request) use (&$gls) {
+            if (! str_contains($request->url(), 'google.serper.dev')) {
+                return false;
+            }
+            $gl = $request['gl'] ?? null;
+            if (is_string($gl) && $gl !== '') {
+                $gls[$gl] = true;
+            }
+
+            return true;
+        });
+
+        $this->assertArrayHasKey('ng', $gls);
+        $this->assertArrayHasKey('uk', $gls);
+        $this->assertArrayHasKey('de', $gls);
+        $this->assertArrayHasKey('fr', $gls);
+    }
 }

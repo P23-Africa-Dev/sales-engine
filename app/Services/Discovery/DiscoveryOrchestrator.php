@@ -135,6 +135,7 @@ class DiscoveryOrchestrator
         array $excludeLeadNames = [],
         bool $deferContactEnrichment = true,
         ?string $searchQueryOverride = null,
+        array $seedHitSnapshots = [],
     ): array {
         $briefSeed = IcpBrief::fromIcpProfile($icp, $query);
         if ($searchQueryOverride !== null && trim($searchQueryOverride) !== '') {
@@ -195,7 +196,9 @@ class DiscoveryOrchestrator
             ];
             $this->providerHealth->reset();
             $this->enrichment->setDeferContactWaterfall($deferContactEnrichment);
-            if (in_array($intent, ['generate_more_leads'], true)) {
+            if ($seedHitSnapshots !== []) {
+                $this->seedHits = $this->hydrateHitSnapshots($seedHitSnapshots, $excludeLeadNames);
+            } elseif (in_array($intent, ['generate_more_leads'], true)) {
                 $this->seedHits = $this->loadUnusedHitsFromSession($chatSessionId, $run->id, $excludeLeadNames);
             }
 
@@ -213,6 +216,7 @@ class DiscoveryOrchestrator
             $candidatesFound = 0;
             $allQueriesExecuted = [];
             $allSourcesHitCount = [];
+            $allQueriesByCountry = [];
             $fanOutUsed = false;
             $sourcesChecked = 0;
             $backfillPasses = 0;
@@ -383,6 +387,9 @@ class DiscoveryOrchestrator
                     foreach ($fanOutMeta['sources_hit_count'] ?? [] as $key => $count) {
                         $allSourcesHitCount[$key] = ($allSourcesHitCount[$key] ?? 0) + (int) $count;
                     }
+                    foreach ($fanOutMeta['queries_by_country'] ?? [] as $country => $count) {
+                        $allQueriesByCountry[$country] = ($allQueriesByCountry[$country] ?? 0) + (int) $count;
+                    }
                     $fanOutUsed = $fanOutUsed || (bool) ($fanOutMeta['fan_out_strategy_used'] ?? false);
 
                     $this->updateProgress($run, 2, $sourcesChecked, $candidatesFound);
@@ -432,6 +439,7 @@ class DiscoveryOrchestrator
                     }
                     $companies = $companies->merge($passCompanies);
                     $candidatesFound += $passFound;
+                    $this->absorbUnusedHitsAsSeed($seenLeadNames);
                     $this->publishPartialProgress($run, $leadsPayload, $effectiveLimit);
 
                     $passYield = count($leadsPayload) - $passStartCount;
@@ -489,6 +497,9 @@ class DiscoveryOrchestrator
                     )));
                     foreach ($fanOutMeta['sources_hit_count'] ?? [] as $key => $count) {
                         $allSourcesHitCount[$key] = ($allSourcesHitCount[$key] ?? 0) + (int) $count;
+                    }
+                    foreach ($fanOutMeta['queries_by_country'] ?? [] as $country => $count) {
+                        $allQueriesByCountry[$country] = ($allQueriesByCountry[$country] ?? 0) + (int) $count;
                     }
                     $fanOutUsed = true;
 
@@ -551,6 +562,9 @@ class DiscoveryOrchestrator
                     foreach ($fanOutMeta['sources_hit_count'] ?? [] as $key => $count) {
                         $allSourcesHitCount[$key] = ($allSourcesHitCount[$key] ?? 0) + (int) $count;
                     }
+                    foreach ($fanOutMeta['queries_by_country'] ?? [] as $country => $count) {
+                        $allQueriesByCountry[$country] = ($allQueriesByCountry[$country] ?? 0) + (int) $count;
+                    }
                     $fanOutUsed = true;
 
                     [$passLeads, $passCompanies, $passFound] = $this->processStandardQuery(
@@ -602,6 +616,10 @@ class DiscoveryOrchestrator
                     is_array($run->result_summary) ? $run->result_summary : [],
                     [
                         'lead_count' => count($leadsPayload),
+                        'requested_lead_count' => $effectiveLimit,
+                        'leads_by_country' => $this->leadsByCountry($leadsPayload),
+                        'queries_by_country' => $allQueriesByCountry,
+                        'searching_countries' => $this->selectedCountryLabels,
                         'sources_enabled' => collect($this->sources)->filter->isEnabled()->map->key()->values()->all(),
                         'queries_executed' => $allQueriesExecuted,
                         'sources_hit_count' => $allSourcesHitCount,
@@ -730,50 +748,15 @@ class DiscoveryOrchestrator
             return $this->collectHitsForTerritory($brief, $ctx, $effectiveLimit, $overrideQueries);
         }
 
-        $hits = collect();
-        $sourcesChecked = 0;
-        $queriesExecuted = [];
-        $sourcesHitCount = [];
-        $fanOutUsed = false;
-
-        foreach ($regions as $region) {
-            if ($this->pastDeadline()) {
-                break;
-            }
-
-            $scopedTerritories = $this->territoriesForRegion($brief, $region);
-            $scopedBrief = $brief->withTerritories($scopedTerritories);
-
-            [$batch, $checked, $meta] = $this->collectHitsForTerritory(
-                $scopedBrief,
-                $ctx,
-                $effectiveLimit,
-                $overrideQueries,
-            );
-            $hits = $hits->merge($batch);
-            $sourcesChecked = max($sourcesChecked, $checked);
-            $queriesExecuted = array_values(array_unique(array_merge(
-                $queriesExecuted,
-                $meta['queries_executed'] ?? [],
-            )));
-            foreach ($meta['sources_hit_count'] ?? [] as $key => $count) {
-                $sourcesHitCount[$key] = ($sourcesHitCount[$key] ?? 0) + (int) $count;
-            }
-            $fanOutUsed = $fanOutUsed || (bool) ($meta['fan_out_strategy_used'] ?? false);
-        }
-
-        $hits = $this->preferLinkedInHits($this->dedupeHits($hits), $brief);
-
-        return [
-            $hits,
-            max(1, $sourcesChecked),
-            [
-                'queries_executed' => $queriesExecuted,
-                'sources_hit_count' => $sourcesHitCount,
-                'fan_out_strategy_used' => $fanOutUsed || count($regions) > 1,
-                'candidates_extracted' => $hits->count(),
-            ],
-        ];
+        // One wave for every selected country. Running a full pass per country meant the
+        // first country consumed the clock and the rest were never searched at all.
+        return $this->collectHitsForTerritory(
+            $brief,
+            $ctx,
+            $effectiveLimit,
+            $overrideQueries,
+            $regions,
+        );
     }
 
     /**
@@ -792,15 +775,19 @@ class DiscoveryOrchestrator
 
         return $kept !== [] ? $kept : [$region['label']];
     }
+    /**
+     * @param  list<array{label: string, gl: string, hunterCountry: string, aliases: list<string>, cities: array<string, string>}>|null  $regions
+     *                                                                                                                                  When set, every region is searched in the same wave with its own geography.
+     */
     private function collectHitsForTerritory(
         IcpBrief $brief,
         SearchContext $ctx,
         int $effectiveLimit,
         ?array $overrideQueries = null,
+        ?array $regions = null,
     ): array {
         $hits = collect();
         $sourcesHitCount = [];
-        $queriesExecuted = [];
         $fanOut = $overrideQueries !== null || $this->shouldUseFanOut($effectiveLimit);
         $enabledSources = array_values(array_filter(
             $this->sources,
@@ -808,16 +795,57 @@ class DiscoveryOrchestrator
         ));
         $sourcesChecked = count($enabledSources);
 
-        if ($overrideQueries !== null) {
-            $variations = $overrideQueries;
-        } elseif ($fanOut) {
-            $variations = $this->queryVariationGenerator->generate($brief, $effectiveLimit);
+        // One brief per market: geography stays scoped so query text and gl/location agree.
+        $briefsByRegion = [];
+        if ($regions !== null && $regions !== []) {
+            foreach ($regions as $region) {
+                $briefsByRegion[(string) $region['label']] = [
+                    'region' => $region,
+                    'brief' => $brief->withTerritories($this->territoriesForRegion($brief, $region)),
+                ];
+            }
         } else {
-            $q = $this->discoveryGeo->appendTerritoryClause($brief, $brief->searchQuery());
-            $variations = [$q];
+            $briefsByRegion[''] = ['region' => null, 'brief' => $brief];
         }
 
-        $queriesExecuted = array_values(array_filter(array_map('strval', $variations)));
+        $searchPlan = [];
+        $queriesExecuted = [];
+
+        foreach ($briefsByRegion as $label => $scoped) {
+            $scopedBrief = $scoped['brief'];
+            $geo = $scoped['region'] === null
+                ? []
+                : $this->regionSerperParams($scopedBrief, $scoped['region']);
+
+            if ($overrideQueries !== null) {
+                $variations = $overrideQueries;
+            } elseif ($fanOut) {
+                $variations = $this->queryVariationGenerator->generate($scopedBrief, $effectiveLimit);
+            } else {
+                $variations = [$this->discoveryGeo->appendTerritoryClause($scopedBrief, $scopedBrief->searchQuery())];
+            }
+
+            foreach (array_filter(array_map('strval', $variations)) as $query) {
+                $searchPlan[] = [
+                    'q' => $query,
+                    'gl' => $geo['gl'] ?? null,
+                    'location' => $geo['location'] ?? null,
+                    'region' => $label !== '' ? $label : null,
+                ];
+                $queriesExecuted[] = $query;
+            }
+        }
+
+        $queriesByCountry = [];
+        foreach ($searchPlan as $entry) {
+            $country = trim((string) ($entry['region'] ?? ''));
+            if ($country === '') {
+                $country = $this->discoveryGeo->primaryLabel($brief) ?: 'default';
+            }
+            $queriesByCountry[$country] = ($queriesByCountry[$country] ?? 0) + 1;
+        }
+
+        $queriesExecuted = array_values(array_unique($queriesExecuted));
 
         $serper = null;
         $otherSources = [];
@@ -829,53 +857,61 @@ class DiscoveryOrchestrator
             }
         }
 
-        if ($serper !== null && $queriesExecuted !== []) {
-            $batch = $serper->searchMany($queriesExecuted, $brief, $ctx);
+        if ($serper !== null && $searchPlan !== []) {
+            $batch = $serper->searchMany($searchPlan, $brief, $ctx);
             $sourcesHitCount['serper'] = ($sourcesHitCount['serper'] ?? 0) + $batch->count();
             $hits = $hits->merge($batch);
         }
 
-        // Freemium quota guard: Fylings/Hunter/Mono run once on the primary query,
-        // not once per Serper fan-out variation (would burn monthly caps quickly).
-        $primaryQuery = $brief->searchQuery();
-        if ($primaryQuery === '' && $queriesExecuted !== []) {
-            $primaryQuery = (string) $queriesExecuted[0];
-        }
-        $primaryBrief = $primaryQuery !== ''
-            ? $brief->withSearchQueryOverride($primaryQuery)
-            : $brief;
-
-        foreach ($otherSources as $source) {
-            if ($this->pastDeadline()) {
-                break;
+        // Freemium quota guard: Fylings/Hunter/Mono run once per market on the primary
+        // query, not once per Serper fan-out variation (would burn monthly caps quickly).
+        foreach ($briefsByRegion as $label => $scoped) {
+            $scopedBrief = $scoped['brief'];
+            $primaryQuery = $scopedBrief->searchQuery();
+            if ($primaryQuery === '' && $queriesExecuted !== []) {
+                $primaryQuery = (string) $queriesExecuted[0];
             }
+            $primaryBrief = $primaryQuery !== ''
+                ? $scopedBrief->withSearchQueryOverride($primaryQuery)
+                : $scopedBrief;
 
-            // Hunter/company registries only on company (or both company-pass) searches.
-            if ($source->key() === 'hunter' && $brief->isPeopleSearch()) {
-                continue;
-            }
-
-            $cacheKey = $source->key() . '|' . mb_strtolower(trim($primaryBrief->searchQuery())) . '|' . $effectiveLimit . '|' . mb_strtolower($this->discoveryGeo->primaryLabel($brief));
-            if (isset($this->registryHitCache[$cacheKey])) {
-                $batch = $this->registryHitCache[$cacheKey];
-            } else {
-                $passCtx = new SearchContext(
-                    $ctx->organizationId,
-                    $ctx->userId,
-                    max(1, $effectiveLimit),
-                    $ctx->intent,
-                );
-                $batch = $source->search($primaryBrief, $passCtx);
-                $registryCap = $this->gatherCap($effectiveLimit);
-                if ($batch->count() > $registryCap) {
-                    $batch = $batch->take($registryCap)->values();
+            foreach ($otherSources as $source) {
+                if ($this->pastDeadline()) {
+                    break 2;
                 }
-                $this->registryHitCache[$cacheKey] = $batch;
-            }
 
-            $key = $source->key();
-            $sourcesHitCount[$key] = ($sourcesHitCount[$key] ?? 0) + $batch->count();
-            $hits = $hits->merge($batch);
+                if (! $this->registryAppliesToPass($source, $brief)) {
+                    continue;
+                }
+
+                $cacheKey = $source->key() . '|' . mb_strtolower(trim($primaryBrief->searchQuery())) . '|' . $effectiveLimit . '|' . mb_strtolower($this->discoveryGeo->primaryLabel($scopedBrief));
+                if (isset($this->registryHitCache[$cacheKey])) {
+                    $batch = $this->registryHitCache[$cacheKey];
+                } else {
+                    $passCtx = new SearchContext(
+                        $ctx->organizationId,
+                        $ctx->userId,
+                        max(1, $effectiveLimit),
+                        $ctx->intent,
+                    );
+                    $batch = $source->search($primaryBrief, $passCtx);
+                    $registryCap = $this->gatherCap($effectiveLimit);
+                    if ($batch->count() > $registryCap) {
+                        $batch = $batch->take($registryCap)->values();
+                    }
+                    $this->registryHitCache[$cacheKey] = $batch;
+                }
+
+                if ($label !== '') {
+                    $batch = $batch
+                        ->map(fn(RawDiscoveryHit $hit): RawDiscoveryHit => $hit->withRegion($label))
+                        ->values();
+                }
+
+                $key = $source->key();
+                $sourcesHitCount[$key] = ($sourcesHitCount[$key] ?? 0) + $batch->count();
+                $hits = $hits->merge($batch);
+            }
         }
 
         $hits = $this->preferLinkedInHits($this->dedupeHits($hits), $brief);
@@ -886,11 +922,39 @@ class DiscoveryOrchestrator
             max(1, $sourcesChecked),
             [
                 'queries_executed' => $queriesExecuted,
+                'queries_by_country' => $queriesByCountry,
                 'sources_hit_count' => $sourcesHitCount,
-                'fan_out_strategy_used' => $fanOut,
+                'fan_out_strategy_used' => $fanOut || count($briefsByRegion) > 1,
                 'candidates_extracted' => $hits->count(),
             ],
         ];
+    }
+
+    /**
+     * Company registries hold no personal profiles, so they stay out of a people-only
+     * search. In both-mode they must still run: starving them left run 159 with zero
+     * company hits because the people half spent the whole clock.
+     */
+    private function registryAppliesToPass(DiscoverySourceInterface $source, IcpBrief $brief): bool
+    {
+        if ($source->key() !== 'hunter') {
+            return true;
+        }
+
+        return ! $brief->isPeopleSearch() || $brief->isBothSearch();
+    }
+
+    /**
+     * @param  array{label: string, gl: string, hunterCountry: string, aliases: list<string>, cities: array<string, string>}  $region
+     * @return array<string, string>
+     */
+    private function regionSerperParams(IcpBrief $brief, array $region): array
+    {
+        if (! $this->discoveryGeo->shouldApplyRetrievalGeo($brief)) {
+            return [];
+        }
+
+        return $this->discoveryGeo->serperParams($brief, $region);
     }
 
     /**
@@ -1035,16 +1099,20 @@ class DiscoveryOrchestrator
     ): array {
         $candidates = [];
         $seenNames = $seenLeadNames;
-        $gatherCap = $this->gatherCap($effectiveLimit);
 
         $orderedHits = $hits
             ->unique(fn(RawDiscoveryHit $h) => mb_strtolower($h->name . '|' . (string) $h->url))
             ->sortByDesc(fn(RawDiscoveryHit $h): int => $this->gatherPriority($h, $brief))
             ->values();
+        $gatherCap = $this->gatherCap($effectiveLimit, $orderedHits->count());
+
+        // Cheap gates first, then one batched extraction for everything that survives.
+        // Extracting hit by hit was what capped a run at roughly 19 candidates.
+        $eligibleHits = [];
 
         /** @var RawDiscoveryHit $hit */
         foreach ($orderedHits as $hit) {
-            if (count($candidates) >= $gatherCap) {
+            if (count($eligibleHits) >= $gatherCap) {
                 break;
             }
             if ($this->pastDeadline() || $this->remainingSeconds() < 20) {
@@ -1092,9 +1160,17 @@ class DiscoveryOrchestrator
                 continue;
             }
 
-            $extractions = $this->extraction->extractMany($hit, $brief, $organization);
+            $eligibleHits[] = $hit;
+        }
 
-            foreach ($extractions as $extracted) {
+        $extractionsByHit = $this->extraction->extractManyBatch($eligibleHits, $brief, $organization);
+
+        foreach ($eligibleHits as $hitIndex => $hit) {
+            if (count($candidates) >= $gatherCap) {
+                break;
+            }
+
+            foreach ($extractionsByHit[$hitIndex] ?? [] as $extracted) {
                 $displayName = trim((string) ($extracted['person_name'] ?? $extracted['name'] ?? $hit->name));
                 $nameKey = mb_strtolower($displayName);
 
@@ -1162,6 +1238,9 @@ class DiscoveryOrchestrator
         $scoredCandidates = [];
         $maxAdvisory = (int) floor($effectiveLimit * 0.25);
 
+        $scorePayloads = [];
+        $prepared = [];
+
         foreach ($candidates as $candidate) {
             if ($this->pastDeadline()) {
                 break;
@@ -1179,26 +1258,40 @@ class DiscoveryOrchestrator
             }
             $fromListicle = (bool) ($extracted['from_listicle'] ?? false);
 
-            $scorePayload = array_merge($extracted, [
+            $prepared[] = compact('hit', 'extracted', 'displayName', 'fromListicle');
+            $scorePayloads[] = array_merge($extracted, [
                 'name' => $displayName,
                 'source' => $hit->source,
                 'provider' => $hit->provider,
                 'authoritative_source' => $this->isAuthoritativeUrl($hit->url),
             ]);
+        }
 
-            // First-batch / near-deadline: heuristic scoring only (skip 60s GLM).
-            $scores = ($this->deferContactEnrichment || $this->pastSoftDeadline() || $this->remainingSeconds() < 45)
-                ? $this->scoring->heuristicScore($scorePayload, $brief)
-                : $this->scoring->score($scorePayload, $brief, $organization);
+        // First-batch / near-deadline: heuristic scoring only (skip the model round-trip).
+        $heuristicOnly = $this->deferContactEnrichment
+            || $this->pastSoftDeadline()
+            || $this->remainingSeconds() < 45;
 
-            $scores = $this->applyScorePenalties($scores, $displayName, $brief, $extracted, $fromListicle);
+        $batchScores = $this->scoring->scoreBatch($scorePayloads, $brief, $organization, $heuristicOnly);
 
-            $scoredCandidates[] = compact('hit', 'extracted', 'displayName', 'fromListicle', 'scores');
+        foreach ($prepared as $index => $candidate) {
+            $scores = $batchScores[$index] ?? $this->scoring->heuristicScore($scorePayloads[$index], $brief);
+            $candidate['scores'] = $this->applyScorePenalties(
+                $scores,
+                $candidate['displayName'],
+                $brief,
+                $candidate['extracted'],
+                $candidate['fromListicle'],
+            );
+
+            $scoredCandidates[] = $candidate;
         }
 
         usort($scoredCandidates, function (array $a, array $b): int {
             return ($b['scores']['priority_score'] ?? 0) <=> ($a['scores']['priority_score'] ?? 0);
         });
+
+        $scoredCandidates = $this->interleaveByRegion($scoredCandidates, $brief);
 
         foreach ($scoredCandidates as $candidate) {
             $recommendedCount = count($leadsPayload);
@@ -1439,7 +1532,10 @@ class DiscoveryOrchestrator
             }
 
             $isAdvisoryLead = ! $icpRecommended || (bool) ($extracted['low_confidence'] ?? false);
-            if ($isAdvisoryLead && ! $isSecondary && $advisoryCount >= $maxAdvisory) {
+            // The 25% ratio only binds once recommended leads could fill the batch on their
+            // own. While the batch is short, a labelled advisory lead beats an empty slot.
+            $advisoryAllowance = max($maxAdvisory, $effectiveLimit - count($leadsPayload));
+            if ($isAdvisoryLead && ! $isSecondary && $advisoryCount >= $advisoryAllowance) {
                 continue;
             }
 
@@ -1467,18 +1563,108 @@ class DiscoveryOrchestrator
             $this->updateProgress($run, 3, $sourcesChecked, $candidatesFound);
         }
 
-        // Recommended first, then advisory (capped at 25% of requested limit), then secondary.
+        // Recommended first, then advisory. Advisory is held to 25% while recommended could
+        // fill the batch, and allowed to fill the remaining slots when it could not.
         $recommendedTake = array_slice($leadsPayload, 0, $effectiveLimit);
-        $advisoryRoom = min(
-            $maxAdvisory,
-            max(0, $effectiveLimit - count($recommendedTake)),
-        );
+        $advisoryRoom = count($recommendedTake) >= $effectiveLimit
+            ? 0
+            : max($maxAdvisory, $effectiveLimit - count($recommendedTake));
+        $advisoryRoom = min($advisoryRoom, max(0, $effectiveLimit - count($recommendedTake)));
         $advisoryTake = array_slice($advisoryPayload, 0, $advisoryRoom);
         $filled = count($recommendedTake) + count($advisoryTake);
         $secondaryTake = array_slice($secondaryPayload, 0, max(0, $effectiveLimit - $filled));
         $combined = array_merge($recommendedTake, $advisoryTake, $secondaryTake);
 
         return [$combined, $companies, $candidatesFound];
+    }
+
+    /**
+     * Let every selected market take turns, strongest market first in each cycle.
+     * Ranking by score alone let one country spend the whole batch: run 159 returned
+     * four Nigerian leads for an ICP that also selected England, Germany and France.
+     *
+     * @param  list<array<string, mixed>>  $scoredCandidates
+     * @return list<array<string, mixed>>
+     */
+    private function interleaveByRegion(array $scoredCandidates, IcpBrief $brief): array
+    {
+        if (count($this->discoveryGeo->selectedRegions($brief)) <= 1 || $scoredCandidates === []) {
+            return $scoredCandidates;
+        }
+
+        $buckets = [];
+        foreach ($scoredCandidates as $candidate) {
+            $buckets[$this->candidateRegionLabel($candidate)][] = $candidate;
+        }
+
+        if (count($buckets) <= 1) {
+            return $scoredCandidates;
+        }
+
+        // Markets with the strongest lead go first in each cycle; unplaced leads go last.
+        uksort($buckets, function (string $a, string $b) use ($buckets): int {
+            if ($a === '' || $b === '') {
+                return $a === '' ? 1 : -1;
+            }
+
+            return ($buckets[$b][0]['scores']['priority_score'] ?? 0)
+                <=> ($buckets[$a][0]['scores']['priority_score'] ?? 0);
+        });
+
+        $ordered = [];
+        while ($buckets !== []) {
+            foreach (array_keys($buckets) as $label) {
+                $ordered[] = array_shift($buckets[$label]);
+                if ($buckets[$label] === []) {
+                    unset($buckets[$label]);
+                }
+            }
+        }
+
+        return $ordered;
+    }
+
+    /**
+     * Confirmed location decides the market; otherwise the market it was searched under.
+     *
+     * @param  array<string, mixed>  $candidate
+     */
+    private function candidateRegionLabel(array $candidate): string
+    {
+        $extracted = is_array($candidate['extracted'] ?? null) ? $candidate['extracted'] : [];
+        $location = trim((string) ($extracted['location'] ?? $extracted['territory'] ?? $extracted['city'] ?? ''));
+        if ($location !== '') {
+            $region = $this->discoveryGeo->regionFromValue($location);
+            if ($region !== null) {
+                return (string) $region['label'];
+            }
+        }
+
+        $hit = $candidate['hit'] ?? null;
+
+        return $hit instanceof RawDiscoveryHit ? trim((string) ($hit->region ?? '')) : '';
+    }
+
+    /**
+     * Delivered leads per market, so a run can show the spread instead of implying one.
+     *
+     * @param  list<array<string, mixed>>  $leadsPayload
+     * @return array<string, int>
+     */
+    private function leadsByCountry(array $leadsPayload): array
+    {
+        $counts = [];
+
+        foreach ($leadsPayload as $lead) {
+            $location = trim((string) ($lead['location'] ?? ''));
+            $region = $location !== '' ? $this->discoveryGeo->regionFromValue($location) : null;
+            $label = $region !== null ? (string) $region['label'] : ($location !== '' ? $location : 'Unconfirmed');
+            $counts[$label] = ($counts[$label] ?? 0) + 1;
+        }
+
+        arsort($counts);
+
+        return $counts;
     }
 
     /**
@@ -2215,7 +2401,6 @@ class DiscoveryOrchestrator
     private function applyAdvisoryCap(array $leadsPayload, int $effectiveLimit): array
     {
         $effectiveLimit = max(1, $effectiveLimit);
-        $maxAdvisory = (int) floor($effectiveLimit * 0.25);
 
         $recommended = [];
         $advisory = [];
@@ -2230,10 +2415,10 @@ class DiscoveryOrchestrator
         }
 
         $recommendedTake = array_slice($recommended, 0, $effectiveLimit);
-        $advisoryRoom = min(
-            $maxAdvisory,
-            max(0, $effectiveLimit - count($recommendedTake)),
-        );
+
+        // Retrieval is finished by the time this runs. Holding advisory rows to 25% here
+        // would hand back a short batch while usable, clearly labelled leads sit unused.
+        $advisoryRoom = max(0, $effectiveLimit - count($recommendedTake));
 
         return array_merge($recommendedTake, array_slice($advisory, 0, $advisoryRoom));
     }
@@ -2337,7 +2522,7 @@ class DiscoveryOrchestrator
         $summary['searching_countries'] = $countries;
         $run->update(['result_summary' => $summary]);
 
-        if ($count >= min(self::FIRST_PAGE_SIZE, $effectiveLimit) || $this->firstPagePublished) {
+        if ($count >= min(3, $effectiveLimit) || $this->firstPagePublished) {
             $this->firstPagePublished = true;
             $this->syncPartialLeadsToChat($run, $partial, $progressMessage, $stillSearching);
         }
@@ -2432,15 +2617,18 @@ class DiscoveryOrchestrator
         };
     }
 
-    private function gatherCap(int $effectiveLimit): int
+    private function gatherCap(int $effectiveLimit, int $hitPool = 0): int
     {
         $effectiveLimit = max(1, $effectiveLimit);
-        // Process more entity hits before the wall clock so creatability has room to convert.
-        if ($effectiveLimit <= 40) {
-            return min(60, max($effectiveLimit * 4, $effectiveLimit));
+        $base = $effectiveLimit <= 40
+            ? min(80, max($effectiveLimit * 4, $effectiveLimit))
+            : max($effectiveLimit, (int) ceil($effectiveLimit * 1.5));
+
+        if ($hitPool > $base) {
+            return min(80, max($base, $effectiveLimit * 3));
         }
 
-        return max($effectiveLimit, (int) ceil($effectiveLimit * 1.5));
+        return $base;
     }
 
     private function gatherPriority(RawDiscoveryHit $hit, IcpBrief $brief): int
@@ -2545,7 +2733,67 @@ class DiscoveryOrchestrator
             'snippet' => mb_substr((string) ($hit->snippet ?? ''), 0, 280),
             'url' => $hit->url,
             'externalId' => $hit->externalId,
+            'region' => $hit->region,
         ];
+    }
+
+    /**
+     * Leftover hits from this run become seed for the next backfill, so we stop
+     * re-searching URLs we already have while the batch is still short.
+     *
+     * @param  array<string, true>  $seenLeadNames
+     */
+    private function absorbUnusedHitsAsSeed(array $seenLeadNames): void
+    {
+        $existing = $this->seedHits ?? collect();
+        $extra = $this->hydrateHitSnapshots($this->unusedHitsForReuse([]), array_keys($seenLeadNames));
+        if ($extra->isEmpty()) {
+            return;
+        }
+
+        $this->seedHits = $this->dedupeHits($existing->merge($extra));
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $snapshots
+     * @param  list<string>  $excludeLeadNames
+     * @return Collection<int, RawDiscoveryHit>
+     */
+    private function hydrateHitSnapshots(array $snapshots, array $excludeLeadNames = []): Collection
+    {
+        $blocked = [];
+        foreach ($excludeLeadNames as $name) {
+            $key = mb_strtolower(trim((string) $name));
+            if ($key !== '') {
+                $blocked[$key] = true;
+            }
+        }
+
+        $hits = collect();
+        foreach ($snapshots as $snap) {
+            if (! is_array($snap)) {
+                continue;
+            }
+            $name = trim((string) ($snap['name'] ?? ''));
+            if ($name === '' || isset($blocked[mb_strtolower($name)])) {
+                continue;
+            }
+
+            $hits->push(new RawDiscoveryHit(
+                name: $name,
+                source: (string) ($snap['source'] ?? 'web'),
+                provider: (string) ($snap['provider'] ?? 'serper'),
+                website: isset($snap['website']) ? (string) $snap['website'] : null,
+                location: isset($snap['location']) ? (string) $snap['location'] : null,
+                sector: isset($snap['sector']) ? (string) $snap['sector'] : null,
+                snippet: isset($snap['snippet']) ? (string) $snap['snippet'] : null,
+                url: isset($snap['url']) ? (string) $snap['url'] : null,
+                externalId: isset($snap['externalId']) ? (string) $snap['externalId'] : null,
+                region: isset($snap['region']) ? (string) $snap['region'] : null,
+            ));
+        }
+
+        return $this->dedupeHits($hits);
     }
 
     /**

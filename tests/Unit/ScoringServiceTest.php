@@ -197,4 +197,41 @@ class ScoringServiceTest extends TestCase
         $this->assertStringContainsString('Matches your search for', $reason);
         $this->assertStringContainsString('earthmoving', mb_strtolower($reason));
     }
+
+    public function test_score_batch_uses_heuristics_when_glm_is_off(): void
+    {
+        config(['services.glm.api_key' => '']);
+
+        $org = Organization::query()->create([
+            'name' => 'Batch Org',
+            'slug' => 'batch-org-' . uniqid(),
+        ]);
+
+        $brief = IcpBrief::fromIcpProfile(new IcpProfile([
+            'name' => 'Lagos FinTech',
+            'config' => array_merge(IcpProfile::defaultConfig(), [
+                'industries' => ['Financial Services'],
+                'territories' => ['Lagos, NG'],
+                'customPrompt' => 'fintech payment companies',
+                'minMatchScore' => 60,
+            ]),
+        ]), 'generate leads');
+
+        $scores = app(ScoringService::class)->scoreBatch([
+            [
+                'name' => 'NovaPay',
+                'industry' => 'Financial Services',
+                'location' => 'Lagos, NG',
+                'summary' => 'Fintech payment rails.',
+            ],
+            [
+                'name' => 'Global Bank Holdings',
+                'industry' => 'Financial Services',
+            ],
+        ], $brief, $org);
+
+        $this->assertCount(2, $scores);
+        $this->assertGreaterThan($scores[1]['priority_score'], $scores[0]['priority_score']);
+        $this->assertStringNotContainsString('in Lagos', $scores[1]['icp_relevance_reason']);
+    }
 }

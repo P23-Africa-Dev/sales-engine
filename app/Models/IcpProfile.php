@@ -50,6 +50,7 @@ class IcpProfile extends Model
             'autoSyncCrm' => false,
             'enrichContactDetails' => true,
             'customPrompt' => '',
+            'searchKeywords' => [],
             'signalTypePacks' => ['default'],
         ];
     }

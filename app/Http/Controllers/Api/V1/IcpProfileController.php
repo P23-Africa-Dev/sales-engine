@@ -140,6 +140,9 @@ class IcpProfileController extends Controller
             'territories.*' => ['string', 'max:255'],
             'decisionMakers' => ['nullable', 'array'],
             'decisionMakers.*' => ['string', 'max:255'],
+            'companySizes' => ['nullable', 'array'],
+            'companySizes.*' => ['string', 'max:64'],
+            'minMatchScore' => ['nullable', 'integer', 'min:1', 'max:100'],
         ]);
 
         $suggestion = $this->searchBriefs->suggest(OrgContext::require(), $data);

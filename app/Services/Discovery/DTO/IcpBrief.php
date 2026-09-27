@@ -31,6 +31,8 @@ readonly class IcpBrief
         public array $revenueRanges = [],
         /** @var list<string> which signal-type packs (SignalTypeRegistry) this ICP opts into */
         public array $signalTypePacks = [],
+        /** @var list<string> extra Serper clauses persisted from Strengthen ICP */
+        public array $searchKeywords = [],
     ) {}
 
     public static function fromIcpProfile(\App\Models\IcpProfile $profile, string $query = ''): self
@@ -60,6 +62,10 @@ readonly class IcpBrief
                 array_map('strval', $config['signalTypePacks'] ?? []),
                 static fn(string $pack) => $pack !== '',
             )),
+            searchKeywords: array_values(array_filter(array_map(
+                static fn($keyword) => is_string($keyword) ? trim($keyword) : '',
+                $config['searchKeywords'] ?? [],
+            ))),
         );
     }
 
@@ -84,6 +90,7 @@ readonly class IcpBrief
             searchQueryOverride: $this->searchQueryOverride,
             revenueRanges: $this->revenueRanges,
             signalTypePacks: $this->signalTypePacks,
+            searchKeywords: $this->searchKeywords,
         );
     }
 
@@ -110,6 +117,7 @@ readonly class IcpBrief
             searchQueryOverride: $this->searchQueryOverride,
             revenueRanges: $this->revenueRanges,
             signalTypePacks: $this->signalTypePacks,
+            searchKeywords: $this->searchKeywords,
         );
     }
 
@@ -134,6 +142,7 @@ readonly class IcpBrief
             searchQueryOverride: $searchQuery,
             revenueRanges: $this->revenueRanges,
             signalTypePacks: $this->signalTypePacks,
+            searchKeywords: $this->searchKeywords,
         );
     }
 
@@ -278,12 +287,11 @@ readonly class IcpBrief
         }
 
         $words = preg_split('/\s+/u', $brief) ?: [];
-        if (count($words) <= $maxWords) {
-            return [$brief];
-        }
-
-        $parts = preg_split('/\s*(?:,|;|\n|\bor\b)\s*/iu', $brief) ?: [];
         $clauses = [];
+        if (count($words) <= $maxWords) {
+            $clauses[] = $brief;
+        } else {
+        $parts = preg_split('/\s*(?:,|;|\n|\bor\b)\s*/iu', $brief) ?: [];
         foreach ($parts as $part) {
             $part = trim(preg_replace('/\s+/u', ' ', (string) $part) ?? '');
             if ($part === '') {
@@ -302,7 +310,25 @@ readonly class IcpBrief
         }
 
         if ($clauses === []) {
-            return [implode(' ', array_slice($words, 0, $maxWords))];
+            $clauses[] = implode(' ', array_slice($words, 0, $maxWords));
+        }
+        }
+
+        foreach ($this->searchKeywords as $keyword) {
+            $keyword = trim((string) $keyword);
+            if ($keyword === '') {
+                continue;
+            }
+            $keywordWords = preg_split('/\s+/u', $keyword) ?: [];
+            if (count($keywordWords) > $maxWords) {
+                $keyword = implode(' ', array_slice($keywordWords, 0, $maxWords));
+            }
+            if ($keyword !== '' && ! in_array($keyword, $clauses, true)) {
+                $clauses[] = $keyword;
+            }
+            if (count($clauses) >= $maxClauses) {
+                break;
+            }
         }
 
         return $clauses;

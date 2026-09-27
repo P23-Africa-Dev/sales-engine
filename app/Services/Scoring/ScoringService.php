@@ -8,6 +8,9 @@ use App\Services\Llm\GlmClient;
 
 class ScoringService
 {
+    /** Candidates per model call when scoring a page. */
+    private const SCORE_BATCH_SIZE = 8;
+
     public function __construct(private readonly GlmClient $glm) {}
 
     /**
@@ -86,71 +89,19 @@ class ScoringService
 
         try {
             $result = $this->glm->chatJson([
-                [
-                    'role' => 'system',
-                    'content' => 'Score lead relevance. Return JSON: icp_fit_score (0-100), intent_score (0-100), query_relevance_score (0-100), priority_score (0-100), rationale (string), icp_relevance_reason (string — one short sentence citing specific ICP industries/territories/decision makers). Score query relevance to the user\'s words first. ICP fit is advisory — results that answer the query but fall outside ICP industries/territories should still have high query_relevance_score. If ICP territories are set and the lead\'s location is a different country, icp_fit_score must be low unless the user query named that other country. Boost query_relevance_score when authoritative_source is true. When is_factual_query is true and icp_fit_score is below minMatchScore, phrase icp_relevance_reason like: "Answers your search for X; doesn\'t match your {industries} focus in {territories}." When firmographic fields are missing, do not claim the lead fits ICP industries.',
-                ],
+                ['role' => 'system', 'content' => $this->scoreSystemPrompt()],
                 [
                     'role' => 'user',
                     'content' => json_encode([
                         'user_query' => $brief->query,
                         'is_factual_query' => $isFactualQuery,
-                        'icp' => [
-                            'name' => $brief->name,
-                            'description' => $brief->description,
-                            'industries' => $brief->industries,
-                            'territories' => $brief->territories,
-                            'companySizes' => $brief->companySizes,
-                            'decisionMakers' => $brief->decisionMakers,
-                            'customPrompt' => $brief->customPrompt,
-                            'minMatchScore' => $brief->minMatchScore,
-                        ],
+                        'icp' => $this->icpPromptContext($brief),
                         'company' => $companyPayload,
                     ], JSON_UNESCAPED_UNICODE),
                 ],
             ], 'score', $organization);
 
-            $queryRelevance = (float) ($result['query_relevance_score'] ?? 50);
-            $icpFit = (float) ($result['icp_fit_score'] ?? 50);
-            $priority = (float) ($result['priority_score'] ?? 45);
-
-            if ($hasUserQuery) {
-                $priority = min(95, ($queryRelevance * 0.65) + ($icpFit * 0.35));
-            }
-
-            if (! empty($companyPayload['authoritative_source'])) {
-                $queryRelevance = min(95, $queryRelevance + 15);
-                if ($hasUserQuery) {
-                    $priority = min(95, ($queryRelevance * 0.65) + ($icpFit * 0.35));
-                }
-            }
-
-            $fit = $this->assessFirmographicFit($companyPayload, $brief);
-            if (
-                ! $hasUserQuery
-                && ! $this->isPersonPayload($companyPayload)
-                && ! $this->hasIcpEvidence($fit)
-                && $this->briefNounOverlap($brief, $companyPayload) === []
-            ) {
-                // Same truth floor as the heuristic path: the model may not promote a lead
-                // whose only evidence is an industry label.
-                $icpFit = min($icpFit, max(0, $brief->minMatchScore - 1));
-                $priority = min($priority, $icpFit);
-            }
-
-            $reason = trim((string) ($result['icp_relevance_reason'] ?? ''));
-            if ($reason === '' || $this->reasonClaimsUnverifiedTerritory($reason, $brief, $fit)) {
-                $reason = $this->buildIcpRelevanceReason($brief, $icpFit, $isFactualQuery, $companyPayload);
-            }
-
-            return [
-                'icp_fit_score' => $icpFit,
-                'intent_score' => (float) ($result['intent_score'] ?? 40),
-                'priority_score' => $priority,
-                'query_relevance_score' => $queryRelevance,
-                'rationale' => (string) ($result['rationale'] ?? ''),
-                'icp_relevance_reason' => $reason,
-            ];
+            return $this->applyGlmScoreRow($result, $companyPayload, $brief);
         } catch (\Throwable) {
             $queryScore = $hasUserQuery
                 ? $this->heuristicQueryRelevance($companyPayload, $brief->query)
@@ -171,6 +122,228 @@ class ScoringService
                 ),
             ];
         }
+    }
+
+    /**
+     * Score a page of candidates with as few model calls as possible: heuristics settle
+     * the clear cases, and only the band that straddles minMatchScore is sent to the
+     * model, batched and pooled. One call per candidate was the run's time ceiling.
+     *
+     * @param  array<int, array<string, mixed>>  $payloads
+     * @return array<int, array{icp_fit_score: float, intent_score: float, priority_score: float, query_relevance_score: float, rationale: string, icp_relevance_reason: string}>
+     */
+    public function scoreBatch(
+        array $payloads,
+        IcpBrief $brief,
+        Organization $organization,
+        bool $heuristicOnly = false,
+    ): array {
+        $scores = [];
+        foreach ($payloads as $index => $payload) {
+            $scores[$index] = $this->heuristicScore($payload, $brief);
+        }
+
+        if ($payloads === [] || $heuristicOnly || ! $this->glm->isConfigured()) {
+            return $scores;
+        }
+
+        $borderline = [];
+        foreach ($payloads as $index => $payload) {
+            if ($this->needsModelScore($scores[$index], $brief)) {
+                $borderline[$index] = $payload;
+            }
+        }
+
+        if ($borderline === []) {
+            return $scores;
+        }
+
+        $isFactualQuery = $brief->isAuthoritativePeopleQuery();
+        $chunks = array_chunk($borderline, self::SCORE_BATCH_SIZE, true);
+        $requests = [];
+
+        foreach ($chunks as $chunkIndex => $chunk) {
+            $leads = [];
+            foreach ($chunk as $index => $payload) {
+                $leads[] = ['index' => $index] + $payload;
+            }
+
+            $requests[$chunkIndex] = [
+                'messages' => [
+                    ['role' => 'system', 'content' => $this->scoreSystemPrompt(true)],
+                    [
+                        'role' => 'user',
+                        'content' => json_encode([
+                            'user_query' => $brief->query,
+                            'is_factual_query' => $isFactualQuery,
+                            'icp' => $this->icpPromptContext($brief),
+                            'leads' => $leads,
+                        ], JSON_UNESCAPED_UNICODE),
+                    ],
+                ],
+                'options' => ['timeout' => 45, 'max_tokens' => 2600],
+            ];
+        }
+
+        $responses = $this->glm->chatJsonPool($requests, 'score', $organization);
+
+        foreach ($chunks as $chunkIndex => $chunk) {
+            $rows = $this->indexScoreRows($responses[$chunkIndex] ?? null, array_keys($chunk));
+
+            foreach ($chunk as $index => $payload) {
+                $row = $rows[$index] ?? null;
+                if ($row === null) {
+                    // Keep the heuristic score rather than inventing one.
+                    continue;
+                }
+
+                $scores[$index] = $this->applyGlmScoreRow($row, $payload, $brief);
+            }
+        }
+
+        return $scores;
+    }
+
+    /**
+     * Only the band around minMatchScore changes an outcome. Clear passes and clear
+     * failures keep their heuristic score and cost nothing.
+     *
+     * @param  array<string, mixed>  $heuristic
+     */
+    private function needsModelScore(array $heuristic, IcpBrief $brief): bool
+    {
+        $fit = (float) ($heuristic['icp_fit_score'] ?? 0);
+        if ($fit <= 0) {
+            // Hard-floored by the truth gates; the model cannot promote it.
+            return false;
+        }
+
+        $min = (float) max(1, $brief->minMatchScore);
+
+        return $fit >= $min - 15 && $fit <= $min + 10;
+    }
+
+    /**
+     * @param  array<string, mixed>  $result
+     * @param  array<string, mixed>  $companyPayload
+     * @return array{icp_fit_score: float, intent_score: float, priority_score: float, query_relevance_score: float, rationale: string, icp_relevance_reason: string}
+     */
+    private function applyGlmScoreRow(array $result, array $companyPayload, IcpBrief $brief): array
+    {
+        $hasUserQuery = $brief->hasUserQuery();
+        $isFactualQuery = $brief->isAuthoritativePeopleQuery();
+
+        $queryRelevance = (float) ($result['query_relevance_score'] ?? 50);
+        $icpFit = (float) ($result['icp_fit_score'] ?? 50);
+        $priority = (float) ($result['priority_score'] ?? 45);
+
+        if ($hasUserQuery) {
+            $priority = min(95, ($queryRelevance * 0.65) + ($icpFit * 0.35));
+        }
+
+        if (! empty($companyPayload['authoritative_source'])) {
+            $queryRelevance = min(95, $queryRelevance + 15);
+            if ($hasUserQuery) {
+                $priority = min(95, ($queryRelevance * 0.65) + ($icpFit * 0.35));
+            }
+        }
+
+        $fit = $this->assessFirmographicFit($companyPayload, $brief);
+        if (
+            ! $hasUserQuery
+            && ! $this->isPersonPayload($companyPayload)
+            && ! $this->hasIcpEvidence($fit)
+            && $this->briefNounOverlap($brief, $companyPayload) === []
+        ) {
+            // Same truth floor as the heuristic path: the model may not promote a lead
+            // whose only evidence is an industry label.
+            $icpFit = min($icpFit, max(0, $brief->minMatchScore - 1));
+            $priority = min($priority, $icpFit);
+        }
+
+        $reason = trim((string) ($result['icp_relevance_reason'] ?? ''));
+        if ($reason === '' || $this->reasonClaimsUnverifiedTerritory($reason, $brief, $fit)) {
+            $reason = $this->buildIcpRelevanceReason($brief, $icpFit, $isFactualQuery, $companyPayload);
+        }
+
+        return [
+            'icp_fit_score' => $icpFit,
+            'intent_score' => (float) ($result['intent_score'] ?? 40),
+            'priority_score' => $priority,
+            'query_relevance_score' => $queryRelevance,
+            'rationale' => (string) ($result['rationale'] ?? ''),
+            'icp_relevance_reason' => $reason,
+        ];
+    }
+
+    private function scoreSystemPrompt(bool $batch = false): string
+    {
+        $shape = $batch
+            ? 'Score EVERY lead in leads[]. Return JSON: {"results":[{"index":<the lead index>,"icp_fit_score":0-100,"intent_score":0-100,"query_relevance_score":0-100,"priority_score":0-100,"rationale":"","icp_relevance_reason":""}]}. One result per lead, echoing its index. Judge each lead only on its own fields — never carry a location or industry from one lead to another.'
+            : 'Score lead relevance. Return JSON: icp_fit_score (0-100), intent_score (0-100), query_relevance_score (0-100), priority_score (0-100), rationale (string), icp_relevance_reason (string).';
+
+        return $shape.' icp_relevance_reason is one short sentence citing specific ICP industries/territories/decision makers. Score query relevance to the user\'s words first. ICP fit is advisory — results that answer the query but fall outside ICP industries/territories should still have high query_relevance_score. If ICP territories are set and the lead\'s location is a different country, icp_fit_score must be low unless the user query named that other country. Boost query_relevance_score when authoritative_source is true. When is_factual_query is true and icp_fit_score is below minMatchScore, phrase icp_relevance_reason like: "Answers your search for X; doesn\'t match your {industries} focus in {territories}." When firmographic fields are missing, do not claim the lead fits ICP industries.';
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function icpPromptContext(IcpBrief $brief): array
+    {
+        return [
+            'name' => $brief->name,
+            'description' => $brief->description,
+            'industries' => $brief->industries,
+            'territories' => $brief->territories,
+            'companySizes' => $brief->companySizes,
+            'decisionMakers' => $brief->decisionMakers,
+            'customPrompt' => $brief->customPrompt,
+            'minMatchScore' => $brief->minMatchScore,
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>|null  $response
+     * @param  list<int>  $keys
+     * @return array<int, array<string, mixed>>
+     */
+    private function indexScoreRows(?array $response, array $keys): array
+    {
+        if ($response === null) {
+            return [];
+        }
+
+        $rows = $response['results'] ?? $response['leads'] ?? $response['scores'] ?? [];
+        if (! is_array($rows)) {
+            return [];
+        }
+
+        $mapped = [];
+        $position = 0;
+
+        foreach ($rows as $row) {
+            if (! is_array($row)) {
+                $position++;
+
+                continue;
+            }
+
+            $index = null;
+            if (isset($row['index']) && is_numeric($row['index']) && in_array((int) $row['index'], $keys, true)) {
+                $index = (int) $row['index'];
+            } elseif (isset($keys[$position])) {
+                $index = $keys[$position];
+            }
+
+            if ($index !== null && ! isset($mapped[$index])) {
+                unset($row['index']);
+                $mapped[$index] = $row;
+            }
+
+            $position++;
+        }
+
+        return $mapped;
     }
 
     /**

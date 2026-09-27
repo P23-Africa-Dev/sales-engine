@@ -212,4 +212,21 @@ class IcpBriefSearchQueryTest extends TestCase
             'Expected at least one additional brief clause in fan-out variations'
         );
     }
+
+    public function test_search_keywords_become_extra_search_clauses(): void
+    {
+        $profile = new IcpProfile([
+            'name' => 'Fintech ICP',
+            'config' => array_merge(IcpProfile::defaultConfig(), [
+                'customPrompt' => 'mobile app and web development for fintech',
+                'searchKeywords' => ['payment rails', 'merchant acquiring'],
+            ]),
+        ]);
+
+        $brief = IcpBrief::fromIcpProfile($profile, 'generate leads');
+        $queries = $brief->searchQueries();
+
+        $this->assertContains('payment rails', $queries);
+        $this->assertContains('merchant acquiring', $queries);
+    }
 }

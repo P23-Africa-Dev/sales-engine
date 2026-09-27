@@ -28,5 +28,8 @@ class IcpSearchBriefSuggestTest extends TestCase
         $this->assertStringNotContainsStringIgnoringCase('nigeria', $brief);
         $this->assertStringNotContainsStringIgnoringCase('lagos', $brief);
         $this->assertNotEmpty($response->json('data.keywords'));
+        $this->assertContains('Logistics & Fleet', $response->json('data.industries'));
+        $this->assertNotEmpty($response->json('data.decisionMakers'));
+        $this->assertSame(60, $response->json('data.minMatchScore'));
     }
 }

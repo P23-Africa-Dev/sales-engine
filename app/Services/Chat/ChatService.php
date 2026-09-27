@@ -17,6 +17,7 @@ use App\Services\Llm\GlmClient;
 use App\Services\Outreach\OutreachDraftService;
 use App\Services\Research\ResearchOrchestrator;
 use App\Support\TimeGreeting;
+use App\Jobs\ContinueDiscoveryJob;
 use App\Jobs\ProcessChatIntentJob;
 use App\Jobs\ProcessQuickResearchJob;
 use InvalidArgumentException;
@@ -317,7 +318,7 @@ class ChatService
             if ($searchQueryOverride !== null) {
                 $brief = $brief->withSearchQueryOverride($searchQueryOverride);
             }
-                $result = $this->discovery->run(
+            $result = $this->discovery->run(
                 $organization,
                 $icp,
                 $user,
@@ -353,12 +354,18 @@ class ChatService
                 $historySlice,
                 $icpSearchBrief,
             );
-            $gateNotice = $this->retrievalGateNotice($result['run'], $leads);
-            if ($gateNotice !== '') {
-                $assistantBody = $assistantBody."\n\n".$gateNotice;
+            foreach (
+                [
+                    $this->countrySpreadNotice($result['run'], $leads),
+                    $this->retrievalGateNotice($result['run'], $leads),
+                ] as $notice
+            ) {
+                if ($notice !== '') {
+                    $assistantBody = $assistantBody . "\n\n" . $notice;
+                }
             }
             if ($degradedMeta !== []) {
-                $assistantBody = $degradedMeta['retrieval_degraded']['notice']."\n\n".$assistantBody;
+                $assistantBody = $degradedMeta['retrieval_degraded']['notice'] . "\n\n" . $assistantBody;
             }
         } elseif ($intent === 'create_outreach' && $icp) {
             $draft = $this->outreach->draftFromPrompt(
@@ -562,12 +569,18 @@ class ChatService
                     $historySlice,
                     $icpSearchBrief,
                 );
-                $gateNotice = $this->retrievalGateNotice($result['run'], $leads);
-                if ($gateNotice !== '') {
-                    $assistantBody = $assistantBody."\n\n".$gateNotice;
+                foreach (
+                    [
+                        $this->countrySpreadNotice($result['run'], $leads),
+                        $this->retrievalGateNotice($result['run'], $leads),
+                    ] as $notice
+                ) {
+                    if ($notice !== '') {
+                        $assistantBody = $assistantBody . "\n\n" . $notice;
+                    }
                 }
                 if ($degradedMeta !== []) {
-                    $assistantBody = $degradedMeta['retrieval_degraded']['notice']."\n\n".$assistantBody;
+                    $assistantBody = $degradedMeta['retrieval_degraded']['notice'] . "\n\n" . $assistantBody;
                 }
             } else {
                 $run->update(['status' => 'failed', 'error' => 'Unsupported async intent.', 'finished_at' => now()]);
@@ -584,32 +597,44 @@ class ChatService
             // and wrote a timeout body) so we do not leave duplicate assistant replies.
             $placeholder = $this->assistantMessageForRun($session->id, $userMessage->id, $run->id);
 
-            if ($placeholder) {
+            $placeholder = $placeholder ?? ChatMessage::query()->create([
+                'chat_session_id' => $session->id,
+                'role' => 'assistant',
+                'body' => $assistantBody,
+                'intent' => $intent,
+                'leads' => $leads ?: null,
+                'meta' => array_merge($meta, ['pending' => true]),
+            ]);
+
+            $continued = in_array($intent, ['generate_leads', 'generate_more_leads'], true)
+                && $this->queueDiscoveryContinuation(
+                    $run,
+                    $userMessage,
+                    $placeholder,
+                    $leads,
+                    $assistantBody,
+                    $meta,
+                    $intent,
+                    $clientTimezone,
+                );
+
+            if (! $continued) {
                 $placeholder->update([
                     'body' => $assistantBody,
                     'intent' => $intent,
                     'leads' => $leads ?: null,
-                    'meta' => array_merge($meta, ['pending' => false]),
+                    'meta' => array_merge($meta, ['pending' => false, 'partial' => false]),
                 ]);
-            } else {
-                ChatMessage::query()->create([
-                    'chat_session_id' => $session->id,
-                    'role' => 'assistant',
-                    'body' => $assistantBody,
-                    'intent' => $intent,
-                    'leads' => $leads ?: null,
-                    'meta' => array_merge($meta, ['pending' => false]),
-                ]);
-            }
 
-            if ($run->fresh()?->status !== 'completed') {
-                $run->update([
-                    'status' => 'completed',
-                    'error' => null,
-                    'finished_at' => $run->finished_at ?? now(),
-                ]);
-            } else {
-                $run->update(['error' => null]);
+                if ($run->fresh()?->status !== 'completed') {
+                    $run->update([
+                        'status' => 'completed',
+                        'error' => null,
+                        'finished_at' => $run->finished_at ?? now(),
+                    ]);
+                } else {
+                    $run->update(['error' => null]);
+                }
             }
 
             $session->touch();
@@ -652,6 +677,269 @@ class ChatService
         }
 
         return $messages->first(fn(ChatMessage $message) => (bool) ($message->meta['pending'] ?? false));
+    }
+
+    /**
+     * Keep the same chat card filling until the requested count is reached.
+     * Stops after three continuations or when a wave adds nothing new.
+     *
+     * @param  list<array<string, mixed>>  $leads
+     * @param  array<string, mixed>  $meta
+     */
+    private function queueDiscoveryContinuation(
+        DiscoveryRun $run,
+        ChatMessage $userMessage,
+        ChatMessage $placeholder,
+        array $leads,
+        string $assistantBody,
+        array $meta,
+        string $intent,
+        ?string $clientTimezone,
+    ): bool {
+        $run->refresh();
+        $summary = is_array($run->result_summary) ? $run->result_summary : [];
+        $requested = max(1, (int) ($summary['requested_lead_count'] ?? 0));
+        $continuations = (int) ($summary['continuation_count'] ?? 0);
+        $unused = is_array($summary['unused_hits'] ?? null) ? $summary['unused_hits'] : [];
+
+        if ($requested < 2 || count($leads) >= $requested || $continuations >= 3) {
+            return false;
+        }
+
+        if ((bool) ($summary['retrieval_degraded'] ?? false)) {
+            return false;
+        }
+
+        // Only resume when the clock cut the run short. A finished run that is
+        // short because gates dropped the hits needs a tighter ICP, not another wave.
+        if (! (bool) ($summary['soft_completed_early'] ?? false)) {
+            return false;
+        }
+
+        $placeholder->update([
+            'body' => $assistantBody,
+            'intent' => $intent,
+            'leads' => $leads ?: null,
+            'meta' => array_merge($meta, [
+                'pending' => true,
+                'partial' => true,
+                'progress_message' => sprintf('%d of %d — still searching.', count($leads), $requested),
+            ]),
+        ]);
+
+        $run->update([
+            'status' => 'running',
+            'error' => null,
+            'finished_at' => null,
+            'result_summary' => array_merge($summary, [
+                'continuation_count' => $continuations,
+                'continuation_queued' => true,
+            ]),
+        ]);
+
+        ContinueDiscoveryJob::dispatch($run->id, $userMessage->id, $clientTimezone);
+
+        return true;
+    }
+
+    public function continueDiscovery(int $runId, int $userMessageId, ?string $clientTimezone = null): void
+    {
+        $run = DiscoveryRun::query()->find($runId);
+        $userMessage = ChatMessage::query()->find($userMessageId);
+        if (! $run || ! $userMessage || $run->status === 'cancelled') {
+            $this->finalizeContinuedDiscovery($runId, $userMessageId);
+
+            return;
+        }
+
+        $session = $run->chat_session_id ? ChatSession::query()->find($run->chat_session_id) : null;
+        $organization = Organization::query()->find($run->organization_id);
+        $user = User::query()->find($run->user_id);
+        $icp = $run->icp_profile_id ? IcpProfile::query()->find($run->icp_profile_id) : null;
+        $placeholder = $session
+            ? $this->assistantMessageForRun($session->id, $userMessage->id, $run->id)
+            : null;
+
+        if (! $session || ! $organization || ! $user || ! $icp || ! $placeholder) {
+            $this->finalizeContinuedDiscovery($runId, $userMessageId);
+
+            return;
+        }
+
+        $summary = is_array($run->result_summary) ? $run->result_summary : [];
+        $requested = max(1, (int) ($summary['requested_lead_count'] ?? 10));
+        $existing = is_array($placeholder->leads) ? $placeholder->leads : [];
+        $continuations = (int) ($summary['continuation_count'] ?? 0) + 1;
+        $remaining = max(0, $requested - count($existing));
+        $unused = is_array($summary['unused_hits'] ?? null) ? $summary['unused_hits'] : [];
+
+        if ($remaining < 1 || $continuations > 3) {
+            $this->finalizeContinuedDiscovery($runId, $userMessageId);
+
+            return;
+        }
+
+        $exclude = [];
+        foreach ($existing as $lead) {
+            $name = trim((string) ($lead['name'] ?? ''));
+            if ($name !== '') {
+                $exclude[] = $name;
+            }
+        }
+
+        $userMeta = is_array($userMessage->meta) ? $userMessage->meta : [];
+        $briefUserQuery = trim((string) ($userMeta['brief_user_query'] ?? $userMessage->body));
+        $searchQueryOverride = (bool) ($userMeta['icp_search_brief'] ?? false)
+            ? IcpBrief::fromIcpProfile($icp)->searchBrief()
+            : null;
+
+        $run->update([
+            'result_summary' => array_merge($summary, [
+                'continuation_count' => $continuations,
+                'continuation_queued' => false,
+            ]),
+        ]);
+
+        $result = $this->discovery->run(
+            $organization,
+            $icp,
+            $user,
+            $briefUserQuery !== '' ? $briefUserQuery : 'generate leads',
+            'generate_more_leads',
+            $session->id,
+            $remaining,
+            $run,
+            $exclude,
+            true,
+            $searchQueryOverride,
+            $unused,
+        );
+
+        $merged = $this->mergeLeadPayloads($existing, $result['leads']);
+        $added = count($merged) - count($existing);
+        $historySlice = $this->memory->recentTurns($session, 6, $userMessage->id);
+        $assistantBody = $this->narrateDiscovery(
+            $organization,
+            $icp,
+            (string) ($userMeta['effective_query'] ?? $userMessage->body),
+            $merged,
+            'generate_leads',
+            $clientTimezone,
+            $historySlice,
+            (bool) ($userMeta['icp_search_brief'] ?? false),
+        );
+        $spread = $this->countrySpreadNotice($result['run'], $merged);
+        if ($spread !== '') {
+            $assistantBody .= "\n\n" . $spread;
+        }
+
+        $meta = is_array($placeholder->meta) ? $placeholder->meta : [];
+        $meta['discovery_run_id'] = $run->id;
+        $meta = array_merge($meta, $this->icpTightenMeta($result['run'], $merged, $requested));
+
+        $stillShort = count($merged) < $requested && $added > 0 && $continuations < 3;
+        $placeholder->update([
+            'body' => $stillShort
+                ? sprintf('%d of %d — still searching.', count($merged), $requested)
+                : $assistantBody,
+            'leads' => $merged ?: null,
+            'meta' => array_merge($meta, [
+                'pending' => $stillShort,
+                'partial' => $stillShort,
+                'progress_message' => $stillShort
+                    ? sprintf('%d of %d — still searching.', count($merged), $requested)
+                    : null,
+            ]),
+        ]);
+
+        $freshSummary = is_array($result['run']->result_summary) ? $result['run']->result_summary : [];
+        $result['run']->update([
+            'result_summary' => array_merge($freshSummary, [
+                'lead_count' => count($merged),
+                'requested_lead_count' => $requested,
+                'continuation_count' => $continuations,
+                'leads_by_country' => $this->leadsByCountryFromPayload($merged),
+            ]),
+        ]);
+
+        if ($stillShort) {
+            $result['run']->update(['status' => 'running', 'finished_at' => null]);
+            ContinueDiscoveryJob::dispatch($run->id, $userMessage->id, $clientTimezone);
+
+            return;
+        }
+
+        $result['run']->update([
+            'status' => 'completed',
+            'error' => null,
+            'finished_at' => now(),
+        ]);
+        $session->touch();
+    }
+
+    public function finalizeContinuedDiscovery(int $runId, int $userMessageId): void
+    {
+        $run = DiscoveryRun::query()->find($runId);
+        $userMessage = ChatMessage::query()->find($userMessageId);
+        if (! $run || ! $userMessage || ! $run->chat_session_id) {
+            return;
+        }
+
+        $placeholder = $this->assistantMessageForRun($run->chat_session_id, $userMessage->id, $run->id);
+        if ($placeholder) {
+            $meta = is_array($placeholder->meta) ? $placeholder->meta : [];
+            $placeholder->update([
+                'meta' => array_merge($meta, ['pending' => false, 'partial' => false]),
+            ]);
+        }
+
+        if ($run->status !== 'cancelled') {
+            $run->update([
+                'status' => 'completed',
+                'finished_at' => $run->finished_at ?? now(),
+            ]);
+        }
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $existing
+     * @param  list<array<string, mixed>>  $incoming
+     * @return list<array<string, mixed>>
+     */
+    private function mergeLeadPayloads(array $existing, array $incoming): array
+    {
+        $seen = [];
+        $out = [];
+        foreach (array_merge($existing, $incoming) as $lead) {
+            if (! is_array($lead)) {
+                continue;
+            }
+            $key = mb_strtolower(trim((string) ($lead['name'] ?? '')));
+            if ($key === '' || isset($seen[$key])) {
+                continue;
+            }
+            $seen[$key] = true;
+            $out[] = $lead;
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $leads
+     * @return array<string, int>
+     */
+    private function leadsByCountryFromPayload(array $leads): array
+    {
+        $counts = [];
+        foreach ($leads as $lead) {
+            $label = trim((string) ($lead['location'] ?? ''));
+            $label = $label !== '' ? $label : 'Unconfirmed';
+            $counts[$label] = ($counts[$label] ?? 0) + 1;
+        }
+        arsort($counts);
+
+        return $counts;
     }
 
     /**
@@ -757,6 +1045,42 @@ class ChatService
     }
 
     /**
+     * Say which markets the batch actually came from, so a four-country ICP is not
+     * silently answered with one country's leads.
+     */
+    private function countrySpreadNotice(\App\Models\DiscoveryRun $run, array $leads): string
+    {
+        if (count($leads) < 2) {
+            return '';
+        }
+
+        $summary = is_array($run->result_summary) ? $run->result_summary : [];
+        $selected = array_values(array_filter((array) ($summary['searching_countries'] ?? [])));
+        if (count($selected) < 2) {
+            return '';
+        }
+
+        $byCountry = (array) ($summary['leads_by_country'] ?? []);
+        if ($byCountry === []) {
+            return '';
+        }
+
+        $parts = [];
+        foreach ($byCountry as $label => $count) {
+            $parts[] = "{$count} {$label}";
+        }
+
+        $notice = 'Spread: ' . implode(', ', $parts) . '.';
+
+        $missing = array_values(array_diff($selected, array_keys($byCountry)));
+        if ($missing !== []) {
+            $notice .= ' Nothing qualified in ' . implode(', ', $missing) . ' this run.';
+        }
+
+        return $notice;
+    }
+
+    /**
      * Explain an empty batch that was caused by gates, not by empty retrieval.
      *
      * @param  list<array<string, mixed>>  $leads
@@ -778,7 +1102,7 @@ class ChatService
         $retrievedText = $retrieved > 0 ? "We retrieved {$retrieved} companies" : 'We retrieved companies';
 
         return "{$retrievedText}, and dropped {$unverified} because their country could not be confirmed. "
-            .'Company databases often omit location, so they were not shown against your territories.';
+            . 'Company databases often omit location, so they were not shown against your territories.';
     }
 
     private function retrievalDegradedNotice(string $reason): string
@@ -896,10 +1220,10 @@ class ChatService
         $config = is_array($icp->config) ? $icp->config : [];
         $territories = array_values(array_filter(
             array_map(
-                static fn ($value): string => is_string($value) ? trim($value) : '',
+                static fn($value): string => is_string($value) ? trim($value) : '',
                 $config['territories'] ?? [],
             ),
-            static fn (string $value): bool => $value !== '',
+            static fn(string $value): bool => $value !== '',
         ));
 
         return implode(', ', array_slice($territories, 0, 3));

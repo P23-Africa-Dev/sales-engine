@@ -18,6 +18,9 @@ use Illuminate\Support\Facades\Log;
 
 class SerperDiscoveryAdapter implements DiscoverySourceInterface
 {
+    /** Concurrent searches per wave. A multi-country plan must not be paced four at a time. */
+    private const POOL_SIZE = 8;
+
     public function __construct(
         private readonly QueryIntentService $queryIntent,
         private readonly PersonNameValidator $personNameValidator,
@@ -50,9 +53,13 @@ class SerperDiscoveryAdapter implements DiscoverySourceInterface
     }
 
     /**
-     * Parallel Serper fan-out (chunks of 4) for faster first-batch discovery.
+     * Parallel Serper fan-out for faster first-batch discovery.
      *
-     * @param  list<string>  $queries
+     * Entries may be plain query strings (inheriting the brief's geography) or
+     * ['q' => string, 'gl' => ?string, 'location' => ?string, 'region' => ?string] so a
+     * single wave can cover every selected country instead of one country per pass.
+     *
+     * @param  list<string|array{q: string, gl?: ?string, location?: ?string, region?: ?string}>  $queries
      * @return Collection<int, RawDiscoveryHit>
      */
     public function searchMany(array $queries, IcpBrief $brief, SearchContext $ctx): Collection
@@ -63,27 +70,27 @@ class SerperDiscoveryAdapter implements DiscoverySourceInterface
 
         $baseUrl = rtrim((string) config('services.serper.base_url'), '/');
         $resultLimit = $this->resolveResultLimit($brief, $ctx);
-        $geoParams = $this->serperGeoParams($brief);
+        $briefGeo = $this->serperGeoParams($brief);
         $hits = collect();
-        $uniqueQueries = array_values(array_unique(array_filter(array_map(
-            fn(string $q): string => $this->sanitizeQuery($q),
-            $queries,
-        ))));
+        $plan = $this->buildQueryPlan($queries, $briefGeo);
 
-        foreach (array_chunk($uniqueQueries, 4) as $chunk) {
-            $responses = Http::pool(function ($pool) use ($chunk, $baseUrl, $resultLimit, $geoParams) {
-                foreach ($chunk as $index => $query) {
+        foreach (array_chunk($plan, self::POOL_SIZE) as $chunk) {
+            $responses = Http::pool(function ($pool) use ($chunk, $baseUrl, $resultLimit) {
+                foreach ($chunk as $index => $entry) {
                     $pool->as((string) $index)
                         ->timeout(30)
                         ->withHeaders([
                             'X-API-KEY' => (string) config('services.serper.api_key'),
                             'Content-Type' => 'application/json',
                         ])
-                        ->post($baseUrl . '/search', $this->searchPayload($query, $resultLimit, $geoParams));
+                        ->post($baseUrl . '/search', $this->searchPayload($entry['q'], $resultLimit, $entry['geo']));
                 }
             });
 
-            foreach ($chunk as $index => $query) {
+            foreach ($chunk as $index => $entry) {
+                $query = $entry['q'];
+                $geoParams = $entry['geo'];
+                $region = $entry['region'];
                 $response = $responses[(string) $index] ?? null;
                 if (! $response instanceof Response) {
                     continue;
@@ -134,7 +141,11 @@ class SerperDiscoveryAdapter implements DiscoverySourceInterface
                 $this->health()->recordSuccess('serper');
 
                 $variantBrief = $brief->withSearchQueryOverride($activeQuery);
-                $hits = $hits->merge($this->mapOrganicHits($response->json('organic') ?? [], $variantBrief, $ctx));
+                $mapped = $this->mapOrganicHits($response->json('organic') ?? [], $variantBrief, $ctx);
+                if ($region !== null) {
+                    $mapped = $mapped->map(fn(RawDiscoveryHit $hit): RawDiscoveryHit => $hit->withRegion($region));
+                }
+                $hits = $hits->merge($mapped);
             }
         }
 
@@ -315,6 +326,51 @@ class SerperDiscoveryAdapter implements DiscoverySourceInterface
         };
 
         return min($configuredMax, $desired);
+    }
+
+    /**
+     * Normalize mixed query input into one pooled plan, deduped on query plus geography
+     * so the same phrase can legitimately run once per country.
+     *
+     * @param  list<string|array<string, mixed>>  $queries
+     * @param  array<string, string>  $briefGeo
+     * @return list<array{q: string, geo: array<string, string>, region: ?string}>
+     */
+    private function buildQueryPlan(array $queries, array $briefGeo): array
+    {
+        $plan = [];
+        $seen = [];
+
+        foreach ($queries as $entry) {
+            if (is_array($entry)) {
+                $query = $this->sanitizeQuery((string) ($entry['q'] ?? ''));
+                $geo = array_filter([
+                    'location' => trim((string) ($entry['location'] ?? '')),
+                    'gl' => trim((string) ($entry['gl'] ?? '')),
+                ], static fn(string $value): bool => $value !== '');
+                $region = isset($entry['region']) && trim((string) $entry['region']) !== ''
+                    ? trim((string) $entry['region'])
+                    : null;
+            } else {
+                $query = $this->sanitizeQuery((string) $entry);
+                $geo = $briefGeo;
+                $region = null;
+            }
+
+            if ($query === '') {
+                continue;
+            }
+
+            $key = mb_strtolower($query).'|'.($geo['gl'] ?? '').'|'.($geo['location'] ?? '');
+            if (isset($seen[$key])) {
+                continue;
+            }
+            $seen[$key] = true;
+
+            $plan[] = ['q' => $query, 'geo' => $geo, 'region' => $region];
+        }
+
+        return $plan;
     }
 
     /**
