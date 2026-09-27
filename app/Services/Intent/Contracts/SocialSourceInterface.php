@@ -10,6 +10,14 @@ interface SocialSourceInterface
 {
     public function key(): string;
 
+    public function isConfigured(): bool;
+
+    /**
+     * When true, a present key turns the source on even if the saved
+     * source list does not name it yet.
+     */
+    public function activatesWhenConfigured(): bool;
+
     public function isEnabled(IcpBrief $brief, array $enabledSources): bool;
 
     /**

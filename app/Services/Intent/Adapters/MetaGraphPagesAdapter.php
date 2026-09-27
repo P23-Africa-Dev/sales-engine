@@ -6,6 +6,7 @@ use App\Models\ApiUsage;
 use App\Services\Discovery\DTO\IcpBrief;
 use App\Services\Intent\Contracts\SocialSourceInterface;
 use App\Services\Intent\DTO\RawSocialHit;
+use App\Services\Intent\SocialSourceHealth;
 use Carbon\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Http;
@@ -23,10 +24,20 @@ class MetaGraphPagesAdapter implements SocialSourceInterface
         return 'meta_graph_pages';
     }
 
+    public function isConfigured(): bool
+    {
+        return trim((string) config('services.meta.access_token')) !== '';
+    }
+
+    public function activatesWhenConfigured(): bool
+    {
+        return false;
+    }
+
     public function isEnabled(IcpBrief $brief, array $enabledSources): bool
     {
         return in_array($this->key(), $enabledSources, true)
-            && trim((string) config('services.meta.access_token')) !== '';
+            && $this->isConfigured();
     }
 
     public function search(
@@ -103,6 +114,7 @@ class MetaGraphPagesAdapter implements SocialSourceInterface
             ]);
 
             if (! $response->successful()) {
+                app(SocialSourceHealth::class)->recordAttempt($this->key(), $response->status(), 0);
                 $error = $response->json('error') ?? [];
                 Log::warning('Meta Graph page posts failed', [
                     'page_id' => $pageId,
@@ -124,8 +136,11 @@ class MetaGraphPagesAdapter implements SocialSourceInterface
                 ->filter(fn(?RawSocialHit $h) => $h !== null && $h->postText !== '')
                 ->values();
 
+            app(SocialSourceHealth::class)->recordAttempt($this->key(), $response->status(), $hits->count());
+
             return $this->pageCache[$pageId] = $hits;
         } catch (\Throwable $e) {
+            app(SocialSourceHealth::class)->recordAttempt($this->key(), 0, 0);
             Log::warning('Meta Graph page posts exception', [
                 'page_id' => $pageId,
                 'error' => $e->getMessage(),

@@ -73,6 +73,7 @@ class SocialSignalEnricher
                     . 'Use hiring_expansion for hiring/recruiting/expansion posts. Use recommendation/switching/pricing when the author is asking for vendors, alternatives, costs, or tools. '
                     . 'Use other only for content with no plausible relevance to the user\'s ICP/interests, or spam. Do not force unrelated content into a sales bucket — pick the type that best matches WHY this matters to the user. '
                     . 'Prefer timely angles: if the post is recent or time-sensitive, say so in why_this_matters_to_you and urgency. '
+                    . 'buying_intent_score answers: would the person behind this active ICP be worse off if this post slid by this week? Score under 40 and use signal_type other when it would not help them. '
                     . 'Every field must be populated (use empty string/array rather than omitting a key).';
 
                 if ($signalType !== null) {
@@ -95,6 +96,8 @@ class SocialSignalEnricher
                             'interest' => [
                                 'description' => $brief->description,
                                 'custom_prompt' => $brief->customPrompt,
+                                'industries' => $brief->industries,
+                                'territories' => $brief->territories,
                             ],
                             'post' => $hit->postText,
                             'title' => $hit->title,

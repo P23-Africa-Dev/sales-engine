@@ -845,9 +845,54 @@ class SocialListeningTest extends TestCase
         $run = $orchestrator->run($org, $icp, $settings, $user);
 
         $this->assertSame('completed', $run->status);
+        $this->assertGreaterThanOrEqual(1, $run->signals_created);
+        $this->assertSame(0, $run->result_summary['rejected']['missingSourceDate']);
+
+        $signal = SocialSignal::query()->where('organization_id', $org->id)->firstOrFail();
+        $this->assertNotNull($signal->posted_at);
+        $this->assertSame('inferred', $signal->meta['date_confidence'] ?? null);
+    }
+
+    public function test_run_discards_a_signal_older_than_the_freshness_window(): void
+    {
+        config([
+            'services.glm.api_key' => '',
+            'services.serper.api_key' => 'test-serper-key',
+        ]);
+
+        [$user, $org] = $this->actingAsOrgMember();
+        $icp = IcpProfile::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'FMCG Lagos ICP',
+            'is_active' => true,
+            'config' => array_merge(IcpProfile::defaultConfig(), [
+                'industries' => [],
+                'territories' => [],
+                'signalTypePacks' => [\App\Models\SignalTypeDefinition::PACK_NONE],
+            ]),
+        ]);
+
+        $settings = SocialListeningSetting::query()->create(array_merge(
+            SocialListeningSetting::defaultsForOrg($org->id, $icp->id),
+            ['enabled_sources' => ['linkedin_public'], 'min_score' => 30, 'freshness_window_days' => 14, 'intent_filters' => []],
+        ));
+
+        Http::fake([
+            'google.serper.dev/*' => Http::response([
+                'organic' => [[
+                    'title' => 'Old FMCG partnership announcement',
+                    'snippet' => 'A distributor partnership was announced long ago.',
+                    'link' => 'https://linkedin.com/posts/stale-1',
+                    'date' => '2 years ago',
+                ]],
+            ], 200),
+        ]);
+
+        $run = app(SocialListeningOrchestrator::class)->run($org, $icp, $settings, $user);
+
+        $this->assertSame('completed', $run->status);
         $this->assertSame(0, $run->signals_created);
-        $this->assertSame(1, $run->result_summary['rejected']['missingSourceDate']);
-        $this->assertSame(1, $run->result_summary['rejected']['total']);
+        $this->assertGreaterThanOrEqual(1, $run->result_summary['rejected']['stale']);
         $this->assertSame(0, SocialSignal::query()->where('organization_id', $org->id)->count());
     }
 
@@ -1046,7 +1091,15 @@ class SocialListeningTest extends TestCase
         $run = app(SocialListeningOrchestrator::class)->run($org, $icp, $settings, $user);
 
         $this->assertSame('completed', $run->status);
-        $this->assertSame(1, $callCount);
+        $this->assertGreaterThanOrEqual(1, $callCount);
+
+        Http::assertSent(function ($request) {
+            if (! str_contains($request->url(), 'serper')) {
+                return true;
+            }
+
+            return ! str_contains((string) ($request->data()['q'] ?? ''), 'New Market Entry');
+        });
 
         $signal = SocialSignal::query()->where('organization_id', $org->id)->first();
         $this->assertNotNull($signal);
@@ -1111,10 +1164,14 @@ class SocialListeningTest extends TestCase
 
         $this->assertNotNull($tagged);
         $this->assertSame('new_market_entry', $tagged->signal_type_key);
-        $this->assertSame(0, SocialSignal::query()
+
+        $generic = SocialSignal::query()
             ->where('organization_id', $org->id)
             ->where('post_url', 'https://linkedin.com/posts/generic-2')
-            ->count());
+            ->first();
+        if ($generic !== null) {
+            $this->assertNull($generic->signal_type_key);
+        }
     }
 
     public function test_leadership_hire_signal_captures_named_people_end_to_end(): void
@@ -1210,5 +1267,255 @@ class SocialListeningTest extends TestCase
         $this->assertNotNull($signal);
         $this->assertSame('leadership_hire_in_territory', $signal->signal_type_key);
         $this->assertSame(['Jane Doe', 'John Smith'], $signal->named_people);
+    }
+
+    public function test_default_packs_still_search_icp_interest_queries(): void
+    {
+        config([
+            'services.glm.api_key' => '',
+            'services.serper.api_key' => 'test-serper-key',
+            'services.social_listening.max_signal_type_queries_per_run' => 1,
+        ]);
+        $this->seed(\Database\Seeders\SignalTypeDefinitionSeeder::class);
+
+        [$user, $org] = $this->actingAsOrgMember();
+        $icp = IcpProfile::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'Fintech ICP',
+            'is_active' => true,
+            'config' => array_merge(IcpProfile::defaultConfig(), [
+                'customPrompt' => 'mobile fintech partnerships',
+                'signalTypePacks' => [\App\Models\SignalTypeDefinition::PACK_DEFAULT],
+                'industries' => [],
+                'territories' => [],
+            ]),
+        ]);
+        $settings = SocialListeningSetting::query()->create(array_merge(
+            SocialListeningSetting::defaultsForOrg($org->id, $icp->id),
+            ['enabled_sources' => ['linkedin_public'], 'min_score' => 30, 'intent_filters' => []],
+        ));
+
+        $sawInterest = false;
+        Http::fake([
+            'google.serper.dev/*' => function ($request) use (&$sawInterest) {
+                $query = (string) ($request->data()['q'] ?? '');
+                if (str_contains(mb_strtolower($query), 'fintech')) {
+                    $sawInterest = true;
+                }
+
+                return Http::response(['organic' => []], 200);
+            },
+        ]);
+
+        $run = app(SocialListeningOrchestrator::class)->run($org, $icp, $settings, $user);
+
+        $this->assertSame('completed', $run->status);
+        $this->assertTrue($sawInterest);
+    }
+
+    public function test_type_mismatch_is_kept_as_an_icp_opportunity(): void
+    {
+        config([
+            'services.glm.api_key' => 'test-glm-key',
+            'services.serper.api_key' => 'test-serper-key',
+            'services.social_listening.max_signal_type_queries_per_run' => 1,
+        ]);
+        $this->seed(\Database\Seeders\SignalTypeDefinitionSeeder::class);
+
+        [$user, $org] = $this->actingAsOrgMember();
+        $icp = IcpProfile::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'Opportunity ICP',
+            'is_active' => true,
+            'config' => array_merge(IcpProfile::defaultConfig(), [
+                'customPrompt' => 'fintech partnerships',
+                'industries' => [],
+                'territories' => [],
+                'signalTypePacks' => [\App\Models\SignalTypeDefinition::PACK_DEFAULT],
+            ]),
+        ]);
+        $settings = SocialListeningSetting::query()->create(array_merge(
+            SocialListeningSetting::defaultsForOrg($org->id, $icp->id),
+            ['enabled_sources' => ['linkedin_public'], 'min_score' => 30, 'intent_filters' => []],
+        ));
+
+        Http::fake([
+            'open.bigmodel.cn/*' => function ($request) {
+                $body = $request->body();
+                if (str_contains($body, 'Generate 3-5 short Google search queries')) {
+                    return Http::response(['choices' => [['message' => ['content' => json_encode(['queries' => ['fintech partnership']])]]]], 200);
+                }
+                if (str_contains($body, 'Decide whether a post is a genuine match')) {
+                    return Http::response(['choices' => [['message' => ['content' => json_encode([
+                        'matched' => false,
+                        'reject_reason' => 'type_mismatch',
+                    ])]]]], 200);
+                }
+
+                return Http::response(['choices' => [['message' => ['content' => json_encode([
+                    'company_name' => 'Acme',
+                    'signal_type' => 'partnership_opportunity',
+                    'buying_intent_score' => 80,
+                    'summary' => 'Acme is looking for a fintech partner.',
+                    'intent_label' => 'Partnership',
+                    'location_text' => '',
+                    'industry' => '',
+                ])]]]], 200);
+            },
+            'google.serper.dev/*' => Http::response([
+                'organic' => [[
+                    'title' => 'Acme seeking fintech partner',
+                    'snippet' => 'Acme announced it is looking for a fintech partner this week.',
+                    'link' => 'https://linkedin.com/posts/opportunity-1',
+                    'date' => '1 day ago',
+                ]],
+            ], 200),
+        ]);
+
+        $run = app(SocialListeningOrchestrator::class)->run($org, $icp, $settings, $user);
+
+        $this->assertSame('completed', $run->status);
+        $signal = SocialSignal::query()->where('post_url', 'https://linkedin.com/posts/opportunity-1')->first();
+        $this->assertNotNull($signal);
+        $this->assertNull($signal->signal_type_key);
+        $this->assertSame(0, $run->result_summary['rejected']['typeMismatch']);
+    }
+
+    public function test_missing_industry_does_not_fail_the_icp_filter(): void
+    {
+        config([
+            'services.glm.api_key' => 'test-glm-key',
+            'services.serper.api_key' => 'test-serper-key',
+        ]);
+
+        [$user, $org] = $this->actingAsOrgMember();
+        $icp = IcpProfile::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'FMCG',
+            'is_active' => true,
+            'config' => array_merge(IcpProfile::defaultConfig(), [
+                'industries' => ['FMCG & Retail'],
+                'territories' => ['Lagos, NG'],
+                'signalTypePacks' => [\App\Models\SignalTypeDefinition::PACK_NONE],
+            ]),
+        ]);
+        $settings = SocialListeningSetting::query()->create(array_merge(
+            SocialListeningSetting::defaultsForOrg($org->id, $icp->id),
+            ['enabled_sources' => ['linkedin_public'], 'min_score' => 30, 'intent_filters' => []],
+        ));
+
+        Http::fake([
+            'open.bigmodel.cn/*' => Http::sequence()
+                ->push(['choices' => [['message' => ['content' => json_encode(['queries' => ['fmcg lagos']])]]]])
+                ->push(['choices' => [['message' => ['content' => json_encode([
+                    'company_name' => 'ShopCo',
+                    'industry' => '',
+                    'location_text' => '',
+                    'signal_type' => 'partnership_opportunity',
+                    'buying_intent_score' => 77,
+                    'summary' => 'Looking for a distribution partner.',
+                ])]]]]),
+            'google.serper.dev/*' => Http::response([
+                'organic' => [[
+                    'title' => 'Looking for a distribution partner',
+                    'snippet' => 'We are expanding and looking for a partner.',
+                    'link' => 'https://linkedin.com/posts/no-industry',
+                    'date' => '1 day ago',
+                ]],
+            ], 200),
+        ]);
+
+        $run = app(SocialListeningOrchestrator::class)->run($org, $icp, $settings, $user);
+
+        $this->assertSame('completed', $run->status);
+        $this->assertSame(1, $run->signals_created);
+        $this->assertSame(0, $run->result_summary['rejected']['icpMismatch']);
+    }
+
+    public function test_missing_optional_keys_do_not_block_serper_sources(): void
+    {
+        config([
+            'services.glm.api_key' => '',
+            'services.serper.api_key' => 'test-serper-key',
+            'services.youtube.api_key' => '',
+            'services.reddit.client_id' => '',
+            'services.reddit.client_secret' => '',
+        ]);
+
+        [$user, $org] = $this->actingAsOrgMember();
+        $icp = IcpProfile::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'ICP',
+            'is_active' => true,
+            'config' => array_merge(IcpProfile::defaultConfig(), [
+                'industries' => [],
+                'territories' => [],
+                'signalTypePacks' => [\App\Models\SignalTypeDefinition::PACK_NONE],
+            ]),
+        ]);
+        $settings = SocialListeningSetting::query()->create(array_merge(
+            SocialListeningSetting::defaultsForOrg($org->id, $icp->id),
+            ['enabled_sources' => ['linkedin_public'], 'min_score' => 30, 'intent_filters' => []],
+        ));
+
+        Http::fake([
+            'google.serper.dev/*' => Http::response([
+                'organic' => [[
+                    'title' => 'Looking for CRM recommendations in Lagos',
+                    'snippet' => 'Looking for CRM recommendations in Lagos',
+                    'link' => 'https://linkedin.com/posts/serper-only',
+                    'date' => '1 day ago',
+                ]],
+            ], 200),
+        ]);
+
+        $run = app(SocialListeningOrchestrator::class)->run($org, $icp, $settings, $user);
+
+        $this->assertSame('completed', $run->status);
+        $this->assertGreaterThanOrEqual(1, $run->signals_created);
+        $sources = collect($run->result_summary['sources'] ?? [])->keyBy('key');
+        $this->assertSame('missing_key', $sources['youtube']['status'] ?? null);
+        $this->assertSame('missing_key', $sources['reddit_native']['status'] ?? null);
+        $this->assertSame('live', $sources['linkedin_public']['status'] ?? null);
+    }
+
+    public function test_daily_cap_soft_completes_instead_of_failing_the_run(): void
+    {
+        config([
+            'services.glm.api_key' => '',
+            'services.serper.api_key' => 'test-serper-key',
+            'services.social_listening.daily_api_cap' => 1,
+        ]);
+
+        [$user, $org] = $this->actingAsOrgMember();
+        $icp = IcpProfile::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'ICP',
+            'is_active' => true,
+            'config' => array_merge(IcpProfile::defaultConfig(), [
+                'signalTypePacks' => [\App\Models\SignalTypeDefinition::PACK_NONE],
+            ]),
+        ]);
+        $settings = SocialListeningSetting::query()->create(array_merge(
+            SocialListeningSetting::defaultsForOrg($org->id, $icp->id),
+            ['enabled_sources' => ['linkedin_public'], 'min_score' => 30],
+        ));
+
+        \App\Models\ApiUsage::query()->create([
+            'organization_id' => $org->id,
+            'provider' => 'serper',
+            'endpoint' => 'social_linkedin_public',
+            'units' => 1,
+            'estimated_cost' => 0,
+        ]);
+
+        Http::fake();
+
+        $run = app(SocialListeningOrchestrator::class)->run($org, $icp, $settings, $user);
+
+        $this->assertSame('completed', $run->status);
+        $this->assertNull($run->error);
+        $this->assertTrue($run->result_summary['budget_exhausted']);
+        $this->assertSame(0, $run->signals_created);
     }
 }

@@ -7,6 +7,7 @@ use App\Services\Discovery\DTO\IcpBrief;
 use App\Services\Intent\Contracts\SocialSourceInterface;
 use App\Services\Intent\DTO\RawSocialHit;
 use App\Services\Intent\SocialPostDateParser;
+use App\Services\Intent\SocialSourceHealth;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -33,10 +34,20 @@ abstract class AbstractSerperSocialAdapter implements SocialSourceInterface
         return $this->sourceKey();
     }
 
+    public function isConfigured(): bool
+    {
+        return trim((string) config('services.serper.api_key')) !== '';
+    }
+
+    public function activatesWhenConfigured(): bool
+    {
+        return false;
+    }
+
     public function isEnabled(IcpBrief $brief, array $enabledSources): bool
     {
         return in_array($this->sourceKey(), $enabledSources, true)
-            && trim((string) config('services.serper.api_key')) !== '';
+            && $this->isConfigured();
     }
 
     public function search(
@@ -81,6 +92,7 @@ abstract class AbstractSerperSocialAdapter implements SocialSourceInterface
             ]);
 
             if (! $response->successful()) {
+                app(SocialSourceHealth::class)->recordAttempt($this->sourceKey(), $response->status(), 0);
                 Log::warning('Serper social search failed', [
                     'source' => $this->sourceKey(),
                     'status' => $response->status(),
@@ -91,7 +103,7 @@ abstract class AbstractSerperSocialAdapter implements SocialSourceInterface
 
             $organic = $response->json('organic') ?? [];
 
-            return collect($organic)->map(function (array $item) {
+            $hits = collect($organic)->map(function (array $item) {
                 $title = (string) ($item['title'] ?? '');
                 $snippet = (string) ($item['snippet'] ?? '');
                 $link = isset($item['link']) ? (string) $item['link'] : null;
@@ -114,7 +126,12 @@ abstract class AbstractSerperSocialAdapter implements SocialSourceInterface
                     dateRaw: $dateRaw,
                 );
             })->filter(fn(RawSocialHit $h) => $h->postText !== '')->values();
+
+            app(SocialSourceHealth::class)->recordAttempt($this->sourceKey(), $response->status(), $hits->count());
+
+            return $hits;
         } catch (\Throwable $e) {
+            app(SocialSourceHealth::class)->recordAttempt($this->sourceKey(), 0, 0);
             Log::warning('Serper social search exception', [
                 'source' => $this->sourceKey(),
                 'error' => $e->getMessage(),

@@ -158,6 +158,12 @@ class SocialListeningController extends Controller
                 'added_to_crm' => $synced,
                 'percent_change' => $percent,
                 'last_run_at' => $settings->last_run_at?->toIso8601String(),
+                'cadence_days' => $settings->cadence_days,
+                'freshness_window_days' => (int) ($settings->freshness_window_days ?? 180),
+                'source_health' => \App\Services\Intent\SocialSourceHealth::describe(
+                    $settings,
+                    is_array($latestRun?->result_summary) ? ($latestRun->result_summary['sources'] ?? null) : null,
+                ),
                 'latest_run' => $this->runs->formatLatestRun($latestRun),
             ],
         ]);
@@ -432,6 +438,7 @@ class SocialListeningController extends Controller
             'org_verified_domain' => $setting->org_verified_domain,
             'verification_status' => $setting->verification_status,
             'last_run_at' => $setting->last_run_at?->toIso8601String(),
+            'source_health' => \App\Services\Intent\SocialSourceHealth::describe($setting),
         ];
     }
 }

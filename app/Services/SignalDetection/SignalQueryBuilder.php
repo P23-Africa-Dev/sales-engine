@@ -57,8 +57,9 @@ class SignalQueryBuilder
         }
 
         $sentence = preg_split('/(?<=[.!?])\s+/u', $text)[0] ?? $text;
+        $words = preg_split('/\s+/u', trim($sentence)) ?: [];
 
-        return mb_strlen($sentence) > 140 ? mb_substr($sentence, 0, 140) : $sentence;
+        return implode(' ', array_slice($words, 0, 8));
     }
 
     /**

@@ -24,6 +24,7 @@ class AppServiceProvider extends ServiceProvider
     {
         // Shared per-run retrieval health: adapters record, the orchestrator reports.
         $this->app->singleton(\App\Services\Discovery\DiscoveryProviderHealth::class);
+        $this->app->singleton(\App\Services\Intent\SocialSourceHealth::class);
 
         $this->app->singleton(DiscoveryOrchestrator::class, function ($app) {
             return new DiscoveryOrchestrator(
@@ -79,6 +80,9 @@ class AppServiceProvider extends ServiceProvider
                     $app->make(\App\Services\Intent\Adapters\SerperRedditAdapter::class),
                     $app->make(\App\Services\Intent\Adapters\SerperMetaAdapter::class),
                     $app->make(\App\Services\Intent\Adapters\MetaGraphPagesAdapter::class),
+                    $app->make(\App\Services\Intent\Adapters\YoutubeSocialAdapter::class),
+                    $app->make(\App\Services\Intent\Adapters\XNativeSocialAdapter::class),
+                    $app->make(\App\Services\Intent\Adapters\RedditNativeSocialAdapter::class),
                 ],
                 enricher: $app->make(\App\Services\Intent\SocialSignalEnricher::class),
                 glm: $app->make(\App\Services\Llm\GlmClient::class),

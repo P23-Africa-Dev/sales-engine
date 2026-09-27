@@ -32,6 +32,20 @@ class SignalGroundingGateTest extends TestCase
         $this->assertSame('missing_source_date', $result->reason);
     }
 
+    public function test_infers_a_missing_date_when_the_search_was_recency_bounded(): void
+    {
+        $result = (new SignalGroundingGate)->admit(
+            'https://example.com/post',
+            null,
+            14,
+            Carbon::parse('2026-09-15'),
+            allowInferredDate: true,
+        );
+
+        $this->assertTrue($result->admitted);
+        $this->assertTrue($result->inferred);
+    }
+
     public function test_rejects_stale_signal_outside_recency_window(): void
     {
         $now = Carbon::parse('2026-09-15 00:00:00');

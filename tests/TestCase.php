@@ -12,6 +12,19 @@ abstract class TestCase extends \Illuminate\Foundation\Testing\TestCase
 {
     use RefreshDatabase;
 
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        config([
+            'services.youtube.api_key' => null,
+            'services.x.bearer_token' => null,
+            'services.reddit.client_id' => null,
+            'services.reddit.client_secret' => null,
+            'services.meta.access_token' => null,
+        ]);
+    }
+
     protected function createUserWithOrg(array $userAttrs = [], array $orgAttrs = []): array
     {
         $user = User::factory()->create($userAttrs);

@@ -24,13 +24,22 @@ use Carbon\CarbonInterface;
  */
 class SignalGroundingGate
 {
-    public function admit(?string $sourceUrl, ?CarbonInterface $sourceDate, int $recencyWindowDays, ?CarbonInterface $now = null): GateResult
-    {
+    public function admit(
+        ?string $sourceUrl,
+        ?CarbonInterface $sourceDate,
+        int $recencyWindowDays,
+        ?CarbonInterface $now = null,
+        bool $allowInferredDate = false,
+    ): GateResult {
         if (trim((string) $sourceUrl) === '') {
             return GateResult::reject('missing_source_url');
         }
 
         if ($sourceDate === null) {
+            if ($allowInferredDate) {
+                return GateResult::admit(inferred: true);
+            }
+
             return GateResult::reject('missing_source_date');
         }
 
