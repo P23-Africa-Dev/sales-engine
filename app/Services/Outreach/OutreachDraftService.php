@@ -33,7 +33,7 @@ class OutreachDraftService
         ?int $chatSessionId = null,
         array $historySlice = [],
     ): array {
-        $channel = str_contains(mb_strtolower($prompt), 'whatsapp') ? 'whatsapp' : 'email';
+        $channel = $this->channelFromText($prompt);
 
         if ($channel === 'whatsapp') {
             $this->assertWhatsAppNotAutoSent();
@@ -60,11 +60,20 @@ class OutreachDraftService
                 'channel' => $channel . ' draft',
                 'preview' => mb_substr($body, 0, 160),
                 'to_email' => $toEmail,
+                'to_phone' => $channel === 'sms' ? $this->resolveLeadPhone($lead) : null,
                 'subject' => $subject,
                 'body' => $body,
                 'regeneration_count' => 0,
-                'accent_bg' => $channel === 'whatsapp' ? '#E8F8EF' : '#EEF2FF',
-                'accent_icon' => $channel === 'whatsapp' ? '#16A34A' : '#4F46E5',
+                'accent_bg' => match ($channel) {
+                    'whatsapp' => '#E8F8EF',
+                    'sms' => '#FFF7ED',
+                    default => '#EEF2FF',
+                },
+                'accent_icon' => match ($channel) {
+                    'whatsapp' => '#16A34A',
+                    'sms' => '#C2410C',
+                    default => '#4F46E5',
+                },
                 'occurred_at' => now(),
                 'meta' => [
                     'sent' => false,
@@ -82,6 +91,7 @@ class OutreachDraftService
             'subject' => $subject,
             'body' => $body,
             'to_email' => $leads->isNotEmpty() ? $this->resolveLeadEmail($leads->first()) : null,
+            'to_phone' => $channel === 'sms' && $leads->isNotEmpty() ? $this->resolveLeadPhone($leads->first()) : null,
             'sent' => false,
             'target_lead_ids' => $targetLeadIds,
             'activity_ids' => $activityIds,
@@ -178,8 +188,7 @@ class OutreachDraftService
         }
 
         $meta = is_array($activity->meta) ? $activity->meta : [];
-        $channel = $channelOverride
-            ?? (str_contains(mb_strtolower((string) $activity->channel), 'whatsapp') ? 'whatsapp' : 'email');
+        $channel = $channelOverride ?? $this->channelFromText((string) $activity->channel);
 
         if ($channel === 'whatsapp') {
             $this->assertWhatsAppNotAutoSent();
@@ -240,7 +249,7 @@ class OutreachDraftService
     public function activityToDraftPayload(OutreachActivity $activity): array
     {
         $meta = is_array($activity->meta) ? $activity->meta : [];
-        $channel = str_contains(mb_strtolower((string) $activity->channel), 'whatsapp') ? 'whatsapp' : 'email';
+        $channel = $this->channelFromText((string) $activity->channel);
         $sent = filled($activity->sent_at) || (($meta['sent'] ?? false) === true);
 
         $rawBody = (string) ($activity->body ?? $activity->preview ?? '');
@@ -266,6 +275,7 @@ class OutreachDraftService
             'subject' => $subject,
             'body' => $body,
             'to_email' => $activity->to_email,
+            'to_phone' => $activity->to_phone,
             'sent' => $sent,
             'activity_id' => $activity->id,
             'regeneration_count' => (int) $activity->regeneration_count,
@@ -284,6 +294,7 @@ class OutreachDraftService
                     'id' => $lead->id,
                     'name' => $lead->name,
                     'email' => is_array($lead->meta) ? (trim((string) ($lead->meta['email'] ?? '')) ?: null) : null,
+                    'phone' => is_array($lead->meta) ? (trim((string) ($lead->meta['phone'] ?? '')) ?: null) : null,
                     'summary' => $lead->summary,
                     'icp_relevance_reason' => is_array($lead->meta)
                         ? (trim((string) ($lead->meta['icp_relevance_reason'] ?? '')) ?: null)
@@ -377,6 +388,39 @@ class OutreachDraftService
         return collect();
     }
 
+    private function channelFromText(string $text): string
+    {
+        $lower = mb_strtolower($text);
+        if (str_contains($lower, 'sms')) {
+            return 'sms';
+        }
+        if (str_contains($lower, 'whatsapp')) {
+            return 'whatsapp';
+        }
+
+        return 'email';
+    }
+
+    private function resolveLeadPhone(Lead $lead): ?string
+    {
+        $raw = '';
+        if (is_array($lead->meta)) {
+            $raw = trim((string) ($lead->meta['phone'] ?? ''));
+        }
+        if ($raw === '' && $lead->company) {
+            $raw = trim((string) ($lead->company->phone ?? ''));
+        }
+        if ($raw === '') {
+            return null;
+        }
+
+        try {
+            return PhoneNumber::toE164($raw);
+        } catch (InvalidArgumentException) {
+            return null;
+        }
+    }
+
     private function resolveLeadEmail(Lead $lead): ?string
     {
         if (! is_array($lead->meta)) {
@@ -442,6 +486,9 @@ class OutreachDraftService
 
         try {
             $system = "Draft a concise {$channel} outreach message for the user's specific request. Do not claim the message was sent. Professional tone for African B2B. " . TimeGreeting::promptContext($clientTimezone) . ' Use the active ICP industries, territories, and decision makers to tailor the angle. Reference the provided lead context when relevant. When prior chat turns are provided, keep continuity with that conversation. Output ONLY the sendable message body. No subject line, no "Subject:" header, no To/From headers, and no ICP analysis preamble.';
+            if ($channel === 'sms') {
+                $system .= ' This is an SMS. Keep it under 320 characters. No subject line.';
+            }
 
             if (filled($extraInstructions)) {
                 $system .= ' Additional guidance from the user: ' . trim($extraInstructions);

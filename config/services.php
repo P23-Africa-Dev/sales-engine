@@ -120,6 +120,13 @@ return [
         'unsubscribe_group_id' => env('SENDGRID_UNSUBSCRIBE_GROUP_ID'),
     ],
 
+    'infobip' => [
+        'base_url' => env('INFOBIP_BASE_URL'),
+        'api_key' => env('INFOBIP_API_KEY'),
+        'sms_from' => env('INFOBIP_SMS_FROM'),
+        'webhook_token' => env('INFOBIP_SMS_WEBHOOK_TOKEN'),
+    ],
+
     'social_listening' => [
         'daily_api_cap' => (int) env('SOCIAL_LISTENING_DAILY_API_CAP', 200),
         // Stage 2 discrete signal-type detection: how many active signal types (from

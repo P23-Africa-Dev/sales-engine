@@ -84,3 +84,10 @@ data:
   OUTREACH_PLATFORM_DAILY_CAP: "30"
   OUTREACH_ORG_WARMUP_START: "50"
   OUTREACH_ORG_DAILY_CEILING: "500"
+
+  # ── Infobip (SMS outreach) ─────────────────────────────────────────────────────
+  # This account authenticates on the shared Infobip host.
+  INFOBIP_BASE_URL: "https://api.infobip.com"
+  # Infobip trial sender accepted by the SMS API. Replace after a branded sender is approved.
+  INFOBIP_SMS_FROM: "InfoSMS"
+  OUTREACH_SMS_DAILY_CAP: "20"

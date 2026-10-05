@@ -8,6 +8,7 @@ use App\Models\OutreachActivity;
 use App\Services\Icp\IcpProfileService;
 use App\Services\Outreach\OutreachDraftService;
 use App\Services\Outreach\OutreachSendService;
+use App\Services\Outreach\OutreachSmsSendService;
 use App\Support\OrgContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -18,6 +19,7 @@ class OutreachController extends Controller
     public function __construct(
         private readonly OutreachDraftService $outreach,
         private readonly OutreachSendService $sendService,
+        private readonly OutreachSmsSendService $smsService,
         private readonly IcpProfileService $icps,
     ) {}
 
@@ -51,7 +53,7 @@ class OutreachController extends Controller
     {
         $data = $request->validate([
             'prompt' => ['required', 'string', 'max:5000'],
-            'channel' => ['nullable', 'string', 'in:email,whatsapp'],
+            'channel' => ['nullable', 'string', 'in:email,whatsapp,sms'],
             'contact_id' => ['nullable', 'integer'],
             'send' => ['nullable', 'boolean'],
             'to_email' => ['nullable', 'email'],
@@ -79,6 +81,9 @@ class OutreachController extends Controller
         $prompt = $data['prompt'];
         if (($data['channel'] ?? null) === 'whatsapp' && ! str_contains(mb_strtolower($prompt), 'whatsapp')) {
             $prompt = 'whatsapp: ' . $prompt;
+        }
+        if (($data['channel'] ?? null) === 'sms' && ! str_contains(mb_strtolower($prompt), 'sms')) {
+            $prompt = 'sms: ' . $prompt;
         }
 
         $draft = $this->outreach->draftFromPrompt($org, $icp, $prompt);
@@ -145,7 +150,7 @@ class OutreachController extends Controller
     {
         $data = $request->validate([
             'instructions' => ['nullable', 'string', 'max:1000'],
-            'channel' => ['nullable', 'string', 'in:email,whatsapp'],
+            'channel' => ['nullable', 'string', 'in:email,whatsapp,sms'],
         ]);
 
         $org = OrgContext::require();
@@ -185,7 +190,9 @@ class OutreachController extends Controller
     public function sendActivity(Request $request, int $id): JsonResponse
     {
         $data = $request->validate([
-            'to_email' => ['required', 'email'],
+            'channel' => ['nullable', 'string', 'in:email,sms'],
+            'to_email' => ['nullable', 'email'],
+            'to_phone' => ['nullable', 'string', 'max:32'],
             'subject' => ['nullable', 'string', 'max:255'],
             'body' => ['required', 'string', 'max:20000'],
             'inbox_id' => ['nullable', 'integer'],
@@ -205,16 +212,31 @@ class OutreachController extends Controller
             return response()->json(['message' => 'Outreach draft not found.'], 404);
         }
 
+        $channel = $data['channel']
+            ?? (str_contains(mb_strtolower((string) $activity->channel), 'sms') ? 'sms' : 'email');
+
         try {
-            $result = $this->sendService->queueEmail(
-                $org,
-                $user,
-                $data['to_email'],
-                (string) ($data['subject'] ?? 'Outreach'),
-                $data['body'],
-                $activity,
-                isset($data['inbox_id']) ? (int) $data['inbox_id'] : null,
-            );
+            if ($channel === 'sms') {
+                $toPhone = trim((string) ($data['to_phone'] ?? ''));
+                if ($toPhone === '') {
+                    return response()->json(['message' => 'to_phone is required to send SMS.'], 422);
+                }
+                $result = $this->smsService->queueSms($org, $user, $toPhone, $data['body'], $activity);
+            } else {
+                $toEmail = trim((string) ($data['to_email'] ?? ''));
+                if ($toEmail === '') {
+                    return response()->json(['message' => 'to_email is required to send email.'], 422);
+                }
+                $result = $this->sendService->queueEmail(
+                    $org,
+                    $user,
+                    $toEmail,
+                    (string) ($data['subject'] ?? 'Outreach'),
+                    $data['body'],
+                    $activity,
+                    isset($data['inbox_id']) ? (int) $data['inbox_id'] : null,
+                );
+            }
         } catch (\Throwable $e) {
             return response()->json(['message' => $e->getMessage()], 422);
         }

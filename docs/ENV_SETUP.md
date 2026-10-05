@@ -221,9 +221,12 @@ curl -s -H "Authorization: Bearer $TOKEN" \
     After SendGrid DNS validates, Sales Engine also runs a **domain integrity checklist** (business domain, DMARC, MX). Organization sending is blocked until integrity is `pass` or `warn` **and** at least one inbox on that domain is confirmed via email code. Leave the customer’s MX and provider SPF/DKIM unchanged. Daily recheck: `php artisan outreach:recheck-domain-integrity` (scheduled at 04:00).
 
 4. **Send quotas** (optional env overrides in `config/outreach.php` / `k8s/configmap.yaml`):
-    - `OUTREACH_PLATFORM_DAILY_CAP` (default 30) — shared platform From fallback
-    - `OUTREACH_ORG_WARMUP_START` (default 50)
-    - `OUTREACH_ORG_DAILY_CEILING` (default 500)
+   - `OUTREACH_PLATFORM_DAILY_CAP` (default 30) — shared platform From fallback
+   - `OUTREACH_ORG_WARMUP_START` (default 50)
+   - `OUTREACH_ORG_DAILY_CEILING` (default 500)
+   - `OUTREACH_SMS_DAILY_CAP` (default 20) — Infobip SMS, separate from email
+
+   SMS uses one shared Infobip account. Secret: `INFOBIP_API_KEY` (Developer tools → API keys, SMS scope) and `INFOBIP_SMS_WEBHOOK_TOKEN` (a random string we generate). ConfigMap: `INFOBIP_BASE_URL` (portal base URL) and `INFOBIP_SMS_FROM` (Channels → SMS → Senders, after approval).
 
     Organization domain sending is recommended. Platform From remains available (Reply-To = user email) until an org finishes domain + inbox setup. Org caps are per organization domain, not per inbox.
 
