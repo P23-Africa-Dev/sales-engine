@@ -34,18 +34,14 @@ class GlmClient
 
         $response = Http::timeout((int) ($options['timeout'] ?? 60))
             ->connectTimeout(15)
+            ->withHeaders(['Accept-Language' => 'en-US,en'])
             ->withToken((string) config('services.glm.api_key'))
-            ->post($baseUrl.'/chat/completions', [
-                'model' => $model,
-                'max_tokens' => (int) ($options['max_tokens'] ?? 2000),
-                'temperature' => (float) ($options['temperature'] ?? 0.2),
-                'messages' => $messages,
-            ]);
+            ->post($baseUrl . '/chat/completions', $this->completionPayload($model, $messages, $options, $purpose));
 
         $this->recordUsage($organization, $purpose, $model, $response->status());
 
         if (! $response->successful()) {
-            throw new RuntimeException('GLM request failed: '.$response->body());
+            throw new RuntimeException('GLM request failed: ' . $response->body());
         }
 
         $content = $response->json('choices.0.message.content');
@@ -101,13 +97,17 @@ class GlmClient
                 $pool->as((string) $key)
                     ->timeout((int) ($requestOptions['timeout'] ?? 60))
                     ->connectTimeout(15)
+                    ->withHeaders(['Accept-Language' => 'en-US,en'])
                     ->withToken($apiKey)
-                    ->post($baseUrl.'/chat/completions', [
-                        'model' => $this->resolveModel($purpose, $requestOptions),
-                        'max_tokens' => (int) ($requestOptions['max_tokens'] ?? 2000),
-                        'temperature' => (float) ($requestOptions['temperature'] ?? 0.2),
-                        'messages' => $request['messages'] ?? [],
-                    ]);
+                    ->post(
+                        $baseUrl . '/chat/completions',
+                        $this->completionPayload(
+                            $this->resolveModel($purpose, $requestOptions),
+                            $request['messages'] ?? [],
+                            $requestOptions,
+                            $purpose,
+                        ),
+                    );
             }
         });
 
@@ -150,6 +150,33 @@ class GlmClient
         return $out;
     }
 
+    /**
+     * Chat and outreach reason before they answer. Extract, score, and research
+     * stay on a direct answer so JSON and the research time budget hold.
+     *
+     * @param  list<array{role: string, content: string}>  $messages
+     * @param  array<string, mixed>  $options
+     * @return array<string, mixed>
+     */
+    private function completionPayload(string $model, array $messages, array $options, string $purpose): array
+    {
+        $reasons = in_array($purpose, ['chat', 'outreach_draft'], true);
+
+        $payload = [
+            'model' => $model,
+            'max_tokens' => (int) ($options['max_tokens'] ?? ($reasons ? 4096 : 2000)),
+            'temperature' => (float) ($options['temperature'] ?? ($reasons ? 0.6 : 0.2)),
+            'thinking' => ['type' => $reasons ? 'enabled' : 'disabled'],
+            'messages' => $messages,
+        ];
+
+        if ($reasons && str_starts_with($model, 'glm-5.2')) {
+            $payload['reasoning_effort'] = 'high';
+        }
+
+        return $payload;
+    }
+
     private function resolveModel(string $purpose, array $options = []): string
     {
         if (! empty($options['model'])) {
@@ -160,6 +187,7 @@ class GlmClient
             'extract' => (string) config('services.glm.extract_model'),
             'score' => (string) config('services.glm.score_model'),
             'outreach_draft' => (string) config('services.glm.outreach_model'),
+            'research' => (string) config('services.glm.research_model'),
             default => (string) config('services.glm.chat_model'),
         };
     }

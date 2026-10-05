@@ -15,15 +15,15 @@ use App\Services\Llm\GlmClient;
 
 class ResearchOrchestrator
 {
-    public const SOFT_DEADLINE_SECONDS = 20;
+    public const SOFT_DEADLINE_SECONDS = 50;
 
-    public const HARD_DEADLINE_SECONDS = 45;
+    public const HARD_DEADLINE_SECONDS = 80;
 
     public const MAX_SUB_QUERIES = 3;
 
-    public const DECOMPOSE_TIMEOUT_SECONDS = 8;
+    public const DECOMPOSE_TIMEOUT_SECONDS = 15;
 
-    public const SYNTHESIZE_TIMEOUT_SECONDS = 12;
+    public const SYNTHESIZE_TIMEOUT_SECONDS = 30;
 
     private float $startedAt = 0;
 
@@ -205,7 +205,7 @@ class ResearchOrchestrator
                         'query' => $query,
                     ], JSON_UNESCAPED_UNICODE),
                 ],
-            ], 'chat', $organization, [
+            ], 'extract', $organization, [
                 'timeout' => self::DECOMPOSE_TIMEOUT_SECONDS,
                 'max_tokens' => 400,
             ]);
@@ -386,9 +386,9 @@ class ResearchOrchestrator
                 ], JSON_UNESCAPED_UNICODE),
             ];
 
-            $result = $this->glm->chatJson($messages, 'chat', $organization, [
+            $result = $this->glm->chatJson($messages, 'research', $organization, [
                 'timeout' => self::SYNTHESIZE_TIMEOUT_SECONDS,
-                'max_tokens' => 2200,
+                'max_tokens' => 3500,
             ]);
 
             $narrative = trim((string) ($result['narrative'] ?? ''));

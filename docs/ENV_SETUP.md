@@ -17,18 +17,19 @@ Step-by-step keys for local and DigitalOcean Kubernetes (`sales-engine` namespac
 
 ## 2. GLM (chat / extract / score / outreach)
 
-1. Create a Zhipu / BigModel account: https://open.bigmodel.cn
-2. Create an API key.
+1. Create a Z.AI international account: https://z.ai
+2. Create an API key (the China `open.bigmodel.cn` key will not work on this endpoint).
 3. Set:
 
-| Variable             | Default                                | Purpose                   |
-| -------------------- | -------------------------------------- | ------------------------- |
-| `GLM_API_KEY`        | —                                      | Required for LLM features |
-| `GLM_BASE_URL`       | `https://open.bigmodel.cn/api/paas/v4` |                           |
-| `GLM_CHAT_MODEL`     | `glm-4-flash`                          | Chat narration            |
-| `GLM_EXTRACT_MODEL`  | `glm-4-flash`                          | Snippet → company JSON    |
-| `GLM_SCORE_MODEL`    | `glm-4-air`                            | ICP fit scores            |
-| `GLM_OUTREACH_MODEL` | `glm-4-flash`                          | Drafts                    |
+| Variable             | Default                        | Purpose                   |
+| -------------------- | ------------------------------ | ------------------------- |
+| `GLM_API_KEY`        | —                              | Required for LLM features |
+| `GLM_BASE_URL`       | `https://api.z.ai/api/paas/v4` | International endpoint    |
+| `GLM_CHAT_MODEL`     | `glm-5.2`                      | Free chat                 |
+| `GLM_RESEARCH_MODEL` | `glm-5.2`                      | Quick research brief      |
+| `GLM_EXTRACT_MODEL`  | `glm-5`                        | Lead generation extract   |
+| `GLM_SCORE_MODEL`    | `glm-5.1`                      | Lead fit scores           |
+| `GLM_OUTREACH_MODEL` | `glm-5.2`                      | Outreach drafts           |
 
 Without `GLM_API_KEY`, discovery still works with heuristic extract/score; freeform chat is limited.
 
@@ -221,12 +222,12 @@ curl -s -H "Authorization: Bearer $TOKEN" \
     After SendGrid DNS validates, Sales Engine also runs a **domain integrity checklist** (business domain, DMARC, MX). Organization sending is blocked until integrity is `pass` or `warn` **and** at least one inbox on that domain is confirmed via email code. Leave the customer’s MX and provider SPF/DKIM unchanged. Daily recheck: `php artisan outreach:recheck-domain-integrity` (scheduled at 04:00).
 
 4. **Send quotas** (optional env overrides in `config/outreach.php` / `k8s/configmap.yaml`):
-   - `OUTREACH_PLATFORM_DAILY_CAP` (default 30) — shared platform From fallback
-   - `OUTREACH_ORG_WARMUP_START` (default 50)
-   - `OUTREACH_ORG_DAILY_CEILING` (default 500)
-   - `OUTREACH_SMS_DAILY_CAP` (default 20) — Infobip SMS, separate from email
+    - `OUTREACH_PLATFORM_DAILY_CAP` (default 30) — shared platform From fallback
+    - `OUTREACH_ORG_WARMUP_START` (default 50)
+    - `OUTREACH_ORG_DAILY_CEILING` (default 500)
+    - `OUTREACH_SMS_DAILY_CAP` (default 20) — Infobip SMS, separate from email
 
-   SMS uses one shared Infobip account. Secret: `INFOBIP_API_KEY` (Developer tools → API keys, SMS scope) and `INFOBIP_SMS_WEBHOOK_TOKEN` (a random string we generate). ConfigMap: `INFOBIP_BASE_URL` (portal base URL) and `INFOBIP_SMS_FROM` (Channels → SMS → Senders, after approval).
+    SMS uses one shared Infobip account. Secret: `INFOBIP_API_KEY` (Developer tools → API keys, SMS scope) and `INFOBIP_SMS_WEBHOOK_TOKEN` (a random string we generate). ConfigMap: `INFOBIP_BASE_URL` (portal base URL) and `INFOBIP_SMS_FROM` (Channels → SMS → Senders, after approval).
 
     Organization domain sending is recommended. Platform From remains available (Reply-To = user email) until an org finishes domain + inbox setup. Org caps are per organization domain, not per inbox.
 

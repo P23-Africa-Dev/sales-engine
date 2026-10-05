@@ -397,7 +397,7 @@ class SocialListeningTest extends TestCase
         ));
 
         Http::fake([
-            'open.bigmodel.cn/*' => Http::sequence()
+            'api.z.ai/*' => Http::sequence()
                 // 1) buildQueries() call — assert custom_prompt was sent, return an investment-flavored query.
                 ->push([
                     'choices' => [[
@@ -456,7 +456,7 @@ class SocialListeningTest extends TestCase
         $this->assertSame(0, $run->result_summary['rejected']['total']);
 
         Http::assertSent(function ($request) {
-            if (! str_contains($request->url(), 'bigmodel.cn')) {
+            if (! str_contains($request->url(), 'api.z.ai')) {
                 return true;
             }
             $body = $request->body();
@@ -746,7 +746,7 @@ class SocialListeningTest extends TestCase
         ));
 
         Http::fake([
-            'open.bigmodel.cn/*' => Http::sequence()
+            'api.z.ai/*' => Http::sequence()
                 ->push(['choices' => [['message' => ['content' => json_encode(['queries' => ['fintech startup raises Series A']])]]]])
                 ->push([
                     'choices' => [[
@@ -923,7 +923,7 @@ class SocialListeningTest extends TestCase
         ));
 
         Http::fake([
-            'open.bigmodel.cn/*' => Http::response([
+            'api.z.ai/*' => Http::response([
                 'choices' => [['message' => ['content' => json_encode(['queries' => ['new opportunities this week']])]]],
             ], 200),
             'google.serper.dev/*' => Http::response(['organic' => []], 200),
@@ -932,7 +932,7 @@ class SocialListeningTest extends TestCase
         app(SocialListeningOrchestrator::class)->run($org, $icp, $settings, $user);
 
         Http::assertSent(function ($request) {
-            if (! str_contains($request->url(), 'bigmodel.cn')) {
+            if (! str_contains($request->url(), 'api.z.ai')) {
                 return true;
             }
             $body = $request->body();
@@ -972,7 +972,7 @@ class SocialListeningTest extends TestCase
         ));
 
         Http::fake([
-            'open.bigmodel.cn/*' => Http::sequence()
+            'api.z.ai/*' => Http::sequence()
                 ->push(['choices' => [['message' => ['content' => json_encode(['queries' => ['fintech startup raises Series A']])]]]])
                 ->push([
                     'choices' => [[
@@ -1202,7 +1202,7 @@ class SocialListeningTest extends TestCase
         ));
 
         Http::fake([
-            'open.bigmodel.cn/*' => function ($request) {
+            'api.z.ai/*' => function ($request) {
                 $body = $request->body();
 
                 // First GLM call is buildQueries(); subsequent calls are per-hit enrich().
@@ -1340,7 +1340,7 @@ class SocialListeningTest extends TestCase
         ));
 
         Http::fake([
-            'open.bigmodel.cn/*' => function ($request) {
+            'api.z.ai/*' => function ($request) {
                 $body = $request->body();
                 if (str_contains($body, 'Generate 3-5 short Google search queries')) {
                     return Http::response(['choices' => [['message' => ['content' => json_encode(['queries' => ['fintech partnership']])]]]], 200);
@@ -1405,7 +1405,7 @@ class SocialListeningTest extends TestCase
         ));
 
         Http::fake([
-            'open.bigmodel.cn/*' => Http::sequence()
+            'api.z.ai/*' => Http::sequence()
                 ->push(['choices' => [['message' => ['content' => json_encode(['queries' => ['fmcg lagos']])]]]])
                 ->push(['choices' => [['message' => ['content' => json_encode([
                     'company_name' => 'ShopCo',

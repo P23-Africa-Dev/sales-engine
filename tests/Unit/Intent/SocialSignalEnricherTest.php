@@ -186,7 +186,7 @@ class SocialSignalEnricherTest extends TestCase
         );
 
         \Illuminate\Support\Facades\Http::fake([
-            'open.bigmodel.cn/*' => \Illuminate\Support\Facades\Http::response([
+            'api.z.ai/*' => \Illuminate\Support\Facades\Http::response([
                 'choices' => [[
                     'message' => ['content' => json_encode([
                         'profile_name' => 'Jane Doe',
@@ -287,7 +287,7 @@ class SocialSignalEnricherTest extends TestCase
         );
 
         \Illuminate\Support\Facades\Http::fake([
-            'open.bigmodel.cn/*' => \Illuminate\Support\Facades\Http::response([
+            'api.z.ai/*' => \Illuminate\Support\Facades\Http::response([
                 'choices' => [['message' => ['content' => json_encode(['company_name' => 'Acme Corp', 'signal_type' => 'market_signal'])]]],
             ], 200),
         ]);

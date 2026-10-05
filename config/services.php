@@ -37,11 +37,12 @@ return [
 
     'glm' => [
         'api_key' => env('GLM_API_KEY'),
-        'base_url' => env('GLM_BASE_URL', 'https://open.bigmodel.cn/api/paas/v4'),
-        'chat_model' => env('GLM_CHAT_MODEL', 'glm-4-flash'),
-        'extract_model' => env('GLM_EXTRACT_MODEL', 'glm-4-flash'),
-        'score_model' => env('GLM_SCORE_MODEL', 'glm-4-air'),
-        'outreach_model' => env('GLM_OUTREACH_MODEL', 'glm-4-flash'),
+        'base_url' => env('GLM_BASE_URL', 'https://api.z.ai/api/paas/v4'),
+        'chat_model' => env('GLM_CHAT_MODEL', 'glm-5.2'),
+        'research_model' => env('GLM_RESEARCH_MODEL', 'glm-5.2'),
+        'extract_model' => env('GLM_EXTRACT_MODEL', 'glm-5'),
+        'score_model' => env('GLM_SCORE_MODEL', 'glm-5.1'),
+        'outreach_model' => env('GLM_OUTREACH_MODEL', 'glm-5.2'),
     ],
 
     'serper' => [
