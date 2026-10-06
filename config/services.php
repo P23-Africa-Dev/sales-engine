@@ -37,11 +37,12 @@ return [
 
     'glm' => [
         'api_key' => env('GLM_API_KEY'),
-        'base_url' => env('GLM_BASE_URL', 'https://open.bigmodel.cn/api/paas/v4'),
-        'chat_model' => env('GLM_CHAT_MODEL', 'glm-4-flash'),
-        'extract_model' => env('GLM_EXTRACT_MODEL', 'glm-4-flash'),
-        'score_model' => env('GLM_SCORE_MODEL', 'glm-4-air'),
-        'outreach_model' => env('GLM_OUTREACH_MODEL', 'glm-4-flash'),
+        'base_url' => env('GLM_BASE_URL', 'https://api.z.ai/api/paas/v4'),
+        'chat_model' => env('GLM_CHAT_MODEL', 'glm-5.2'),
+        'research_model' => env('GLM_RESEARCH_MODEL', 'glm-5.2'),
+        'extract_model' => env('GLM_EXTRACT_MODEL', 'glm-5'),
+        'score_model' => env('GLM_SCORE_MODEL', 'glm-5.1'),
+        'outreach_model' => env('GLM_OUTREACH_MODEL', 'glm-5.2'),
     ],
 
     'serper' => [
@@ -118,6 +119,13 @@ return [
         'webhook_secret' => env('SENDGRID_WEBHOOK_SECRET'),
         'webhook_public_key' => env('SENDGRID_WEBHOOK_PUBLIC_KEY'),
         'unsubscribe_group_id' => env('SENDGRID_UNSUBSCRIBE_GROUP_ID'),
+    ],
+
+    'infobip' => [
+        'base_url' => env('INFOBIP_BASE_URL'),
+        'api_key' => env('INFOBIP_API_KEY'),
+        'sms_from' => env('INFOBIP_SMS_FROM'),
+        'webhook_token' => env('INFOBIP_SMS_WEBHOOK_TOKEN'),
     ],
 
     'social_listening' => [

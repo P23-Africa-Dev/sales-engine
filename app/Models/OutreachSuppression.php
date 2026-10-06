@@ -10,6 +10,7 @@ class OutreachSuppression extends Model
     protected $fillable = [
         'organization_id',
         'email',
+        'phone',
         'reason',
         'sendgrid_event_id',
         'suppressed_at',

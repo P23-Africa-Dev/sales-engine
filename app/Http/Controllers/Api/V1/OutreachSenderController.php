@@ -10,6 +10,7 @@ use App\Models\OutreachSetupRequest;
 use App\Services\Outreach\DomainIntegrityService;
 use App\Services\Outreach\OutreachIdentityResolver;
 use App\Services\Outreach\OutreachQuotaService;
+use App\Services\Outreach\Transport\InfobipSmsTransport;
 use App\Support\OrgContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -20,6 +21,7 @@ class OutreachSenderController extends Controller
         private readonly DomainIntegrityService $integrity,
         private readonly OutreachQuotaService $quota,
         private readonly OutreachIdentityResolver $identityResolver,
+        private readonly InfobipSmsTransport $sms,
     ) {}
 
     public function show(Request $request): JsonResponse
@@ -90,6 +92,11 @@ class OutreachSenderController extends Controller
                     'created_at' => $openSupport->created_at?->toIso8601String(),
                 ] : null,
                 'quota' => $this->quota->snapshot($org, $effectiveQuotaMode),
+                'sms' => [
+                    'configured' => $this->sms->isConfigured(),
+                    'from' => config('services.infobip.sms_from') ?: null,
+                    'quota' => $this->quota->snapshot($org, 'sms'),
+                ],
             ],
         ]);
     }

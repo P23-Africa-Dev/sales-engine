@@ -64,11 +64,13 @@ data:
   # ── Factory23 + LLM / discovery (non-secret) ────────────────────────────────
   FACTORY23_API_URL: "https://api.thefactory23.com"
   FACTORY23_CRM_SYNC_ENABLED: "true"
-  GLM_BASE_URL: "https://open.bigmodel.cn/api/paas/v4"
-  GLM_CHAT_MODEL: "glm-4-flash"
-  GLM_EXTRACT_MODEL: "glm-4-flash"
-  GLM_SCORE_MODEL: "glm-4-air"
-  GLM_OUTREACH_MODEL: "glm-4-flash"
+  # Z.AI international. User-facing replies use GLM-5.2; bulk lead JSON stays on a faster GLM-5.
+  GLM_BASE_URL: "https://api.z.ai/api/paas/v4"
+  GLM_CHAT_MODEL: "glm-5.2"
+  GLM_RESEARCH_MODEL: "glm-5.2"
+  GLM_EXTRACT_MODEL: "glm-5"
+  GLM_SCORE_MODEL: "glm-5.1"
+  GLM_OUTREACH_MODEL: "glm-5.2"
   SERPER_BASE_URL: "https://google.serper.dev"
   SERPER_MAX_RESULTS: "20"
   MONO_BASE_URL: "https://api.withmono.com"
@@ -84,3 +86,10 @@ data:
   OUTREACH_PLATFORM_DAILY_CAP: "30"
   OUTREACH_ORG_WARMUP_START: "50"
   OUTREACH_ORG_DAILY_CEILING: "500"
+
+  # ── Infobip (SMS outreach) ─────────────────────────────────────────────────────
+  # This account authenticates on the shared Infobip host.
+  INFOBIP_BASE_URL: "https://api.infobip.com"
+  # Infobip trial sender accepted by the SMS API. Replace after a branded sender is approved.
+  INFOBIP_SMS_FROM: "InfoSMS"
+  OUTREACH_SMS_DAILY_CAP: "20"

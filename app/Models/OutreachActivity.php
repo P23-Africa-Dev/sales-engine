@@ -16,6 +16,7 @@ class OutreachActivity extends Model
         'channel',
         'preview',
         'to_email',
+        'to_phone',
         'subject',
         'body',
         'regeneration_count',

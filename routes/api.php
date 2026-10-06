@@ -20,6 +20,7 @@ use App\Http\Controllers\Api\V1\OutreachDomainController;
 use App\Http\Controllers\Api\V1\OutreachInboxController;
 use App\Http\Controllers\Api\V1\OutreachSenderController;
 use App\Http\Controllers\Api\V1\OutreachSetupRequestController;
+use App\Http\Controllers\Api\V1\InfobipSmsWebhookController;
 use App\Http\Controllers\Api\V1\SendGridWebhookController;
 use App\Http\Controllers\Api\V1\SignalTypeController;
 use App\Http\Controllers\Api\V1\SocialListeningController;
@@ -36,6 +37,7 @@ Route::get('/health', HealthController::class);
 // Public: SendGrid posts delivery/open/click/bounce events here. Verified via
 // ECDSA signature inside the controller, not session/token auth.
 Route::post('/webhooks/sendgrid', [SendGridWebhookController::class, 'handle']);
+Route::post('/webhooks/infobip/sms', [InfobipSmsWebhookController::class, 'handle']);
 
 Route::prefix('auth')->group(function () {
     Route::post('/register', [AuthController::class, 'register']);
