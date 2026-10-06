@@ -2,17 +2,18 @@
 
 namespace App\Http\Resources;
 
+use App\Models\Lead;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
-/** @mixin \App\Models\Lead */
+/** @mixin Lead */
 class LeadResource extends JsonResource
 {
     public function toArray(Request $request): array
     {
         $meta = is_array($this->meta) ? $this->meta : [];
         $profileUrls = is_array($meta['profile_urls'] ?? null)
-            ? array_values(array_filter($meta['profile_urls'], fn($u) => is_string($u) && trim($u) !== ''))
+            ? array_values(array_filter($meta['profile_urls'], fn ($u) => is_string($u) && trim($u) !== ''))
             : [];
         $email = trim((string) ($meta['email'] ?? ''));
         $phone = trim((string) ($meta['phone'] ?? ''));
@@ -68,6 +69,8 @@ class LeadResource extends JsonResource
                 ? trim((string) $meta['icp_relevance_reason'])
                 : null,
             'save_status' => $this->save_status,
+            'native_crm_saved' => $this->relationLoaded('crmEntry') ? $this->crmEntry !== null : $this->crmEntry()->exists(),
+            'native_crm_lead_id' => $meta['native_crm_lead_id'] ?? null,
             'crm_synced' => filled($this->synced_to_f23_at),
             'crm_duplicate' => filled($this->crm_duplicate_of),
             'crm_duplicate_reason' => $this->crm_duplicate_reason,

@@ -27,7 +27,7 @@ class MetricsController extends Controller
                     ->count(),
                 'leads_in_crm' => Lead::query()
                     ->where('organization_id', $orgId)
-                    ->whereNotNull('synced_to_f23_at')
+                    ->where(fn ($query) => $query->whereNotNull('synced_to_f23_at')->orWhereHas('crmEntry'))
                     ->count(),
                 'companies_cached' => Company::query()->where('organization_id', $orgId)->count(),
                 'qualified_leads' => Lead::query()->where('organization_id', $orgId)->where('stage', 'qualified')->count(),

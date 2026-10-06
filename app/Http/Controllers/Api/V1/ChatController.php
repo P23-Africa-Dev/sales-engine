@@ -5,6 +5,8 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\ChatMessageResource;
 use App\Models\ChatSession;
+use App\Models\IcpProfile;
+use App\Models\Lead;
 use App\Services\Chat\ChatService;
 use App\Support\OrgContext;
 use Illuminate\Http\JsonResponse;
@@ -26,7 +28,7 @@ class ChatController extends Controller
         $icpProfileId = isset($data['icp_profile_id']) ? (int) $data['icp_profile_id'] : null;
 
         if ($icpProfileId) {
-            $icp = \App\Models\IcpProfile::query()
+            $icp = IcpProfile::query()
                 ->where('organization_id', $org->id)
                 ->where('id', $icpProfileId)
                 ->firstOrFail();
@@ -88,6 +90,19 @@ class ChatController extends Controller
     {
         $session = $this->ownedSession($id);
         $messages = $session->messages()->orderBy('id')->get();
+        $leadIds = $messages->flatMap(fn ($message) => collect($message->leads ?? [])->pluck('id'))->filter()->unique();
+        $current = Lead::query()->where('organization_id', $session->organization_id)->whereIn('id', $leadIds)->with('crmEntry')->get()->keyBy('id');
+        foreach ($messages as $message) {
+            $message->leads = collect($message->leads ?? [])->map(function ($snapshot) use ($current) {
+                if (! is_array($snapshot)) {
+                    return $snapshot;
+                }
+                $lead = $current->get($snapshot['id'] ?? null);
+                $canonical = $lead?->meta['native_crm_lead_id'] ?? null;
+
+                return array_replace($snapshot, ['native_crm_saved' => $lead?->crmEntry !== null, 'native_crm_lead_id' => $canonical, 'save_status' => $lead?->save_status ?? $snapshot['save_status'] ?? 'draft']);
+            })->all();
+        }
 
         return response()->json([
             'data' => ChatMessageResource::collection($messages),

@@ -49,6 +49,7 @@ class SocialSignalResource extends JsonResource
             'posted_at' => $this->posted_at?->toIso8601String(),
             'post_url' => $this->post_url,
             'lead_id' => $this->lead_id,
+            'native_crm_saved' => $this->lead_id ? $this->lead?->crmEntry !== null : false,
             'f23_lead_id' => $this->f23_lead_id,
             // Stage 1 (ICP Filter) / Stage 2 (Signal Detection) audit trail —
             // see docs/backend_implementation_plan.md. Null on signals created
@@ -67,7 +68,7 @@ class SocialSignalResource extends JsonResource
                 // Only present when the caller eager-loaded enrichmentLogs (list/show
                 // endpoints both do) — omitted entirely otherwise rather than firing
                 // an N+1 query per signal.
-                'contacts' => $this->whenLoaded('enrichmentLogs', fn() => $this->enrichmentLogs->map(fn($log) => [
+                'contacts' => $this->whenLoaded('enrichmentLogs', fn () => $this->enrichmentLogs->map(fn ($log) => [
                     'personName' => $log->person_name,
                     'foundEmail' => $log->found_email,
                     'foundPhone' => $log->found_phone,

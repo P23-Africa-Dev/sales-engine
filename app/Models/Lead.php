@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class Lead extends Model
 {
@@ -40,6 +41,11 @@ class Lead extends Model
             'crm_fields_updated' => 'array',
             'synced_to_f23_at' => 'datetime',
         ];
+    }
+
+    public function crmEntry(): HasOne
+    {
+        return $this->hasOne(CrmEntry::class);
     }
 
     public function organization(): BelongsTo

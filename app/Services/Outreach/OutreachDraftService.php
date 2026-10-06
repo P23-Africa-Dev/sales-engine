@@ -9,8 +9,9 @@ use App\Models\Lead;
 use App\Models\Organization;
 use App\Models\OutreachActivity;
 use App\Models\SocialSignal;
-use App\Support\TimeGreeting;
+use App\Services\Chat\IcpChatContextBuilder;
 use App\Services\Llm\GlmClient;
+use App\Support\TimeGreeting;
 use Illuminate\Support\Collection;
 use InvalidArgumentException;
 
@@ -18,7 +19,7 @@ class OutreachDraftService
 {
     public function __construct(
         private readonly GlmClient $glm,
-        private readonly \App\Services\Chat\IcpChatContextBuilder $icpChatContext,
+        private readonly IcpChatContextBuilder $icpChatContext,
     ) {}
 
     /**
@@ -42,12 +43,12 @@ class OutreachDraftService
         $leads = $this->resolveLeads($organization, $icp, $chatSessionId);
 
         $composed = $this->compose($organization, $icp, $prompt, $channel, $leads->all(), $clientTimezone, $historySlice);
-        $fallbackSubject = $channel === 'email' ? 'Introduction: ' . $icp->name : null;
+        $fallbackSubject = $channel === 'email' ? 'Introduction: '.$icp->name : null;
         $normalized = $this->normalizeEmailParts($channel, $composed, $fallbackSubject);
         $body = $normalized['body'];
         $subject = $normalized['subject'];
         $alignmentNote = $this->buildIcpAlignmentNote($icp, $leads->all());
-        $targetLeadIds = $leads->pluck('id')->map(fn($id) => (int) $id)->all();
+        $targetLeadIds = $leads->pluck('id')->map(fn ($id) => (int) $id)->all();
 
         $activityIds = [];
         foreach ($leads as $lead) {
@@ -57,7 +58,7 @@ class OutreachDraftService
                 'lead_id' => $lead->id,
                 'company_id' => $lead->company_id,
                 'name' => $lead->name,
-                'channel' => $channel . ' draft',
+                'channel' => $channel.' draft',
                 'preview' => mb_substr($body, 0, 160),
                 'to_email' => $toEmail,
                 'subject' => $subject,
@@ -87,7 +88,7 @@ class OutreachDraftService
             'activity_ids' => $activityIds,
             'activity_id' => $activityIds[0] ?? null,
             'icp_alignment_note' => $alignmentNote,
-            'leads' => $leads->map(fn(Lead $l) => [
+            'leads' => $leads->map(fn (Lead $l) => [
                 'id' => $l->id,
                 'name' => $l->name,
                 'source' => $l->source,
@@ -128,6 +129,7 @@ class OutreachDraftService
             'organization_id' => $organization->id,
             'social_signal_id' => $signal->id,
             'lead_id' => $signal->lead_id,
+            'company_id' => $signal->lead?->company_id,
             'name' => $signal->profile_name ?? $signal->company_name ?? 'Social prospect',
             'channel' => 'email draft',
             'preview' => mb_substr($body, 0, 160),
@@ -210,14 +212,14 @@ class OutreachDraftService
         );
 
         $fallbackSubject = $channel === 'email'
-            ? ($activity->social_signal_id ? 'Following up on your post' : 'Introduction: ' . $icp->name)
+            ? ($activity->social_signal_id ? 'Following up on your post' : 'Introduction: '.$icp->name)
             : null;
         $normalized = $this->normalizeEmailParts($channel, $composed, $fallbackSubject);
         $body = $normalized['body'];
         $subject = $normalized['subject'];
 
         $activity->update([
-            'channel' => $channel . ' draft',
+            'channel' => $channel.' draft',
             'preview' => mb_substr($body, 0, 160),
             'subject' => $subject,
             'body' => $body,
@@ -311,8 +313,8 @@ class OutreachDraftService
             if ($message && is_array($message->leads) && count($message->leads) > 0) {
                 $ids = collect($message->leads)
                     ->pluck('id')
-                    ->filter(fn($id) => is_numeric($id))
-                    ->map(fn($id) => (int) $id)
+                    ->filter(fn ($id) => is_numeric($id))
+                    ->map(fn ($id) => (int) $id)
                     ->all();
 
                 if ($ids !== []) {
@@ -348,8 +350,8 @@ class OutreachDraftService
     ): Collection {
         $meta = is_array($activity->meta) ? $activity->meta : [];
         $targetIds = collect($meta['target_lead_ids'] ?? [])
-            ->filter(fn($id) => is_numeric($id))
-            ->map(fn($id) => (int) $id)
+            ->filter(fn ($id) => is_numeric($id))
+            ->map(fn ($id) => (int) $id)
             ->all();
 
         if ($targetIds !== []) {
@@ -435,16 +437,16 @@ class OutreachDraftService
         if (! $this->glm->isConfigured()) {
             $names = collect($leads)->pluck('name')->implode(', ');
             $greeting = TimeGreeting::phrase($clientTimezone);
-            $extra = $extraInstructions ? ' ' . $extraInstructions : '';
+            $extra = $extraInstructions ? ' '.$extraInstructions : '';
 
-            return "{$greeting}. Following up regarding {$icp->name}. " . ($names ? "Relevant accounts: {$names}. " : '') . trim($prompt) . $extra;
+            return "{$greeting}. Following up regarding {$icp->name}. ".($names ? "Relevant accounts: {$names}. " : '').trim($prompt).$extra;
         }
 
         try {
-            $system = "Draft a concise {$channel} outreach message for the user's specific request. Do not claim the message was sent. Professional tone for African B2B. " . TimeGreeting::promptContext($clientTimezone) . ' Use the active ICP industries, territories, and decision makers to tailor the angle. Reference the provided lead context when relevant. When prior chat turns are provided, keep continuity with that conversation. Output ONLY the sendable message body. No subject line, no "Subject:" header, no To/From headers, and no ICP analysis preamble.';
+            $system = "Draft a concise {$channel} outreach message for the user's specific request. Do not claim the message was sent. Professional tone for African B2B. ".TimeGreeting::promptContext($clientTimezone).' Use the active ICP industries, territories, and decision makers to tailor the angle. Reference the provided lead context when relevant. When prior chat turns are provided, keep continuity with that conversation. Output ONLY the sendable message body. No subject line, no "Subject:" header, no To/From headers, and no ICP analysis preamble.';
 
             if (filled($extraInstructions)) {
-                $system .= ' Additional guidance from the user: ' . trim($extraInstructions);
+                $system .= ' Additional guidance from the user: '.trim($extraInstructions);
             }
 
             $messages = [
@@ -481,7 +483,7 @@ class OutreachDraftService
 
             return $this->glm->chat($messages, 'outreach_draft', $organization);
         } catch (\Throwable) {
-            return 'Draft outreach for ' . $icp->name . ': ' . $prompt;
+            return 'Draft outreach for '.$icp->name.': '.$prompt;
         }
     }
 
@@ -502,25 +504,25 @@ class OutreachDraftService
             $meta = is_array($lead->meta) ? $lead->meta : [];
             $reason = trim((string) ($meta['icp_relevance_reason'] ?? ''));
             if ($reason !== '') {
-                $reasons[] = $lead->name . ': ' . $reason;
+                $reasons[] = $lead->name.': '.$reason;
             }
         }
 
         $count = count($leads);
         if ($count === 0) {
-            return "Drafted against your active ICP \"{$icp->name}\" ({$industryLabel}" . ($territoryLabel ? " in {$territoryLabel}" : '') . ').';
+            return "Drafted against your active ICP \"{$icp->name}\" ({$industryLabel}".($territoryLabel ? " in {$territoryLabel}" : '').').';
         }
 
-        $intro = "Targeting these {$count} lead" . ($count === 1 ? '' : 's')
-            . " because they relate to your {$industryLabel} focus"
-            . ($territoryLabel ? " in {$territoryLabel}" : '')
-            . '.';
+        $intro = "Targeting these {$count} lead".($count === 1 ? '' : 's')
+            ." because they relate to your {$industryLabel} focus"
+            .($territoryLabel ? " in {$territoryLabel}" : '')
+            .'.';
 
         if ($reasons === []) {
             return $intro;
         }
 
-        return $intro . ' ' . implode(' ', array_slice($reasons, 0, 3));
+        return $intro.' '.implode(' ', array_slice($reasons, 0, 3));
     }
 
     /**

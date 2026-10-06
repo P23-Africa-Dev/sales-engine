@@ -6,7 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Resources\SocialSignalResource;
 use App\Jobs\ProcessSignalReminderJob;
 use App\Jobs\RunSocialListeningJob;
-use App\Models\OutreachIdentity;
+use App\Models\OutreachActivity;
 use App\Models\SignalReminder;
 use App\Models\SocialListeningRun;
 use App\Models\SocialListeningSetting;
@@ -15,9 +15,11 @@ use App\Services\Icp\IcpProfileService;
 use App\Services\Intent\SignalToLeadService;
 use App\Services\Intent\SocialListeningRunService;
 use App\Services\Intent\SocialListeningSettingsService;
+use App\Services\Intent\SocialSourceHealth;
 use App\Services\Outreach\OutreachDraftService;
 use App\Services\Outreach\OutreachSendService;
 use App\Support\OrgContext;
+use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use InvalidArgumentException;
@@ -51,7 +53,7 @@ class SocialListeningController extends Controller
             return response()->json(['message' => 'Activate an ICP profile before viewing social signals.'], 422);
         }
 
-        $query = SocialSignal::query()
+        $query = SocialSignal::query()->with('lead.crmEntry')
             ->with('enrichmentLogs')
             ->where('organization_id', $org->id)
             ->where('icp_profile_id', $icp->id)
@@ -70,7 +72,7 @@ class SocialListeningController extends Controller
         }
 
         if (! empty($data['search'])) {
-            $term = '%' . $data['search'] . '%';
+            $term = '%'.$data['search'].'%';
             $query->where(function ($q) use ($term) {
                 $q->where('post_text', 'like', $term)
                     ->orWhere('company_name', 'like', $term)
@@ -113,7 +115,7 @@ class SocialListeningController extends Controller
     public function showSignal(int $id): JsonResponse
     {
         $org = OrgContext::require();
-        $signal = SocialSignal::query()
+        $signal = SocialSignal::query()->with('lead.crmEntry')
             ->with('enrichmentLogs')
             ->where('organization_id', $org->id)
             ->where('id', $id)
@@ -140,7 +142,7 @@ class SocialListeningController extends Controller
 
         $detected = (clone $base)->count();
         $high = (clone $base)->where('score', '>=', $minScore)->count();
-        $synced = (clone $base)->where('status', 'synced')->count();
+        $synced = (clone $base)->where(fn ($q) => $q->where('status', 'synced')->orWhereHas('lead.crmEntry'))->count();
 
         $weekAgo = now()->subWeek();
         $detectedThisWeek = (clone $base)->where('created_at', '>=', $weekAgo)->count();
@@ -160,7 +162,7 @@ class SocialListeningController extends Controller
                 'last_run_at' => $settings->last_run_at?->toIso8601String(),
                 'cadence_days' => $settings->cadence_days,
                 'freshness_window_days' => (int) ($settings->freshness_window_days ?? 180),
-                'source_health' => \App\Services\Intent\SocialSourceHealth::describe(
+                'source_health' => SocialSourceHealth::describe(
                     $settings,
                     is_array($latestRun?->result_summary) ? ($latestRun->result_summary['sources'] ?? null) : null,
                 ),
@@ -208,8 +210,8 @@ class SocialListeningController extends Controller
 
         if (array_key_exists('meta_page_ids', $data) && is_array($data['meta_page_ids'])) {
             $data['meta_page_ids'] = array_values(array_filter(
-                array_map(fn($id) => ltrim(trim((string) $id), '@'), $data['meta_page_ids']),
-                fn(string $id) => $id !== ''
+                array_map(fn ($id) => ltrim(trim((string) $id), '@'), $data['meta_page_ids']),
+                fn (string $id) => $id !== ''
             ));
         }
 
@@ -309,7 +311,7 @@ class SocialListeningController extends Controller
             return response()->json(['message' => 'Active ICP required.'], 422);
         }
 
-        $signal = SocialSignal::query()
+        $signal = SocialSignal::query()->with('lead.crmEntry')
             ->where('organization_id', $org->id)
             ->where('id', $id)
             ->firstOrFail();
@@ -323,7 +325,7 @@ class SocialListeningController extends Controller
                     return response()->json(['message' => 'Authenticated user required to send email.'], 401);
                 }
 
-                $activity = \App\Models\OutreachActivity::query()->find($draft['activity_id'] ?? null);
+                $activity = OutreachActivity::query()->find($draft['activity_id'] ?? null);
                 $result = $this->outreachSend->queueEmail(
                     $org,
                     $user,
@@ -357,12 +359,12 @@ class SocialListeningController extends Controller
             return response()->json(['message' => 'Authenticated user required.'], 401);
         }
 
-        $signal = SocialSignal::query()
+        $signal = SocialSignal::query()->with('lead.crmEntry')
             ->where('organization_id', $org->id)
             ->where('id', $id)
             ->firstOrFail();
 
-        $remindAt = isset($data['remind_at']) ? \Carbon\Carbon::parse($data['remind_at']) : now()->addDay();
+        $remindAt = isset($data['remind_at']) ? Carbon::parse($data['remind_at']) : now()->addDay();
 
         $reminder = SignalReminder::query()->create([
             'organization_id' => $org->id,
@@ -385,7 +387,7 @@ class SocialListeningController extends Controller
     public function syncToCrm(int $id): JsonResponse
     {
         $org = OrgContext::require();
-        $signal = SocialSignal::query()
+        $signal = SocialSignal::query()->with('lead.crmEntry')
             ->where('organization_id', $org->id)
             ->where('id', $id)
             ->firstOrFail();
@@ -409,7 +411,7 @@ class SocialListeningController extends Controller
     public function dismiss(int $id): JsonResponse
     {
         $org = OrgContext::require();
-        $signal = SocialSignal::query()
+        $signal = SocialSignal::query()->with('lead.crmEntry')
             ->where('organization_id', $org->id)
             ->where('id', $id)
             ->firstOrFail();
@@ -438,7 +440,7 @@ class SocialListeningController extends Controller
             'org_verified_domain' => $setting->org_verified_domain,
             'verification_status' => $setting->verification_status,
             'last_run_at' => $setting->last_run_at?->toIso8601String(),
-            'source_health' => \App\Services\Intent\SocialSourceHealth::describe($setting),
+            'source_health' => SocialSourceHealth::describe($setting),
         ];
     }
 }

@@ -5,18 +5,23 @@ use App\Http\Controllers\Api\V1\ChatController;
 use App\Http\Controllers\Api\V1\CompanyController;
 use App\Http\Controllers\Api\V1\CrmController;
 use App\Http\Controllers\Api\V1\DiscoveryController;
+use App\Http\Controllers\Api\V1\GeoController;
 use App\Http\Controllers\Api\V1\HealthController;
 use App\Http\Controllers\Api\V1\IcpProfileController;
 use App\Http\Controllers\Api\V1\IntegrationController;
 use App\Http\Controllers\Api\V1\LeadSyncController;
 use App\Http\Controllers\Api\V1\MetricsController;
+use App\Http\Controllers\Api\V1\NativeCrmController;
+use App\Http\Controllers\Api\V1\NativeCrmEmailController;
 use App\Http\Controllers\Api\V1\OrganizationController;
 use App\Http\Controllers\Api\V1\OutreachController;
+use App\Http\Controllers\Api\V1\OutreachDashboardController;
 use App\Http\Controllers\Api\V1\OutreachDomainController;
 use App\Http\Controllers\Api\V1\OutreachInboxController;
 use App\Http\Controllers\Api\V1\OutreachSenderController;
 use App\Http\Controllers\Api\V1\OutreachSetupRequestController;
 use App\Http\Controllers\Api\V1\SendGridWebhookController;
+use App\Http\Controllers\Api\V1\SignalTypeController;
 use App\Http\Controllers\Api\V1\SocialListeningController;
 use Illuminate\Support\Facades\Route;
 
@@ -50,8 +55,8 @@ Route::middleware(['auth:sanctum', 'org.resolve'])->group(function () {
     Route::post('/organizations', [OrganizationController::class, 'store']);
     Route::get('/organizations/current', [OrganizationController::class, 'current']);
 
-    Route::get('/signal-types', [\App\Http\Controllers\Api\V1\SignalTypeController::class, 'index']);
-    Route::get('/geo/places', [\App\Http\Controllers\Api\V1\GeoController::class, 'places']);
+    Route::get('/signal-types', [SignalTypeController::class, 'index']);
+    Route::get('/geo/places', [GeoController::class, 'places']);
     Route::post('/icp-profiles/suggest-search-brief', [IcpProfileController::class, 'suggestSearchBrief'])
         ->middleware('throttle:20,1');
     Route::get('/icp-profiles/active', [IcpProfileController::class, 'active']);
@@ -122,6 +127,42 @@ Route::middleware(['auth:sanctum', 'org.resolve'])->group(function () {
     Route::post('/social-listening/signals/{id}/reminder', [SocialListeningController::class, 'setReminder']);
     Route::post('/social-listening/signals/{id}/sync-to-crm', [SocialListeningController::class, 'syncToCrm']);
     Route::post('/social-listening/signals/{id}/dismiss', [SocialListeningController::class, 'dismiss']);
+
+    Route::get('/outreach/dashboard', [OutreachDashboardController::class, 'dashboard']);
+    Route::get('/outreach/activities', [OutreachDashboardController::class, 'index']);
+    Route::prefix('crm')->group(function () {
+        Route::get('/discovery-pending', [NativeCrmController::class, 'pending']);
+        Route::get('/pipelines', [NativeCrmController::class, 'pipelines']);
+        Route::post('/pipelines', [NativeCrmController::class, 'storePipeline']);
+        Route::patch('/pipelines/{id}', [NativeCrmController::class, 'updatePipeline']);
+        Route::post('/pipelines/{id}/delete', [NativeCrmController::class, 'deletePipeline']);
+        Route::post('/pipelines/{id}/set-default', [NativeCrmController::class, 'setDefault']);
+        Route::get('/preferences', [NativeCrmController::class, 'preferences']);
+        Route::put('/preferences/preferred-pipeline', [NativeCrmController::class, 'setPreference']);
+        Route::get('/labels', [NativeCrmController::class, 'labels']);
+        Route::post('/labels', [NativeCrmController::class, 'storeLabel']);
+        Route::post('/labels/reorder', [NativeCrmController::class, 'reorderLabels']);
+        Route::patch('/labels/{id}', [NativeCrmController::class, 'updateLabel']);
+        Route::post('/labels/{id}/delete', [NativeCrmController::class, 'deleteLabel']);
+        Route::get('/assignees', [NativeCrmController::class, 'assignees']);
+        Route::get('/leads', [NativeCrmController::class, 'index']);
+        Route::post('/leads', [NativeCrmController::class, 'store']);
+        Route::get('/leads/pipeline', [NativeCrmController::class, 'pipeline']);
+        Route::get('/leads/analytics', [NativeCrmController::class, 'analytics']);
+        Route::get('/leads/agent-uploads-overview', [NativeCrmController::class, 'uploads']);
+        Route::post('/leads/from-discovery', [NativeCrmController::class, 'saveDiscovery'])->middleware('throttle:30,1');
+        Route::post('/leads/from-social-signal', [NativeCrmController::class, 'saveSignals'])->middleware('throttle:30,1');
+        Route::post('/leads/import/preview', [NativeCrmController::class, 'importPreview']);
+        Route::post('/leads/import', [NativeCrmController::class, 'import']);
+        Route::get('/leads/export', [NativeCrmController::class, 'export']);
+        Route::get('/leads/{id}/emails', [NativeCrmEmailController::class, 'index']);
+        Route::post('/leads/{id}/emails', [NativeCrmEmailController::class, 'store'])->middleware('throttle:20,1');
+        Route::get('/leads/{id}', [NativeCrmController::class, 'show']);
+        Route::patch('/leads/{id}/native', [NativeCrmController::class, 'update']);
+        Route::delete('/leads/{id}', [NativeCrmController::class, 'destroy']);
+        Route::post('/leads/{id}/notes', [NativeCrmController::class, 'note']);
+        Route::post('/leads/{id}/activities', [NativeCrmController::class, 'activity']);
+    });
 
     Route::get('/crm/pipeline', [CrmController::class, 'pipeline']);
     Route::patch('/crm/leads/{id}', [CrmController::class, 'updateLead']);

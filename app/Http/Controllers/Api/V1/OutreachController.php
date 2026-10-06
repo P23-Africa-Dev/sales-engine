@@ -11,6 +11,7 @@ use App\Services\Outreach\OutreachSendService;
 use App\Support\OrgContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 
 class OutreachController extends Controller
@@ -30,7 +31,7 @@ class OutreachController extends Controller
             ->orderByDesc('id')
             ->limit(20)
             ->get()
-            ->map(fn(OutreachActivity $a) => [
+            ->map(fn (OutreachActivity $a) => [
                 'id' => $a->id,
                 'name' => $a->name,
                 'channel' => $a->channel,
@@ -78,7 +79,7 @@ class OutreachController extends Controller
 
         $prompt = $data['prompt'];
         if (($data['channel'] ?? null) === 'whatsapp' && ! str_contains(mb_strtolower($prompt), 'whatsapp')) {
-            $prompt = 'whatsapp: ' . $prompt;
+            $prompt = 'whatsapp: '.$prompt;
         }
 
         $draft = $this->outreach->draftFromPrompt($org, $icp, $prompt);
@@ -206,20 +207,19 @@ class OutreachController extends Controller
         }
 
         try {
-            $result = $this->sendService->queueEmail(
-                $org,
-                $user,
-                $data['to_email'],
-                (string) ($data['subject'] ?? 'Outreach'),
-                $data['body'],
-                $activity,
-                isset($data['inbox_id']) ? (int) $data['inbox_id'] : null,
-            );
+            $result = DB::transaction(function () use ($org, $user, $data, $id) {
+                $activity = OutreachActivity::query()->where('organization_id', $org->id)->lockForUpdate()->findOrFail($id);
+                if ($activity->sent_at || $activity->delivery_status === 'queued') {
+                    return ['message_id' => $activity->sendgrid_message_id, 'sent' => $activity->sent_at !== null, 'queued' => $activity->delivery_status === 'queued', 'delivery_status' => $activity->delivery_status, 'activity_id' => $activity->id];
+                }
+
+                return $this->sendService->queueEmail($org, $user, $data['to_email'], (string) ($data['subject'] ?? 'Outreach'), $data['body'], $activity, isset($data['inbox_id']) ? (int) $data['inbox_id'] : null) + ['activity_id' => $activity->id];
+            });
         } catch (\Throwable $e) {
             return response()->json(['message' => $e->getMessage()], 422);
         }
 
-        return response()->json(['data' => array_merge($result, ['activity_id' => $activity->id])]);
+        return response()->json(['data' => $result]);
     }
 
     public function destroy(int $id): JsonResponse

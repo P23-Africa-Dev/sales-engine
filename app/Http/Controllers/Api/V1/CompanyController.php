@@ -41,7 +41,7 @@ class CompanyController extends Controller
 
     public function leads(Request $request): JsonResponse
     {
-        $leads = Lead::query()
+        $leads = Lead::query()->with('crmEntry')
             ->where('organization_id', OrgContext::require()->id)
             ->when($request->query('stage'), fn ($q) => $q->where('stage', $request->query('stage')))
             ->orderByDesc('score')

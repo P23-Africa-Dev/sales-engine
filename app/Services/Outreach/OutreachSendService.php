@@ -5,6 +5,7 @@ namespace App\Services\Outreach;
 use App\Jobs\SendOutreachEmailJob;
 use App\Models\Organization;
 use App\Models\OutreachActivity;
+use App\Models\OutreachDomainAuthentication;
 use App\Models\OutreachSuppression;
 use App\Models\User;
 use App\Services\Outreach\Transport\SendGridOutreachTransport;
@@ -72,7 +73,7 @@ class OutreachSendService
             body: $body,
             activityId: $activity?->id,
             inboxId: $identity->inboxId,
-        );
+        )->afterCommit();
 
         return [
             'message_id' => null,
@@ -183,7 +184,7 @@ class OutreachSendService
             );
         }
 
-        $domain = \App\Models\OutreachDomainAuthentication::query()
+        $domain = OutreachDomainAuthentication::query()
             ->where('organization_id', $organization->id)
             ->first();
 
