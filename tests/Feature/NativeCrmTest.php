@@ -13,6 +13,23 @@ use Tests\TestCase;
 
 class NativeCrmTest extends TestCase
 {
+    public function test_discovery_crm_save_persists_business_and_individual_types(): void
+    {
+        [, $org] = $this->actingAsOrgMember();
+        $person = Lead::query()->create(['organization_id' => $org->id, 'name' => 'Ada Okafor', 'meta' => ['entity_type' => 'person']]);
+        $business = Lead::query()->create(['organization_id' => $org->id, 'name' => 'Harbor Systems', 'meta' => ['entity_type' => 'company']]);
+
+        $this->withHeaders($this->orgHeaders($org))->postJson('/api/v1/crm/leads/from-discovery', ['lead_ids' => [$person->id, $business->id]])->assertOk();
+
+        $this->assertSame('individual', $person->fresh()->meta['lead_type']);
+        $this->assertSame('business', $business->fresh()->meta['lead_type']);
+        $this->getJson('/api/v1/crm/leads/'.$person->id)->assertOk()->assertJsonPath('data.lead.lead_type', 'individual');
+        $this->getJson('/api/v1/crm/leads/'.$business->id)->assertOk()->assertJsonPath('data.lead.lead_type', 'business');
+        $this->patchJson('/api/v1/crm/leads/'.$person->id.'/native', ['lead_type' => 'individual', 'next_action' => 'Call Ada'])->assertOk()->assertJsonPath('data.lead.lead_type', 'individual');
+        $this->assertSame('individual', $person->fresh()->meta['lead_type']);
+        $this->patchJson('/api/v1/crm/leads/'.$person->id.'/native', ['lead_type' => 'unknown'])->assertUnprocessable()->assertJsonValidationErrors('lead_type');
+    }
+
     public function test_default_setup_is_persistent_and_drafts_are_excluded(): void
     {
         [, $org] = $this->actingAsOrgMember();

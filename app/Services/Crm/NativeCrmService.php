@@ -95,6 +95,7 @@ class NativeCrmService
             $org = OrgContext::require();
             Organization::query()->whereKey($org->id)->lockForUpdate()->firstOrFail();
             $lead = Lead::query()->where('organization_id', $org->id)->lockForUpdate()->findOrFail($id);
+            $lead->meta = array_replace($lead->meta ?? [], ['lead_type' => $lead->leadType()]);
             $existing = $this->entries()->where('lead_id', $lead->id)->first();
             $key = $this->identity($lead);
             $duplicate = ! $existing && $key ? $this->entries()->where('identity_key', $key)->first() : null;
@@ -184,6 +185,7 @@ class NativeCrmService
 
         return array_replace($meta, [
             'id' => $lead->id, 'organization_id' => $entry->organization_id, 'company_id' => $entry->organization_id,
+            'lead_type' => $lead->leadType(), 'entity_type' => $lead->leadType() === 'individual' ? 'person' : 'company',
             'pipeline_id' => $entry->pipeline_id, 'name' => $lead->name, 'source' => $lead->source, 'summary' => $lead->summary,
             'status' => $entry->stage->slug, 'priority' => $entry->priority, 'budget_amount' => $entry->budget_amount, 'budget_currency' => $entry->budget_currency,
             'email' => $meta['email'] ?? null, 'phone' => $meta['phone'] ?? null, 'location' => $meta['location'] ?? null,

@@ -2,7 +2,12 @@
 
 namespace Tests\Feature;
 
+use App\Http\Resources\LeadResource;
+use App\Models\ChatMessage;
+use App\Models\ChatSession;
+use App\Models\Company;
 use App\Models\CompanyContact;
+use App\Models\DiscoveryRun;
 use App\Models\IcpProfile;
 use App\Models\Lead;
 use App\Services\Outreach\OutreachDraftService;
@@ -168,7 +173,7 @@ class DiscoveryTest extends TestCase
         ]);
 
         $contact = CompanyContact::query()->create([
-            'company_id' => \App\Models\Company::query()->create([
+            'company_id' => Company::query()->create([
                 'organization_id' => $org->id,
                 'name' => 'Co',
                 'normalized_name' => 'co',
@@ -326,9 +331,9 @@ class DiscoveryTest extends TestCase
 
         // enrichContactDetails is off on this ICP — must read as "never attempted",
         // not "attempted and found nothing" (contact_ready alone can't tell the two apart).
-        $lead = \App\Models\Lead::query()->where('organization_id', $org->id)->firstOrFail();
+        $lead = Lead::query()->where('organization_id', $org->id)->firstOrFail();
         $this->assertSame('not_attempted', $lead->meta['contact_status'] ?? null);
-        $this->assertSame('not_attempted', (new \App\Http\Resources\LeadResource($lead))->toArray(request())['contact_status']);
+        $this->assertSame('not_attempted', (new LeadResource($lead))->toArray(request())['contact_status']);
     }
 
     public function test_lead_resource_exposes_contact_fields(): void
@@ -411,6 +416,7 @@ class DiscoveryTest extends TestCase
         $lead = Lead::query()->where('organization_id', $org->id)->first();
         $this->assertNotNull($lead);
         $this->assertSame('company', $lead->meta['entity_type'] ?? null);
+        $this->assertSame('business', $lead->meta['lead_type'] ?? null);
         $this->assertSame($leadName, $lead->name);
     }
 
@@ -456,7 +462,8 @@ class DiscoveryTest extends TestCase
 
         $response->assertCreated()
             ->assertJsonPath('data.status', 'completed')
-            ->assertJsonPath('data.leads.0.entity_type', 'person');
+            ->assertJsonPath('data.leads.0.entity_type', 'person')
+            ->assertJsonPath('data.leads.0.lead_type', 'individual');
 
         $leadName = (string) $response->json('data.leads.0.name');
         $this->assertStringContainsStringIgnoringCase('Ada', $leadName);
@@ -580,11 +587,11 @@ class DiscoveryTest extends TestCase
             ->assertJsonPath('data.status', 'completed');
 
         $leads = $response->json('data.leads') ?? [];
-        $names = collect($leads)->pluck('name')->map(fn($n) => mb_strtolower((string) $n))->all();
+        $names = collect($leads)->pluck('name')->map(fn ($n) => mb_strtolower((string) $n))->all();
         $this->assertNotContains('loader market research', $names);
         $this->assertNotContains('construction equipment market', $names);
 
-        $person = collect($leads)->first(fn($lead) => ($lead['entity_type'] ?? null) === 'person');
+        $person = collect($leads)->first(fn ($lead) => ($lead['entity_type'] ?? null) === 'person');
         $this->assertNotNull($person);
         $this->assertStringContainsStringIgnoringCase('Ada', (string) $person['name']);
         $linkedin = (string) ($person['linkedin_url'] ?? ($person['profile_urls'][0] ?? ''));
@@ -655,7 +662,7 @@ class DiscoveryTest extends TestCase
         $this->assertLessThan($companyIdx, $peopleIdx, 'people_pass should run before company_pass');
 
         $withLinkedIn = collect($leads)->first(
-            fn($lead) => filled($lead['linkedin_url'] ?? null) || filled($lead['profile_urls'][0] ?? null)
+            fn ($lead) => filled($lead['linkedin_url'] ?? null) || filled($lead['profile_urls'][0] ?? null)
         );
         $this->assertNotNull($withLinkedIn, 'Expected at least one lead to retain a LinkedIn/profile URL from the hit');
         $linkedin = (string) ($withLinkedIn['linkedin_url'] ?? ($withLinkedIn['profile_urls'][0] ?? ''));
@@ -673,14 +680,14 @@ class DiscoveryTest extends TestCase
             'config' => IcpProfile::defaultConfig(),
         ]);
 
-        $session = \App\Models\ChatSession::query()->create([
+        $session = ChatSession::query()->create([
             'organization_id' => $org->id,
             'user_id' => $user->id,
             'icp_profile_id' => $icp->id,
             'title' => 'Generate',
         ]);
 
-        $run = \App\Models\DiscoveryRun::query()->create([
+        $run = DiscoveryRun::query()->create([
             'organization_id' => $org->id,
             'user_id' => $user->id,
             'icp_profile_id' => $icp->id,
@@ -692,7 +699,7 @@ class DiscoveryTest extends TestCase
             'finished_at' => now(),
         ]);
 
-        $placeholder = \App\Models\ChatMessage::query()->create([
+        $placeholder = ChatMessage::query()->create([
             'chat_session_id' => $session->id,
             'role' => 'assistant',
             'body' => 'Lead search is taking longer than usual.',

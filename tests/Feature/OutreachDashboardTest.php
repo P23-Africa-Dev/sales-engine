@@ -3,8 +3,10 @@
 namespace Tests\Feature;
 
 use App\Models\Company;
+use App\Models\IcpProfile;
 use App\Models\Lead;
 use App\Models\OutreachActivity;
+use App\Models\SocialSignal;
 use App\Services\Outreach\OutreachSendService;
 use Tests\TestCase;
 
@@ -34,6 +36,59 @@ class OutreachDashboardTest extends TestCase
         OutreachActivity::query()->create(['organization_id' => $org->id, 'company_id' => $company->id, 'name' => 'Draft', 'channel' => 'email']);
 
         $this->getJson('/api/v1/outreach/dashboard')->assertOk()->assertJsonPath('data.source', 'live')->assertJsonPath('data.businesses.0.industry', 'Software')->assertJsonPath('data.businesses.0.emailsSent', 1)->assertJsonPath('data.businesses.0.prospects', 1)->assertJsonPath('data.metrics.0.primaryPercent', 50)->assertJsonPath('data.metrics.1.total', null)->assertJsonPath('data.outreach.0.businessId', (string) $company->id);
+    }
+
+    public function test_dashboard_distinguishes_people_from_businesses_and_scopes_person_history(): void
+    {
+        [, $org] = $this->actingAsOrgMember();
+        $company = Company::query()->create(['organization_id' => $org->id, 'name' => 'Harbor Systems', 'normalized_name' => 'harbor systems']);
+        $business = Lead::query()->create(['organization_id' => $org->id, 'company_id' => $company->id, 'name' => 'Harbor Systems', 'meta' => ['entity_type' => 'company']]);
+        $person = Lead::query()->create(['organization_id' => $org->id, 'company_id' => $company->id, 'name' => 'Ada Okafor', 'meta' => ['entity_type' => 'person', 'company' => 'Harbor Systems']]);
+        $otherPerson = Lead::query()->create(['organization_id' => $org->id, 'company_id' => $company->id, 'name' => 'Tunde Akin', 'meta' => ['entity_type' => 'individual']]);
+        OutreachActivity::query()->create(['organization_id' => $org->id, 'company_id' => $company->id, 'lead_id' => $person->id, 'name' => 'Ada introduction', 'channel' => 'email', 'sent_at' => now()]);
+        OutreachActivity::query()->create(['organization_id' => $org->id, 'company_id' => $company->id, 'lead_id' => $business->id, 'name' => 'Harbor introduction', 'channel' => 'email']);
+        [, $otherOrg] = $this->createUserWithOrg();
+        Lead::query()->create(['organization_id' => $otherOrg->id, 'name' => 'Private person', 'meta' => ['entity_type' => 'person']]);
+
+        $data = $this->withHeaders($this->orgHeaders($org))->getJson('/api/v1/outreach/dashboard')->assertOk()->json('data');
+        $prospects = collect($data['businesses'])->keyBy('id');
+        $outreach = collect($data['outreach'])->keyBy('name');
+
+        $this->assertCount(3, $prospects);
+        $this->assertSame('business', $prospects[(string) $company->id]['leadType']);
+        $this->assertSame('individual', $prospects['lead:'.$person->id]['leadType']);
+        $this->assertSame('Ada Okafor', $prospects['lead:'.$person->id]['name']);
+        $this->assertSame(1, $prospects['lead:'.$person->id]['emailsSent']);
+        $this->assertSame('individual', $prospects['lead:'.$otherPerson->id]['leadType']);
+        $this->assertSame('lead:'.$person->id, $outreach['Ada introduction']['businessId']);
+        $this->assertSame('individual', $outreach['Ada introduction']['leadType']);
+        $this->assertSame('business', $outreach['Harbor introduction']['leadType']);
+        $this->assertSame('voice-calls', $data['metrics'][2]['id']);
+        $this->assertSame('Incoming', $data['metrics'][2]['primaryLabel']);
+        $this->assertSame('Outgoing', $data['metrics'][2]['secondaryLabel']);
+        $this->assertNull($data['metrics'][2]['total']);
+        $this->assertNull($data['metrics'][2]['primaryCount']);
+        $this->assertNull($data['metrics'][2]['secondaryCount']);
+        $this->getJson('/api/v1/outreach/activities?lead_id='.$person->id)->assertOk()->assertJsonPath('data.total', 1)->assertJsonPath('data.items.0.name', 'Ada introduction');
+    }
+
+    public function test_unlinked_social_outreach_keeps_the_individual_type(): void
+    {
+        [, $org] = $this->actingAsOrgMember();
+        $icp = IcpProfile::query()->create(['organization_id' => $org->id, 'name' => 'Supplier prospects', 'is_active' => true, 'config' => IcpProfile::defaultConfig()]);
+        $signal = SocialSignal::query()->create(['organization_id' => $org->id, 'icp_profile_id' => $icp->id, 'content_hash' => 'person-outreach', 'post_url' => 'https://example.com/post', 'platform' => 'linkedin', 'source_label' => 'LinkedIn', 'source_icon' => 'in', 'score' => 80, 'profile_name' => 'Ada Okafor', 'post_text' => 'Looking for suppliers', 'entity_type' => 'individual', 'status' => 'new']);
+        OutreachActivity::query()->create(['organization_id' => $org->id, 'social_signal_id' => $signal->id, 'name' => 'Ada Okafor', 'channel' => 'email']);
+
+        $this->withHeaders($this->orgHeaders($org))->getJson('/api/v1/outreach/dashboard')->assertOk()->assertJsonPath('data.outreach.0.leadType', 'individual')->assertJsonPath('data.outreach.0.businessId', null);
+    }
+
+    public function test_person_only_company_cache_is_not_displayed_as_an_extra_business(): void
+    {
+        [, $org] = $this->actingAsOrgMember();
+        $company = Company::query()->create(['organization_id' => $org->id, 'name' => 'Ada Okafor', 'normalized_name' => 'ada okafor']);
+        $person = Lead::query()->create(['organization_id' => $org->id, 'company_id' => $company->id, 'name' => 'Ada Okafor', 'meta' => ['entity_type' => 'person']]);
+
+        $this->withHeaders($this->orgHeaders($org))->getJson('/api/v1/outreach/dashboard')->assertOk()->assertJsonPath('data.counts.businesses', 1)->assertJsonPath('data.businesses.0.id', 'lead:'.$person->id)->assertJsonPath('data.businesses.0.leadType', 'individual');
     }
 
     public function test_empty_dashboard_never_supplies_sample_businesses(): void

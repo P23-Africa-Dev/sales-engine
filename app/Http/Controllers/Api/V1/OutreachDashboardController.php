@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Company;
 use App\Models\CrmActivity;
 use App\Models\CrmEntry;
+use App\Models\Lead;
 use App\Models\OutreachActivity;
 use App\Services\Crm\NativeCrmService;
 use App\Support\OrgContext;
@@ -33,6 +34,9 @@ class OutreachDashboardController extends Controller
             } else {
                 $query->where('delivery_status', $request->input('status'));
             }
+        }
+        if ($request->filled('lead_id')) {
+            $query->where('lead_id', $request->integer('lead_id'));
         }
         if ($request->filled('business_id')) {
             $query->where('company_id', $request->integer('business_id'));
@@ -73,17 +77,45 @@ class OutreachDashboardController extends Controller
         $activities = OutreachActivity::query()->where('organization_id', $org->id);
         $sent = (clone $activities)->whereIn('channel', ['email', 'email draft'])->whereNotNull('sent_at')->count();
         $emailTotal = (clone $activities)->whereIn('channel', ['email', 'email draft'])->count();
+        $leads = Lead::query()->where('organization_id', $org->id)->with(['company', 'crmEntry.pipeline', 'crmEntry.assignee', 'crmEntry.creator'])->get();
+        $individuals = $leads->filter(fn (Lead $lead) => $lead->leadType() === 'individual');
         $businesses = Company::query()->where('organization_id', $org->id)->withCount(['leads as prospects_count' => fn (Builder $q) => $q->whereHas('crmEntry')])->orderBy('name')->get();
         $entries = $this->crm->entries()->get()->groupBy(fn (CrmEntry $e) => $e->lead->company_id);
         $counts = (clone $activities)->whereIn('channel', ['email', 'email draft'])->whereNotNull('sent_at')->select('company_id')->selectRaw('count(*) as total')->groupBy('company_id')->pluck('total', 'company_id');
-        $companies = $businesses->map(function (Company $company) use ($entries, $counts) {
+        $companies = $businesses->filter(fn (Company $company) => ! $leads->contains(fn (Lead $lead) => $lead->company_id === $company->id) || $leads->contains(fn (Lead $lead) => $lead->company_id === $company->id && $lead->leadType() === 'business'))->map(function (Company $company) use ($entries, $counts) {
             $entry = $entries->get($company->id)?->first();
             $meta = $company->business_fields ?? [];
 
-            return ['id' => (string) $company->id, 'name' => $company->name, 'company' => $company->name, 'industry' => $company->sector ?? '—', 'country' => $company->country_code ?? '—', 'website' => $company->website ?? '—', 'owner' => $entry?->assignee?->name ?? $entry?->creator?->name ?? '—', 'created' => $company->created_at->toDateString(), 'avatarColor' => '#42a8a1', 'emailsSent' => (int) ($counts[$company->id] ?? 0), 'prospects' => $company->prospects_count, 'followUpsCompleted' => CrmActivity::query()->where('organization_id', $company->organization_id)->where('type', 'follow_up_completed')->whereIn('lead_id', $entries->get($company->id, collect())->pluck('lead_id'))->count(), 'pipeline' => $entry?->pipeline?->name, 'pipelineIds' => $entries->get($company->id, collect())->pluck('pipeline_id')->unique()->map(fn ($id) => (string) $id)->values(), 'email' => $company->email ?? ($entry?->lead?->meta['email'] ?? null)];
+            return ['leadType' => 'business', 'id' => (string) $company->id, 'name' => $company->name, 'company' => $company->name, 'industry' => $company->sector ?? '—', 'country' => $company->country_code ?? '—', 'website' => $company->website ?? '—', 'owner' => $entry?->assignee?->name ?? $entry?->creator?->name ?? '—', 'created' => $company->created_at->toDateString(), 'avatarColor' => '#42a8a1', 'emailsSent' => (int) ($counts[$company->id] ?? 0), 'prospects' => $company->prospects_count, 'followUpsCompleted' => CrmActivity::query()->where('organization_id', $company->organization_id)->where('type', 'follow_up_completed')->whereIn('lead_id', $entries->get($company->id, collect())->pluck('lead_id'))->count(), 'pipeline' => $entry?->pipeline?->name, 'pipelineIds' => $entries->get($company->id, collect())->pluck('pipeline_id')->unique()->map(fn ($id) => (string) $id)->values(), 'email' => $company->email ?? ($entry?->lead?->meta['email'] ?? null)];
         });
+        $individualEmailCounts = (clone $activities)->whereIn('channel', ['email', 'email draft'])->whereNotNull('sent_at')->select('lead_id')->selectRaw('count(*) as total')->groupBy('lead_id')->pluck('total', 'lead_id');
+        $individualFollowUps = CrmActivity::query()->where('organization_id', $org->id)->where('type', 'follow_up_completed')->select('lead_id')->selectRaw('count(*) as total')->groupBy('lead_id')->pluck('total', 'lead_id');
+        $people = $individuals->filter(fn (Lead $lead) => empty($lead->meta['native_crm_lead_id']))->map(function (Lead $lead) use ($individualEmailCounts, $individualFollowUps) {
+            $entry = $lead->crmEntry;
+            $meta = $lead->meta ?? [];
+
+            return [
+                'id' => 'lead:'.$lead->id, 'leadType' => 'individual', 'name' => $lead->name,
+                'company' => $meta['company'] ?? '—', 'industry' => $lead->company?->sector ?? '—',
+                'country' => $lead->company?->country_code ?? '—', 'website' => $meta['website'] ?? '—',
+                'owner' => $entry?->assignee?->name ?? $entry?->creator?->name ?? '—',
+                'created' => $lead->created_at->toDateString(), 'avatarColor' => '#e3a5e9',
+                'emailsSent' => (int) ($individualEmailCounts[$lead->id] ?? 0),
+                'prospects' => $entry ? 1 : 0,
+                'followUpsCompleted' => (int) ($individualFollowUps[$lead->id] ?? 0),
+                'pipeline' => $entry?->pipeline?->name, 'pipelineIds' => $entry ? [(string) $entry->pipeline_id] : [],
+                'email' => $meta['email'] ?? null,
+            ];
+        });
+        $companies = $companies->concat($people)->sortBy('name')->values();
+        $leadTypes = $leads->mapWithKeys(fn (Lead $lead) => [$lead->id => $lead->leadType()]);
         $metric = fn (string $id, string $title, ?int $total, string $primary, string $secondary, ?int $percent) => ['id' => $id, 'title' => $title, 'total' => $total, 'primaryLabel' => $primary, 'secondaryLabel' => $secondary, 'primaryPercent' => $percent, 'secondaryPercent' => null, 'avatars' => 0];
 
-        return response()->json(['data' => ['source' => 'live', 'counts' => ['outreach' => (clone $activities)->count(), 'businesses' => $companies->count()], 'defaultBusinessId' => $companies->first()['id'] ?? null, 'businesses' => $companies, 'pipelines' => $this->crm->pipelines()->orderBy('sort_order')->get(['id', 'name']), 'metrics' => [$metric('email', 'No of Emails', $emailTotal, 'Sent', 'Received unavailable', $emailTotal ? (int) round($sent / $emailTotal * 100) : 0), $metric('sms', 'No of SMS', null, 'Unavailable', 'Unavailable', null), $metric('in-person', 'No of In-persons Outreach', null, 'Unavailable', 'Unavailable', null)], 'outreach' => (clone $activities)->orderByDesc('updated_at')->get()->map(fn (OutreachActivity $a) => ['id' => (string) $a->id, 'businessId' => $a->company_id ? (string) $a->company_id : null, 'name' => $a->name, 'channel' => str_replace(' draft', '', $a->channel), 'status' => $a->delivery_status ?? ($a->sent_at ? 'sent' : 'Draft'), 'owner' => '—', 'created' => $a->created_at->toDateString(), 'avatarColor' => '#42a8a1']), 'supported_channels' => ['email', 'whatsapp']]]);
+        return response()->json(['data' => ['source' => 'live', 'counts' => ['outreach' => (clone $activities)->count(), 'businesses' => $companies->count()], 'defaultBusinessId' => $companies->first()['id'] ?? null, 'businesses' => $companies, 'pipelines' => $this->crm->pipelines()->orderBy('sort_order')->get(['id', 'name']), 'metrics' => [$metric('email', 'No of Emails', $emailTotal, 'Sent', 'Received unavailable', $emailTotal ? (int) round($sent / $emailTotal * 100) : 0), $metric('sms', 'No of SMS', null, 'Unavailable', 'Unavailable', null), array_merge($metric('voice-calls', 'Number of Voice Calls', null, 'Incoming', 'Outgoing', null), ['primaryCount' => null, 'secondaryCount' => null])], 'outreach' => (clone $activities)->with('socialSignal')->orderByDesc('updated_at')->get()->map(function (OutreachActivity $a) use ($leadTypes) {
+            $entityType = $a->meta['lead_type'] ?? $a->meta['entity_type'] ?? $a->socialSignal?->entity_type;
+            $leadType = $leadTypes[$a->lead_id] ?? (in_array($entityType, ['person', 'individual'], true) ? 'individual' : 'business');
+
+            return ['id' => (string) $a->id, 'leadType' => $leadType, 'businessId' => $leadType === 'individual' ? ($a->lead_id ? 'lead:'.$a->lead_id : null) : ($a->company_id ? (string) $a->company_id : null), 'name' => $a->name, 'channel' => str_replace(' draft', '', $a->channel), 'status' => $a->delivery_status ?? ($a->sent_at ? 'sent' : 'Draft'), 'owner' => '—', 'created' => $a->created_at->toDateString(), 'avatarColor' => '#42a8a1'];
+        }), 'supported_channels' => ['email', 'whatsapp']]]);
     }
 }

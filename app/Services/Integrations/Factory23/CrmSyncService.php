@@ -4,9 +4,9 @@ namespace App\Services\Integrations\Factory23;
 
 use App\Models\Lead;
 use App\Models\Organization;
+use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
-use App\Services\Integrations\Factory23\CrmSyncException;
 
 class CrmSyncService
 {
@@ -104,7 +104,7 @@ class CrmSyncService
                 $pushed++;
             } catch (\Throwable $e) {
                 $skipped++;
-                $errors[] = "Lead {$lead->id}: " . $e->getMessage();
+                $errors[] = "Lead {$lead->id}: ".$e->getMessage();
                 Log::warning('F23 CRM sync failed', ['lead_id' => $lead->id, 'error' => $e->getMessage()]);
             }
         }
@@ -214,7 +214,7 @@ class CrmSyncService
         }
 
         $payload = $this->buildLeadPayload($organization, $lead, $options);
-        $response = $this->postWithRetry($base . '/api/v1/crm/leads', $token, $payload, $organization, $lead);
+        $response = $this->postWithRetry($base.'/api/v1/crm/leads', $token, $payload, $organization, $lead);
 
         $f23LeadId = (string) ($response->json('data.lead.id') ?? $response->json('data.id') ?? $response->json('id') ?? '');
 
@@ -268,7 +268,7 @@ class CrmSyncService
 
             $response = $this->requestWithRetry(
                 'patch',
-                $base . '/api/v1/crm/leads/' . $f23LeadId . '/merge',
+                $base.'/api/v1/crm/leads/'.$f23LeadId.'/merge',
                 $token,
                 $mergePayload,
                 $organization,
@@ -319,7 +319,7 @@ class CrmSyncService
         array $payload,
         Organization $organization,
         Lead $lead,
-    ): \Illuminate\Http\Client\Response {
+    ): Response {
         return $this->requestWithRetry('post', $url, $token, $payload, $organization, $lead);
     }
 
@@ -333,7 +333,7 @@ class CrmSyncService
         array $payload,
         Organization $organization,
         Lead $lead,
-    ): \Illuminate\Http\Client\Response {
+    ): Response {
         $attempts = 3;
         $lastException = null;
 
@@ -355,6 +355,7 @@ class CrmSyncService
 
                 if (in_array($response->status(), [500, 502, 503, 504], true) && $attempt < $attempts) {
                     usleep((int) (1000000 * (2 ** ($attempt - 1))));
+
                     continue;
                 }
 
@@ -377,7 +378,7 @@ class CrmSyncService
                     'method' => $method,
                 ]);
                 throw new CrmSyncException(
-                    'Could not save lead to CRM (HTTP ' . $response->status() . '): ' . $message,
+                    'Could not save lead to CRM (HTTP '.$response->status().'): '.$message,
                     'push_failed',
                 );
             } catch (CrmSyncException $e) {
@@ -386,6 +387,7 @@ class CrmSyncService
                 $lastException = $e;
                 if ($attempt < $attempts) {
                     usleep((int) (1000000 * (2 ** ($attempt - 1))));
+
                     continue;
                 }
             }
@@ -397,7 +399,7 @@ class CrmSyncService
         );
     }
 
-    private function formatValidationMessage(\Illuminate\Http\Client\Response $response): string
+    private function formatValidationMessage(Response $response): string
     {
         $errors = $response->json('errors');
         if (is_array($errors) && $errors !== []) {
@@ -413,7 +415,7 @@ class CrmSyncService
             }
 
             if ($parts !== []) {
-                return 'Some lead details could not be saved: ' . implode(' ', $parts);
+                return 'Some lead details could not be saved: '.implode(' ', $parts);
             }
         }
 
@@ -424,7 +426,7 @@ class CrmSyncService
             return 'A website/profile URL on this lead was invalid, so it was not sent. Other details can still be saved. Try again.';
         }
 
-        return 'Could not save lead to CRM: ' . $message;
+        return 'Could not save lead to CRM: '.$message;
     }
 
     /**
@@ -454,6 +456,7 @@ class CrmSyncService
             : $this->resolveDefaultLeadStatus($organization);
 
         $raw = array_filter([
+            'lead_type' => $lead->leadType(),
             'name' => $lead->name,
             'source' => 'sales_engine',
             'status' => $status,
@@ -476,13 +479,12 @@ class CrmSyncService
                 'pipeline_stage' => $pipelineStage !== '' ? $pipelineStage : null,
                 'social_signal_id' => $meta['social_signal_id'] ?? null,
             ]),
-        ], fn($value) => $value !== null);
+        ], fn ($value) => $value !== null);
 
         return $this->fieldValidator->sanitizePayload($raw)['payload'];
     }
 
     /**
-     * @param  mixed  $profileUrls
      * @return list<string>
      */
     private function normalizeProfileUrls(mixed $profileUrls, mixed $linkedinUrl): array
@@ -527,7 +529,7 @@ class CrmSyncService
 
         $response = Http::timeout(10)
             ->withToken($token)
-            ->get($base . '/api/v1/crm/labels', [
+            ->get($base.'/api/v1/crm/labels', [
                 'company_id' => $organization->f23_company_id,
             ]);
 

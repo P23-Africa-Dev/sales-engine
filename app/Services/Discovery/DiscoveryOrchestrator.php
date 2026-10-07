@@ -2,6 +2,9 @@
 
 namespace App\Services\Discovery;
 
+use App\Jobs\ResolveLeadLocationJob;
+use App\Models\ChatMessage;
+use App\Models\Company;
 use App\Models\DiscoveryRun;
 use App\Models\IcpProfile;
 use App\Models\Lead;
@@ -9,19 +12,16 @@ use App\Models\LeadSignal;
 use App\Models\Organization;
 use App\Models\User;
 use App\Services\CompanyCache\CompanyCacheService;
+use App\Services\Discovery\Adapters\SerperDiscoveryAdapter;
 use App\Services\Discovery\Contracts\DiscoverySourceInterface;
-use App\Services\Discovery\DiscoveryGeo;
 use App\Services\Discovery\DTO\IcpBrief;
 use App\Services\Discovery\DTO\RawDiscoveryHit;
 use App\Services\Discovery\DTO\SearchContext;
-use App\Services\Discovery\QueryIntentService;
-use App\Services\Discovery\PersonNameValidator;
-use App\Services\Discovery\CompanyNameValidator;
-use App\Services\Discovery\FactualListSynthesizer;
-use App\Services\Extraction\ExtractionService;
 use App\Services\Enrichment\LeadProfileEnrichmentService;
 use App\Services\Enrichment\ProfileUrlValidator;
+use App\Services\Extraction\ExtractionService;
 use App\Services\IcpFiltering\DTO\CandidateCompany;
+use App\Services\IcpFiltering\DTO\IcpFilterResult;
 use App\Services\IcpFiltering\IcpFilterService;
 use App\Services\Scoring\ScoringService;
 use Illuminate\Support\Collection;
@@ -324,7 +324,7 @@ class DiscoveryOrchestrator
                         }
 
                         $this->qualityThreshold = self::QUALITY_VOLUME;
-                        $this->appendStage($run, 'backfill_pass_' . $pass);
+                        $this->appendStage($run, 'backfill_pass_'.$pass);
                         $backfillPasses++;
 
                         $backfillQueries = $this->queryVariationGenerator->generateBackfill(
@@ -642,7 +642,7 @@ class DiscoveryOrchestrator
                         'gate_stats' => $this->gateStats,
                         'unused_hits' => $unusedHits,
                         'unused_hit_urls' => array_values(array_filter(array_map(
-                            static fn(array $hit): string => trim((string) ($hit['url'] ?? '')),
+                            static fn (array $hit): string => trim((string) ($hit['url'] ?? '')),
                             $unusedHits,
                         ))),
                         'serper_geo' => $this->discoveryGeo->shouldApplyRetrievalGeo($brief)
@@ -775,9 +775,10 @@ class DiscoveryOrchestrator
 
         return $kept !== [] ? $kept : [$region['label']];
     }
+
     /**
      * @param  list<array{label: string, gl: string, hunterCountry: string, aliases: list<string>, cities: array<string, string>}>|null  $regions
-     *                                                                                                                                  When set, every region is searched in the same wave with its own geography.
+     *                                                                                                                                             When set, every region is searched in the same wave with its own geography.
      */
     private function collectHitsForTerritory(
         IcpBrief $brief,
@@ -791,7 +792,7 @@ class DiscoveryOrchestrator
         $fanOut = $overrideQueries !== null || $this->shouldUseFanOut($effectiveLimit);
         $enabledSources = array_values(array_filter(
             $this->sources,
-            fn(DiscoverySourceInterface $source): bool => $source->isEnabled()
+            fn (DiscoverySourceInterface $source): bool => $source->isEnabled()
         ));
         $sourcesChecked = count($enabledSources);
 
@@ -850,7 +851,7 @@ class DiscoveryOrchestrator
         $serper = null;
         $otherSources = [];
         foreach ($enabledSources as $source) {
-            if ($source instanceof \App\Services\Discovery\Adapters\SerperDiscoveryAdapter) {
+            if ($source instanceof SerperDiscoveryAdapter) {
                 $serper = $source;
             } else {
                 $otherSources[] = $source;
@@ -884,7 +885,7 @@ class DiscoveryOrchestrator
                     continue;
                 }
 
-                $cacheKey = $source->key() . '|' . mb_strtolower(trim($primaryBrief->searchQuery())) . '|' . $effectiveLimit . '|' . mb_strtolower($this->discoveryGeo->primaryLabel($scopedBrief));
+                $cacheKey = $source->key().'|'.mb_strtolower(trim($primaryBrief->searchQuery())).'|'.$effectiveLimit.'|'.mb_strtolower($this->discoveryGeo->primaryLabel($scopedBrief));
                 if (isset($this->registryHitCache[$cacheKey])) {
                     $batch = $this->registryHitCache[$cacheKey];
                 } else {
@@ -904,7 +905,7 @@ class DiscoveryOrchestrator
 
                 if ($label !== '') {
                     $batch = $batch
-                        ->map(fn(RawDiscoveryHit $hit): RawDiscoveryHit => $hit->withRegion($label))
+                        ->map(fn (RawDiscoveryHit $hit): RawDiscoveryHit => $hit->withRegion($label))
                         ->values();
                 }
 
@@ -968,7 +969,7 @@ class DiscoveryOrchestrator
         return $hits->filter(function (RawDiscoveryHit $hit) use (&$seen): bool {
             $nameKey = mb_strtolower(trim($hit->name));
             $urlKey = mb_strtolower(trim((string) ($hit->url ?? '')));
-            $dedupeKey = $urlKey !== '' ? $nameKey . '|' . $urlKey : $nameKey;
+            $dedupeKey = $urlKey !== '' ? $nameKey.'|'.$urlKey : $nameKey;
 
             if ($dedupeKey === '' || isset($seen[$dedupeKey])) {
                 return false;
@@ -1011,7 +1012,7 @@ class DiscoveryOrchestrator
     public function enabledSources(): array
     {
         return collect($this->sources)
-            ->map(fn(DiscoverySourceInterface $s) => [
+            ->map(fn (DiscoverySourceInterface $s) => [
                 'key' => $s->key(),
                 'enabled' => $s->isEnabled(),
             ])
@@ -1040,7 +1041,7 @@ class DiscoveryOrchestrator
         $seenNames = $seenLeadNames;
 
         /** @var RawDiscoveryHit $hit */
-        foreach ($hits->unique(fn(RawDiscoveryHit $h) => mb_strtolower($h->name . ($h->url ?? ''))) as $hit) {
+        foreach ($hits->unique(fn (RawDiscoveryHit $h) => mb_strtolower($h->name.($h->url ?? ''))) as $hit) {
             $extractions = $this->extraction->extractMany($hit, $brief, $organization);
 
             foreach ($extractions as $extracted) {
@@ -1101,8 +1102,8 @@ class DiscoveryOrchestrator
         $seenNames = $seenLeadNames;
 
         $orderedHits = $hits
-            ->unique(fn(RawDiscoveryHit $h) => mb_strtolower($h->name . '|' . (string) $h->url))
-            ->sortByDesc(fn(RawDiscoveryHit $h): int => $this->gatherPriority($h, $brief))
+            ->unique(fn (RawDiscoveryHit $h) => mb_strtolower($h->name.'|'.(string) $h->url))
+            ->sortByDesc(fn (RawDiscoveryHit $h): int => $this->gatherPriority($h, $brief))
             ->values();
         $gatherCap = $this->gatherCap($effectiveLimit, $orderedHits->count());
 
@@ -1124,6 +1125,7 @@ class DiscoveryOrchestrator
             $urlLower = mb_strtolower((string) $hit->url);
             if ($this->isNonEntityLeadUrl($urlLower)) {
                 $this->gateStats['gather_junk_title']++;
+
                 continue;
             }
 
@@ -1133,6 +1135,7 @@ class DiscoveryOrchestrator
                 && ! str_contains($urlLower, 'linkedin.com/company/')
             ) {
                 $this->gateStats['gather_junk_title']++;
+
                 continue;
             }
 
@@ -1150,6 +1153,7 @@ class DiscoveryOrchestrator
                     && ! $this->companyNameValidator->isValidCompanyName($hit->name, [])
                 ) {
                     $this->gateStats['gather_invalid_name']++;
+
                     continue;
                 }
             } elseif (! $this->companyNameValidator->isValidCompanyName($hit->name, [
@@ -1157,6 +1161,7 @@ class DiscoveryOrchestrator
                 'url' => $hit->url,
             ])) {
                 $this->gateStats['gather_invalid_name']++;
+
                 continue;
             }
 
@@ -1176,6 +1181,7 @@ class DiscoveryOrchestrator
 
                 if ($displayName === '' || mb_strtolower($displayName) === mb_strtolower($brief->name)) {
                     $this->gateStats['gather_empty_extract']++;
+
                     continue;
                 }
 
@@ -1192,6 +1198,7 @@ class DiscoveryOrchestrator
                     (bool) ($extracted['from_listicle'] ?? false),
                 )) {
                     $this->gateStats['gather_creatability']++;
+
                     continue;
                 }
 
@@ -1308,6 +1315,7 @@ class DiscoveryOrchestrator
 
             if (! $this->passesCreatabilityGate($brief, $displayName, $extracted, $fromListicle)) {
                 $this->gateStats['dropped_creatability']++;
+
                 continue;
             }
 
@@ -1325,7 +1333,7 @@ class DiscoveryOrchestrator
             if (trim((string) ($extracted['location'] ?? $extracted['territory'] ?? $extracted['city'] ?? '')) === '') {
                 $inferred = trim((string) ($hit->location ?? ''));
                 if ($inferred === '') {
-                    $haystack = trim($hit->name . ' ' . ($hit->snippet ?? '') . ' ' . ($hit->url ?? '') . ' ' . ($hit->website ?? ''));
+                    $haystack = trim($hit->name.' '.($hit->snippet ?? '').' '.($hit->url ?? '').' '.($hit->website ?? ''));
                     $inferred = (string) ($this->discoveryGeo->inferLocationFromText($haystack) ?? '');
                 }
                 if ($inferred !== '') {
@@ -1345,13 +1353,14 @@ class DiscoveryOrchestrator
             if ($enforceTerritory && ! $locationUnknown && ! $territoryPassed) {
                 $this->gateStats['dropped_hard_gate']++;
                 $this->gateStats['wrong_country_dropped']++;
+
                 continue;
             }
 
             if ($enforceTerritory && $locationUnknown) {
                 if ($this->hasStrongGeoProxy($brief, $hit, $extracted)) {
                     $proxyLocation = $this->discoveryGeo->inferLocationFromText(
-                        trim($hit->name . ' ' . ($hit->snippet ?? '') . ' ' . ($hit->url ?? '') . ' ' . ($hit->website ?? ''))
+                        trim($hit->name.' '.($hit->snippet ?? '').' '.($hit->url ?? '').' '.($hit->website ?? ''))
                     );
                     if ($proxyLocation !== null) {
                         $extracted['location'] = $proxyLocation;
@@ -1365,6 +1374,7 @@ class DiscoveryOrchestrator
                     // location evidence they cannot be shown against a territory-scoped ICP.
                     $this->gateStats['dropped_hard_gate']++;
                     $this->gateStats['dropped_unverified_country']++;
+
                     continue;
                 } elseif (
                     $this->hasTrustedEntityProfileUrl($brief, $extracted, $hit)
@@ -1401,9 +1411,11 @@ class DiscoveryOrchestrator
                 } elseif ($territoryFailed && ! $locationUnknown) {
                     $this->gateStats['dropped_hard_gate']++;
                     $this->gateStats['wrong_country_dropped']++;
+
                     continue;
                 } elseif ($industryFailed && ! $this->hasTrustedEntityProfileUrl($brief, $extracted, $hit)) {
                     $this->gateStats['dropped_hard_gate']++;
+
                     continue;
                 } else {
                     $icpRecommended = false;
@@ -1429,6 +1441,7 @@ class DiscoveryOrchestrator
                 );
                 if ($fit['unknown'] && ! $this->hasTrustedEntityProfileUrl($brief, $extracted, $hit)) {
                     $this->gateStats['dropped_hard_gate']++;
+
                     continue;
                 }
             }
@@ -1449,11 +1462,13 @@ class DiscoveryOrchestrator
                     // Unverifiable country on a database row: drop rather than imply a match.
                     $this->gateStats['dropped_hard_gate']++;
                     $this->gateStats['dropped_unverified_country']++;
+
                     continue;
                 }
                 if ($hunterLocation !== '' && ! $this->passesIcpHardGate($brief, $hunterExtracted)) {
                     $this->gateStats['dropped_hard_gate']++;
                     $this->gateStats['wrong_country_dropped']++;
+
                     continue;
                 }
             }
@@ -1501,6 +1516,7 @@ class DiscoveryOrchestrator
                     if (! (bool) ($postGate->reasons['territory'] ?? true)) {
                         $this->gateStats['dropped_hard_gate']++;
                         $this->gateStats['wrong_country_dropped']++;
+
                         continue;
                     }
                     // Strong geo + trusted entity URL → promote out of fallback low-confidence.
@@ -1678,7 +1694,7 @@ class DiscoveryOrchestrator
     /**
      * @param  array<string, mixed>  $extracted
      */
-    private function icpHardGateResult(IcpBrief $brief, array $extracted): \App\Services\IcpFiltering\DTO\IcpFilterResult
+    private function icpHardGateResult(IcpBrief $brief, array $extracted): IcpFilterResult
     {
         $industry = trim((string) ($extracted['industry'] ?? '')) ?: null;
         $territory = trim((string) ($extracted['location'] ?? $extracted['territory'] ?? $extracted['city'] ?? '')) ?: null;
@@ -1895,11 +1911,11 @@ class DiscoveryOrchestrator
         }
 
         $haystack = trim(
-            (string) ($extracted['location'] ?? '') . ' '
-                . $hit->name . ' '
-                . (string) ($hit->snippet ?? '') . ' '
-                . (string) ($hit->url ?? '') . ' '
-                . (string) ($hit->website ?? '')
+            (string) ($extracted['location'] ?? '').' '
+                .$hit->name.' '
+                .(string) ($hit->snippet ?? '').' '
+                .(string) ($hit->url ?? '').' '
+                .(string) ($hit->website ?? '')
         );
         $inferred = $this->discoveryGeo->inferLocationFromText($haystack);
         if ($inferred === null || trim($inferred) === '') {
@@ -1953,7 +1969,7 @@ class DiscoveryOrchestrator
             $existing = is_array($extracted['profile_urls'] ?? null) ? $extracted['profile_urls'] : [];
             $existing[] = $hitUrl;
             $extracted['profile_urls'] = array_values(array_unique(array_filter(
-                array_map(static fn($u) => is_string($u) ? trim($u) : '', $existing),
+                array_map(static fn ($u) => is_string($u) ? trim($u) : '', $existing),
             )));
 
             $hitLower = mb_strtolower($hitUrl);
@@ -2011,7 +2027,7 @@ class DiscoveryOrchestrator
             return false;
         }
 
-        $withScheme = str_contains($normalized, '://') ? $normalized : 'https://' . $normalized;
+        $withScheme = str_contains($normalized, '://') ? $normalized : 'https://'.$normalized;
         $host = mb_strtolower((string) (parse_url($withScheme, PHP_URL_HOST) ?: ''));
         $path = (string) (parse_url($withScheme, PHP_URL_PATH) ?: '');
 
@@ -2038,7 +2054,7 @@ class DiscoveryOrchestrator
             return false;
         }
 
-        $withScheme = str_contains($normalized, '://') ? $normalized : 'https://' . $normalized;
+        $withScheme = str_contains($normalized, '://') ? $normalized : 'https://'.$normalized;
         $host = mb_strtolower((string) (parse_url($withScheme, PHP_URL_HOST) ?: $normalized));
 
         return str_contains($host, 'linkedin.com')
@@ -2086,7 +2102,7 @@ class DiscoveryOrchestrator
                 continue;
             }
 
-            $withScheme = str_contains($url, '://') ? $url : 'https://' . $url;
+            $withScheme = str_contains($url, '://') ? $url : 'https://'.$url;
             $path = (string) (parse_url($withScheme, PHP_URL_PATH) ?: '');
             $host = mb_strtolower((string) (parse_url($withScheme, PHP_URL_HOST) ?: ''));
 
@@ -2111,7 +2127,7 @@ class DiscoveryOrchestrator
     /**
      * @param  array<string, mixed>  $extracted
      * @param  array{icp_fit_score: float, intent_score: float, priority_score: float, query_relevance_score: float, rationale: string}  $scores
-     * @return array{company: \App\Models\Company, payload: array<string, mixed>}
+     * @return array{company: Company, payload: array<string, mixed>}
      */
     private function createLeadFromExtraction(
         Organization $organization,
@@ -2169,7 +2185,7 @@ class DiscoveryOrchestrator
         }
 
         $profileUrls = is_array($extracted['profile_urls'] ?? null)
-            ? array_values(array_filter($extracted['profile_urls'], fn($u) => is_string($u) && trim($u) !== ''))
+            ? array_values(array_filter($extracted['profile_urls'], fn ($u) => is_string($u) && trim($u) !== ''))
             : [];
 
         $candidateUrls = [];
@@ -2322,6 +2338,7 @@ class DiscoveryOrchestrator
             'save_status' => Lead::SAVE_DRAFT,
             'meta' => array_filter([
                 'entity_type' => $entityType,
+                'lead_type' => $entityType === 'person' ? 'individual' : 'business',
                 'rationale' => $scores['rationale'],
                 'low_confidence' => (bool) ($extracted['low_confidence'] ?? false),
                 'title' => $extracted['title'] ?? null,
@@ -2347,7 +2364,7 @@ class DiscoveryOrchestrator
                 'query_relevance_score' => (int) round($scores['query_relevance_score']),
                 'query_match' => $queryMatch,
                 'icp_relevance_reason' => trim((string) ($scores['icp_relevance_reason'] ?? '')) ?: null,
-            ], fn($v) => $v !== null && $v !== ''),
+            ], fn ($v) => $v !== null && $v !== ''),
         ]);
 
         return [
@@ -2359,6 +2376,7 @@ class DiscoveryOrchestrator
                 'score' => (int) round((float) $lead->score),
                 'summary' => $lead->summary,
                 'entity_type' => $entityType,
+                'lead_type' => $entityType === 'person' ? 'individual' : 'business',
                 'title' => $extracted['title'] ?? null,
                 'company' => $metaCompany,
                 'contact_person' => $entityType === 'company' && $contactPerson !== '' ? $contactPerson : null,
@@ -2507,7 +2525,7 @@ class DiscoveryOrchestrator
             ? 'selected markets'
             : (count($countries) === 1
                 ? $countries[0]
-                : $countries[0] . ' and ' . $countries[1] . (count($countries) > 2 ? ' (+' . (count($countries) - 2) . ')' : ''));
+                : $countries[0].' and '.$countries[1].(count($countries) > 2 ? ' (+'.(count($countries) - 2).')' : ''));
 
         $stillSearching = $count < $effectiveLimit;
         $progressMessage = $stillSearching
@@ -2541,7 +2559,7 @@ class DiscoveryOrchestrator
             return;
         }
 
-        $placeholder = \App\Models\ChatMessage::query()
+        $placeholder = ChatMessage::query()
             ->where('chat_session_id', $run->chat_session_id)
             ->where('role', 'assistant')
             ->orderByDesc('id')
@@ -2662,7 +2680,7 @@ class DiscoveryOrchestrator
             return true;
         }
 
-        $haystack = trim($hit->name . ' ' . ($hit->snippet ?? '') . ' ' . ($hit->url ?? '') . ' ' . ($hit->website ?? ''));
+        $haystack = trim($hit->name.' '.($hit->snippet ?? '').' '.($hit->url ?? '').' '.($hit->website ?? ''));
 
         return $this->discoveryGeo->inferLocationFromText($haystack) !== null;
     }
@@ -2695,13 +2713,13 @@ class DiscoveryOrchestrator
 
         if ($brief->isPeopleSearch()) {
             return $seed->filter(
-                fn(RawDiscoveryHit $hit): bool => str_contains(mb_strtolower((string) $hit->url), 'linkedin.com/in/')
+                fn (RawDiscoveryHit $hit): bool => str_contains(mb_strtolower((string) $hit->url), 'linkedin.com/in/')
             )->values();
         }
 
         if ($brief->isCompanySearch()) {
             return $seed->filter(
-                fn(RawDiscoveryHit $hit): bool => ! str_contains(mb_strtolower((string) $hit->url), 'linkedin.com/in/')
+                fn (RawDiscoveryHit $hit): bool => ! str_contains(mb_strtolower((string) $hit->url), 'linkedin.com/in/')
             )->values();
         }
 
@@ -2807,10 +2825,10 @@ class DiscoveryOrchestrator
             $url = mb_strtolower(trim((string) ($lead['source_url'] ?? $lead['linkedin_url'] ?? $lead['website'] ?? '')));
             $name = mb_strtolower(trim((string) ($lead['name'] ?? '')));
             if ($url !== '') {
-                $used['url:' . $url] = true;
+                $used['url:'.$url] = true;
             }
             if ($name !== '') {
-                $used['name:' . $name] = true;
+                $used['name:'.$name] = true;
             }
         }
 
@@ -2819,12 +2837,12 @@ class DiscoveryOrchestrator
         foreach ($this->allCollectedHits as $snap) {
             $url = mb_strtolower(trim((string) ($snap['url'] ?? '')));
             $name = mb_strtolower(trim((string) ($snap['name'] ?? '')));
-            $key = $url !== '' ? 'url:' . $url : 'name:' . $name;
+            $key = $url !== '' ? 'url:'.$url : 'name:'.$name;
             if ($key === 'url:' || $key === 'name:' || isset($seen[$key])) {
                 continue;
             }
             $seen[$key] = true;
-            if (isset($used['url:' . $url]) || isset($used['name:' . $name])) {
+            if (isset($used['url:'.$url]) || isset($used['name:'.$name])) {
                 continue;
             }
             $unused[] = $snap;
@@ -2915,7 +2933,7 @@ class DiscoveryOrchestrator
                 continue;
             }
 
-            \App\Jobs\ResolveLeadLocationJob::dispatch($leadId);
+            ResolveLeadLocationJob::dispatch($leadId);
         }
     }
 }

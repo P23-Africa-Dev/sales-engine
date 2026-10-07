@@ -95,6 +95,7 @@ class SignalToLeadService
             'competitors' => $signal->competitors ?: null,
             'signal_source' => $signal->platform,
             'entity_type' => $isIndividual ? 'individual' : 'company',
+            'lead_type' => $isIndividual ? 'individual' : 'business',
             'crm_destination' => $this->resolveCrmDestination($organization, $signal),
         ], static fn ($value) => $value !== null && $value !== [] && $value !== '');
 

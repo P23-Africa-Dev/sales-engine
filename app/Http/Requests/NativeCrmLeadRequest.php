@@ -18,6 +18,7 @@ class NativeCrmLeadRequest extends FormRequest
         $org = OrgContext::require()->id;
 
         return [
+            'lead_type' => ['sometimes', 'in:business,individual'],
             'name' => [$this->isMethod('POST') ? 'required' : 'sometimes', 'string', 'max:255'],
             'pipeline_id' => ['sometimes', 'integer', Rule::exists('crm_pipelines', 'id')->where('organization_id', $org)],
             'status' => ['sometimes', 'string', Rule::exists('crm_stages', 'slug')->where('organization_id', $org)],

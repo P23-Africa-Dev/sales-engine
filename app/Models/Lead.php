@@ -43,6 +43,14 @@ class Lead extends Model
         ];
     }
 
+    public function leadType(): string
+    {
+        $meta = $this->meta ?? [];
+        $type = $meta['lead_type'] ?? $meta['entity_type'] ?? 'business';
+
+        return in_array($type, ['person', 'individual'], true) ? 'individual' : 'business';
+    }
+
     public function crmEntry(): HasOne
     {
         return $this->hasOne(CrmEntry::class);

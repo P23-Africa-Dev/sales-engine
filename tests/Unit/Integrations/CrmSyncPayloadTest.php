@@ -3,7 +3,6 @@
 namespace Tests\Unit\Integrations;
 
 use App\Models\Lead;
-use App\Models\Organization;
 use App\Services\Integrations\Factory23\CrmSyncService;
 use Illuminate\Support\Facades\Http;
 use ReflectionMethod;
@@ -23,6 +22,7 @@ class CrmSyncPayloadTest extends TestCase
             'score' => 90,
             'summary' => '1. Elon Musk · 2. Larry Page',
             'meta' => [
+                'entity_type' => 'person',
                 'title' => 'CEO',
                 'company' => 'Tesla',
                 'location' => 'Austin, TX',
@@ -41,6 +41,7 @@ class CrmSyncPayloadTest extends TestCase
         /** @var array<string, mixed> $payload */
         $payload = $method->invoke($service, $org, $lead);
 
+        $this->assertSame('individual', $payload['lead_type']);
         $this->assertSame('Elon Musk', $payload['name']);
         $this->assertSame('CEO', $payload['position']);
         $this->assertSame('Tesla', $payload['company_name']);
