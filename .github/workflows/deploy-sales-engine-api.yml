@@ -1,0 +1,206 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Sales Engine API — Production Deploy Workflow
+#
+# The Laravel app lives in backend/. This workflow stays at the repository
+# root because GitHub Actions only runs workflows from /.github/workflows.
+#
+# Triggers:
+#   push to `main`     → test + build + deploy
+#   workflow_dispatch  → same
+#
+# Required GitHub Secrets:
+#   DO_ACCESS_TOKEN   Personal access token for the new DigitalOcean account (factory-reg)
+#   DROPLET_SSH_KEY   Private key authorized on root@144.126.227.55
+# ─────────────────────────────────────────────────────────────────────────────
+name: Deploy to Production
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  REGISTRY: registry.digitalocean.com/factory-reg
+  IMAGE_NAME: registry.digitalocean.com/factory-reg/sales-engine-api
+  DROPLET_HOST: 144.126.227.55
+
+jobs:
+  # ── Job 1: Lint & Test ────────────────────────────────────────────────────
+  test:
+    name: Lint & Test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: test_root_pass
+          MYSQL_DATABASE: sales_engine_test
+          MYSQL_USER: sales_engine_test
+          MYSQL_PASSWORD: sales_engine_test_pass
+        ports: ["3306:3306"]
+        options: >-
+          --health-cmd="mysqladmin ping -uroot -ptest_root_pass --silent"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+      redis:
+        image: redis:7.2-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PHP 8.3
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.3"
+          extensions: pdo_mysql, mbstring, bcmath, gd, zip, pcntl, exif
+          coverage: none
+
+      - name: Cache Composer dependencies
+        uses: actions/cache@v4
+        with:
+          path: backend/vendor
+          key: composer-${{ hashFiles('backend/composer.lock') }}
+          restore-keys: composer-
+
+      - name: Install dependencies
+        env:
+          COMPOSER_AUTH: '{"github-oauth":{"github.com":"${{ secrets.COMPOSER_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}"}}'
+        run: |
+          for attempt in 1 2 3; do
+            composer install --optimize-autoloader --prefer-dist --no-interaction && exit 0
+            echo "composer install attempt ${attempt} failed; retrying in $((attempt * 20))s"
+            sleep $((attempt * 20))
+          done
+          exit 1
+
+      - name: Copy .env for testing
+        run: cp .env.example .env
+
+      - name: Configure test environment
+        run: |
+          php artisan key:generate
+          sed -i 's/DB_HOST=.*/DB_HOST=127.0.0.1/' .env
+          sed -i 's/DB_DATABASE=.*/DB_DATABASE=sales_engine_test/' .env
+          sed -i 's/DB_USERNAME=.*/DB_USERNAME=sales_engine_test/' .env
+          sed -i 's/DB_PASSWORD=.*/DB_PASSWORD=sales_engine_test_pass/' .env
+          sed -i 's/REDIS_HOST=.*/REDIS_HOST=127.0.0.1/' .env
+          sed -i 's/APP_ENV=.*/APP_ENV=testing/' .env
+          sed -i 's/CACHE_STORE=.*/CACHE_STORE=array/' .env
+          sed -i 's/SESSION_DRIVER=.*/SESSION_DRIVER=array/' .env
+          sed -i 's/QUEUE_CONNECTION=.*/QUEUE_CONNECTION=sync/' .env
+
+      - name: Run migrations
+        run: php artisan migrate --force --no-interaction
+
+      - name: Seed signal type definitions (Stage 2 registry)
+        run: php artisan db:seed --class=SignalTypeDefinitionSeeder --force --no-interaction
+
+      - name: Run PHP syntax check
+        run: find app config routes -name "*.php" -print0 | xargs -0 php -l | grep -v "No syntax errors" || true
+
+      - name: Run test suite
+        run: php artisan test
+
+      - name: Health route smoke (artisan)
+        run: |
+          php artisan route:list --path=api/v1/health | grep -q health
+
+  # ── Job 2: Build & Push image ─────────────────────────────────────────────
+  build:
+    name: Build & Push
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    outputs:
+      image_tag: ${{ steps.meta.outputs.version }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install doctl
+        uses: digitalocean/action-doctl@v2
+        with:
+          token: ${{ secrets.DO_ACCESS_TOKEN }}
+
+      - name: Login to DO Container Registry
+        run: doctl registry login --expiry-seconds 600
+
+      - name: Extract metadata (tags, labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha,prefix=,format=short
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: backend
+          file: backend/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=registry,ref=${{ env.IMAGE_NAME }}:buildcache
+          cache-to: type=registry,ref=${{ env.IMAGE_NAME }}:buildcache,mode=max
+          platforms: linux/amd64
+          secrets: |
+            composer_auth={"github-oauth":{"github.com":"${{ secrets.COMPOSER_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}"}}
+
+  # ── Job 3: Deploy to the droplet ─────────────────────────────────────────
+  deploy:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: build
+    environment:
+      name: production
+      url: https://api.salesengine.thefactory23.com/api/v1/health
+
+    steps:
+      - name: Set image tag variable
+        id: tag
+        run: echo "SHA_TAG=$(echo ${{ github.sha }} | cut -c1-7)" >> $GITHUB_OUTPUT
+
+      - name: Deploy to the droplet
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          DO_TOKEN: ${{ secrets.DO_ACCESS_TOKEN }}
+        with:
+          host: ${{ env.DROPLET_HOST }}
+          username: root
+          key: ${{ secrets.DROPLET_SSH_KEY }}
+          envs: DO_TOKEN
+          script_stop: true
+          command_timeout: 20m
+          script: |
+            set -e
+            printf '%s' "$DO_TOKEN" | docker login registry.digitalocean.com -u "$DO_TOKEN" --password-stdin
+            cd /opt/factory
+            TAG="${{ steps.tag.outputs.SHA_TAG }}"
+            sed -i "s|registry.digitalocean.com/factory-reg/sales-engine-api:[A-Za-z0-9_.-]*|registry.digitalocean.com/factory-reg/sales-engine-api:${TAG}|g" docker-compose.yml
+            docker compose pull sales-php sales-queue sales-discovery sales-scheduler
+            docker compose up -d --force-recreate --no-deps sales-php sales-queue sales-discovery sales-scheduler
+            docker compose up -d --force-recreate --no-deps sales-nginx
+            docker exec factory-sales-php-1 php artisan migrate --force --no-interaction
+            HEALTH=$(docker exec factory-sales-nginx-1 wget -qO- http://127.0.0.1/api/v1/health)
+            echo "$HEALTH"
+            echo "$HEALTH" | grep -q '"status":"ok"'
+            echo "$HEALTH" | grep -q '"service":"sales-engine"'

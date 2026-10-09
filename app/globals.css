@@ -1,0 +1,375 @@
+@import "tailwindcss";
+@import "mapbox-gl/dist/mapbox-gl.css";
+@import "react-phone-number-input/style.css";
+
+html {
+  scroll-behavior: smooth;
+}
+
+@keyframes dash {
+  to {
+    stroke-dashoffset: -100;
+  }
+}
+
+.animate-dash-route {
+  animation: dash 12s linear infinite;
+}
+
+.PhoneInput {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.PhoneInputCountry {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: 4px;
+}
+
+.PhoneInputCountryIcon {
+  width: 22px;
+  height: 16px;
+  border-radius: 2px;
+  overflow: hidden;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.05);
+}
+
+.PhoneInputCountryIcon--border {
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.1);
+}
+
+.PhoneInputCountryIconImg {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.PhoneInputCountrySelectArrow {
+  width: 6px;
+  height: 6px;
+  margin-left: 4px;
+  opacity: 0.5;
+}
+
+.PhoneInputInput {
+  flex: 1;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: 14px;
+  color: #555555;
+}
+
+.PhoneInputInput::placeholder {
+  color: #9aa0a6;
+}
+
+.phone-input-default {
+  height: 52px;
+  padding: 0 18px;
+  border-radius: 24px;
+  border: 1px solid #8a8a8a;
+  background: #fff;
+}
+
+.phone-input-compact {
+  height: 49px;
+  padding: 0 16px;
+  border-radius: 12px;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  box-shadow:
+    0px 1px 3px 1px rgba(0, 0, 0, 0.15),
+    0px 1px 2px 0px rgba(0, 0, 0, 0.3);
+}
+
+.phone-input-compact .PhoneInputInput {
+  font-size: 12px;
+  color: #616263;
+}
+
+.phone-input-compact .PhoneInputInput::placeholder {
+  font-size: 10px;
+}
+
+.phone-input-dark {
+  height: 40px;
+  padding: 0 16px;
+  border-radius: 12px;
+  border: 1px solid #2d454b;
+  background: #1a2e33;
+}
+
+.phone-input-dark .PhoneInputInput {
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.phone-input-dark .PhoneInputInput::placeholder {
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.phone-input-dark .PhoneInputCountrySelectArrow {
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.phone-input-enterprise {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.phone-input-enterprise .PhoneInputCountry {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.phone-input-enterprise .PhoneInputCountrySelectArrow {
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.phone-input-enterprise .PhoneInputInput {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: 12px;
+  color: #fff;
+}
+
+.phone-input-enterprise .PhoneInputInput::placeholder {
+  color: rgba(255, 255, 255, 0.2);
+}
+
+@theme {
+  --color-dash-dark: #09232D;
+  --color-dash-teal: #4fd1c5;
+  --color-dash-purple: #d15fe2;
+  --color-dash-orange: #ff7e5f;
+  --color-dash-blue: #3182ce;
+  --color-dash-red: #e53e3e;
+  --color-dash-bg: #f4f7f9;
+  --font-sans: var(--font-poppins);
+}
+
+:root {
+  --font-poppins: "Poppins", sans-serif;
+  --container-padding: 14px;
+  --container-pb: 32px;
+  --map-half-width: min(50% - var(--container-padding), 362px);
+}
+
+@media (min-width: 640px) {
+  :root {
+    --container-padding: 24px;
+    --container-pb: 51px;
+  }
+}
+
+@media (min-width: 1024px) {
+  :root {
+    --container-padding: 32px;
+    --container-pb: 64px;
+  }
+}
+
+@layer utilities {
+  .hero-grid {
+    background-image:
+      linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+    background-size: 40px 40px;
+  }
+
+  .ticket-cutout {
+    --notch-size: 16px;
+    mask-image:
+      radial-gradient(circle var(--notch-size) at 0% 12%,
+        transparent 98%,
+        black 100%),
+      radial-gradient(circle var(--notch-size) at 0% 52%,
+        transparent 98%,
+        black 100%),
+      radial-gradient(circle var(--notch-size) at 100% 12%,
+        transparent 98%,
+        black 100%),
+      radial-gradient(circle var(--notch-size) at 100% 52%,
+        transparent 98%,
+        black 100%);
+    mask-size: 100% 100%;
+    mask-repeat: no-repeat;
+    mask-composite: intersect;
+    -webkit-mask-image:
+      radial-gradient(circle var(--notch-size) at 0% 12%,
+        transparent 98%,
+        black 100%),
+      radial-gradient(circle var(--notch-size) at 0% 52%,
+        transparent 98%,
+        black 100%),
+      radial-gradient(circle var(--notch-size) at 100% 12%,
+        transparent 98%,
+        black 100%),
+      radial-gradient(circle var(--notch-size) at 100% 52%,
+        transparent 98%,
+        black 100%);
+    -webkit-mask-size: 100% 100%;
+    -webkit-mask-repeat: no-repeat;
+    -webkit-mask-composite: source-in;
+  }
+
+  .payroll-cutout {
+    --notch-size: 18px;
+    mask-image:
+      radial-gradient(circle var(--notch-size) at 0% 14%,
+        transparent 98%,
+        black 100%),
+      radial-gradient(circle var(--notch-size) at 0% 75%,
+        transparent 98%,
+        black 100%),
+      radial-gradient(circle var(--notch-size) at 100% 14%,
+        transparent 98%,
+        black 100%),
+      radial-gradient(circle var(--notch-size) at 100% 75%,
+        transparent 98%,
+        black 100%);
+    mask-size: 100% 100%;
+    mask-repeat: no-repeat;
+    mask-composite: intersect;
+    -webkit-mask-image:
+      radial-gradient(circle var(--notch-size) at 0% 14%,
+        transparent 98%,
+        black 100%),
+      radial-gradient(circle var(--notch-size) at 0% 75%,
+        transparent 98%,
+        black 100%),
+      radial-gradient(circle var(--notch-size) at 100% 14%,
+        transparent 98%,
+        black 100%),
+      radial-gradient(circle var(--notch-size) at 100% 75%,
+        transparent 98%,
+        black 100%);
+    -webkit-mask-size: 100% 100%;
+    -webkit-mask-repeat: no-repeat;
+    -webkit-mask-composite: source-in;
+  }
+}
+
+@utility no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* Custom Mapbox Popup Styles */
+.custom-dark-popup .mapboxgl-popup-content {
+  background: rgba(255, 255, 255, 0.96);
+  padding: 0;
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.18);
+  border-radius: 18px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  backdrop-filter: blur(18px);
+}
+
+.custom-dark-popup .mapboxgl-popup-close-button {
+  display: none;
+}
+
+.custom-dark-popup .mapboxgl-popup-tip {
+  border-top-color: rgba(255, 255, 255, 0.96) !important;
+  border-bottom-color: transparent !important;
+}
+
+.custom-dark-popup.mapboxgl-popup-anchor-top .mapboxgl-popup-tip,
+.custom-dark-popup.mapboxgl-popup-anchor-top-left .mapboxgl-popup-tip,
+.custom-dark-popup.mapboxgl-popup-anchor-top-right .mapboxgl-popup-tip {
+  border-bottom-color: rgba(255, 255, 255, 0.96) !important;
+  border-top-color: transparent !important;
+}
+
+/* POI hover tooltip — must not intercept mouse events */
+.poi-tooltip,
+.poi-tooltip * {
+  pointer-events: none !important;
+}
+.poi-tooltip .mapboxgl-popup-content {
+  padding: 0;
+  border-radius: 10px;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.18);
+  overflow: hidden;
+}
+
+@keyframes searchFocusPulse {
+  0% {
+    transform: translate(-50%, -50%) scale(0.6);
+    opacity: 0.55;
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(1.8);
+    opacity: 0;
+  }
+}
+
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes pulseRing {
+  0% {
+    transform: scale(0.72);
+    opacity: 0.8;
+  }
+  100% {
+    transform: scale(1.35);
+    opacity: 0;
+  }
+}
+
+@keyframes floatIcon {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
+@keyframes bounceDot {
+  0%,
+  80%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.45;
+  }
+  40% {
+    transform: translateY(-5px);
+    opacity: 1;
+  }
+}
+
+@keyframes salesGaugeSpin {
+  0% {
+    transform: rotate(-145deg);
+    opacity: 0.35;
+  }
+  100% {
+    transform: rotate(-24deg);
+    opacity: 1;
+  }
+}
+
+.sales-gauge-spin {
+  animation: salesGaugeSpin 900ms cubic-bezier(0.2, 0.75, 0.25, 1) both;
+}

@@ -1,0 +1,10 @@
+up_to_5  monthly=price_1TtWNd8SULh0hGHL4IZn9lhc  annual=price_1TtWNf8SULh0hGHL5Zry7wgY
+up_to_10  monthly=price_1TtWNj8SULh0hGHLVnXh1g7m  annual=price_1TtWNl8SULh0hGHLy07DZqKN
+up_to_15  monthly=price_1TtWNp8SULh0hGHLMhxWyrVx  annual=price_1TtWNr8SULh0hGHLfFnU661j
+up_to_20  monthly=price_1TtWNv8SULh0hGHLBldiVNyF  annual=price_1TtWNx8SULh0hGHLdcSmO5jz
+up_to_25  monthly=price_1TtWO08SULh0hGHLWpjqWU3d  annual=price_1TtWO28SULh0hGHLEX2WsS8Z
+up_to_30  monthly=price_1TtWO68SULh0hGHLtQWV3HB7  annual=price_1TtWO88SULh0hGHL5qJd9Dkm
+up_to_40  monthly=price_1TtWOC8SULh0hGHLJXJaZrNu  annual=price_1TtWOE8SULh0hGHLVq72pPK2
+up_to_50  monthly=price_1TtWOI8SULh0hGHLnXuiFclY  annual=price_1TtWOK8SULh0hGHLi0txyocb
+up_to_75  monthly=price_1TtWON8SULh0hGHLO6LjanNM  annual=price_1TtWOP8SULh0hGHLGhNigWK4
+up_to_100  monthly=price_1TtWOT8SULh0hGHLSTuJulmO  annual=price_1TtWOV8SULh0hGHLYo6AW9W1
