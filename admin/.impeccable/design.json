@@ -1,0 +1,331 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-13T07:56:34.941614+00:00",
+  "title": "Design System: Sales Engine Admin",
+  "extensions": {
+    "colorMeta": {
+      "canvas": {
+        "role": "primary",
+        "displayName": "Canvas",
+        "tonalRamp": [
+          "oklch(15% 0.025 210)",
+          "oklch(27% 0.025 210)",
+          "oklch(39% 0.025 210)",
+          "oklch(51% 0.025 210)",
+          "oklch(63% 0.025 210)",
+          "oklch(75% 0.025 210)",
+          "oklch(87% 0.025 210)",
+          "oklch(95% 0.025 210)"
+        ]
+      },
+      "mint": {
+        "role": "primary",
+        "displayName": "Mint",
+        "tonalRamp": [
+          "oklch(15% 0.09 175)",
+          "oklch(27% 0.09 175)",
+          "oklch(39% 0.09 175)",
+          "oklch(51% 0.09 175)",
+          "oklch(63% 0.09 175)",
+          "oklch(75% 0.09 175)",
+          "oklch(87% 0.09 175)",
+          "oklch(95% 0.09 175)"
+        ]
+      },
+      "mint-hover": {
+        "role": "primary",
+        "displayName": "Mint Hover",
+        "tonalRamp": [
+          "oklch(15% 0.09 175)",
+          "oklch(27% 0.09 175)",
+          "oklch(39% 0.09 175)",
+          "oklch(51% 0.09 175)",
+          "oklch(63% 0.09 175)",
+          "oklch(75% 0.09 175)",
+          "oklch(87% 0.09 175)",
+          "oklch(95% 0.09 175)"
+        ]
+      },
+      "wine": {
+        "role": "secondary",
+        "displayName": "Wine",
+        "tonalRamp": [
+          "oklch(15% 0.09 325)",
+          "oklch(27% 0.09 325)",
+          "oklch(39% 0.09 325)",
+          "oklch(51% 0.09 325)",
+          "oklch(63% 0.09 325)",
+          "oklch(75% 0.09 325)",
+          "oklch(87% 0.09 325)",
+          "oklch(95% 0.09 325)"
+        ]
+      },
+      "lavender": {
+        "role": "secondary",
+        "displayName": "Lavender",
+        "tonalRamp": [
+          "oklch(15% 0.025 315)",
+          "oklch(27% 0.025 315)",
+          "oklch(39% 0.025 315)",
+          "oklch(51% 0.025 315)",
+          "oklch(63% 0.025 315)",
+          "oklch(75% 0.025 315)",
+          "oklch(87% 0.025 315)",
+          "oklch(95% 0.025 315)"
+        ]
+      },
+      "paper": {
+        "role": "neutral",
+        "displayName": "Paper",
+        "tonalRamp": [
+          "oklch(15% 0 0)",
+          "oklch(27% 0 0)",
+          "oklch(39% 0 0)",
+          "oklch(51% 0 0)",
+          "oklch(63% 0 0)",
+          "oklch(75% 0 0)",
+          "oklch(87% 0 0)",
+          "oklch(95% 0 0)"
+        ]
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Ink",
+        "tonalRamp": [
+          "oklch(15% 0.025 265)",
+          "oklch(27% 0.025 265)",
+          "oklch(39% 0.025 265)",
+          "oklch(51% 0.025 265)",
+          "oklch(63% 0.025 265)",
+          "oklch(75% 0.025 265)",
+          "oklch(87% 0.025 265)",
+          "oklch(95% 0.025 265)"
+        ]
+      },
+      "muted": {
+        "role": "neutral",
+        "displayName": "Muted",
+        "tonalRamp": [
+          "oklch(15% 0.025 270)",
+          "oklch(27% 0.025 270)",
+          "oklch(39% 0.025 270)",
+          "oklch(51% 0.025 270)",
+          "oklch(63% 0.025 270)",
+          "oklch(75% 0.025 270)",
+          "oklch(87% 0.025 270)",
+          "oklch(95% 0.025 270)"
+        ]
+      },
+      "line": {
+        "role": "neutral",
+        "displayName": "Line",
+        "tonalRamp": [
+          "oklch(15% 0 300)",
+          "oklch(27% 0 300)",
+          "oklch(39% 0 300)",
+          "oklch(51% 0 300)",
+          "oklch(63% 0 300)",
+          "oklch(75% 0 300)",
+          "oklch(87% 0 300)",
+          "oklch(95% 0 300)"
+        ]
+      },
+      "pipeline": {
+        "role": "secondary",
+        "displayName": "Pipeline",
+        "tonalRamp": [
+          "oklch(15% 0.09 315)",
+          "oklch(27% 0.09 315)",
+          "oklch(39% 0.09 315)",
+          "oklch(51% 0.09 315)",
+          "oklch(63% 0.09 315)",
+          "oklch(75% 0.09 315)",
+          "oklch(87% 0.09 315)",
+          "oklch(95% 0.09 315)"
+        ]
+      },
+      "won": {
+        "role": "secondary",
+        "displayName": "Won",
+        "tonalRamp": [
+          "oklch(15% 0.09 175)",
+          "oklch(27% 0.09 175)",
+          "oklch(39% 0.09 175)",
+          "oklch(51% 0.09 175)",
+          "oklch(63% 0.09 175)",
+          "oklch(75% 0.09 175)",
+          "oklch(87% 0.09 175)",
+          "oklch(95% 0.09 175)"
+        ]
+      },
+      "source-purple": {
+        "role": "secondary",
+        "displayName": "Source Purple",
+        "tonalRamp": [
+          "oklch(15% 0.09 315)",
+          "oklch(27% 0.09 315)",
+          "oklch(39% 0.09 315)",
+          "oklch(51% 0.09 315)",
+          "oklch(63% 0.09 315)",
+          "oklch(75% 0.09 315)",
+          "oklch(87% 0.09 315)",
+          "oklch(95% 0.09 315)"
+        ]
+      },
+      "source-gold": {
+        "role": "secondary",
+        "displayName": "Source Gold",
+        "tonalRamp": [
+          "oklch(15% 0.09 80)",
+          "oklch(27% 0.09 80)",
+          "oklch(39% 0.09 80)",
+          "oklch(51% 0.09 80)",
+          "oklch(63% 0.09 80)",
+          "oklch(75% 0.09 80)",
+          "oklch(87% 0.09 80)",
+          "oklch(95% 0.09 80)"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Page title",
+        "purpose": "Regular-weight CRM route heading."
+      },
+      "headline": {
+        "displayName": "Panel heading",
+        "purpose": "Medium-weight analytical and workspace headings."
+      }
+    },
+    "shadows": [
+      {
+        "name": "workspace",
+        "value": "0 12px 32px #00000038, 0 3px 10px #ffffff26",
+        "purpose": "Inherited panel elevation."
+      },
+      {
+        "name": "tooltip",
+        "value": "0 6px 20px #0003",
+        "purpose": "Transient chart inspection."
+      }
+    ],
+    "motion": [
+      {
+        "name": "chart-ease",
+        "value": "cubic-bezier(0.16, 1, 0.3, 1)",
+        "purpose": "Scroll-triggered chart reveal."
+      },
+      {
+        "name": "chart-draw",
+        "value": "0.8s",
+        "purpose": "Line, area, and donut reveal."
+      },
+      {
+        "name": "bar-growth",
+        "value": "0.65s",
+        "purpose": "Horizontal and vertical bars."
+      },
+      {
+        "name": "interaction",
+        "value": "0.18s ease-out",
+        "purpose": "Inherited control hover."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "compact-grid",
+        "value": "1100px"
+      },
+      {
+        "name": "stacked-content",
+        "value": "760px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary action",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Mint marks a management action.",
+      "html": "<button class=\"ds-primary\">Save changes</button>",
+      "css": ".ds-primary{font-family:Poppins,sans-serif;font-size:13px;background:#2ae9c9;color:#06252b;border:1px solid #2ae9c9;border-radius:9px;padding:10px 14px;font-weight:600;transition:background .18s ease-out;box-shadow:0 3px 9px #075c4c20}.ds-primary:hover{background:#6cf0d9}.ds-primary:focus-visible{outline:2px solid #147c72;outline-offset:4px;}"
+    },
+    {
+      "name": "Secondary action",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "White controls on working surfaces.",
+      "html": "<button class=\"ds-secondary\">Inspect</button>",
+      "css": ".ds-secondary{font-family:Poppins,sans-serif;font-size:13px;background:#fff;color:#111522;border:1px solid #d5d2db;border-radius:9px;padding:10px 14px;transition:background .18s ease-out,box-shadow .18s ease-out}.ds-secondary:hover{background:#f0edf3;box-shadow:0 3px 8px #39233a14}.ds-secondary:focus-visible{outline:2px solid #147c72;outline-offset:4px;}"
+    },
+    {
+      "name": "Business field",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "A labeled white input with visible focus.",
+      "html": "<label class=\"ds-field\">Business scope<input aria-label=\"Business scope\" placeholder=\"Find a client business\"></label>",
+      "css": ".ds-field{font-family:Poppins,sans-serif;font-size:13px;display:grid;gap:8px;color:#111522}.ds-field input{font-family:Poppins,sans-serif;font-size:13px;background:#fff;color:#111522;border:1px solid #c8c5d0;border-radius:8px;padding:11px 12px}.ds-field input:focus-visible{outline:2px solid #147c72;outline-offset:4px;}"
+    },
+    {
+      "name": "View navigation",
+      "kind": "nav",
+      "refersTo": "card",
+      "description": "Capsule view switching with mint selection.",
+      "html": "<nav class=\"ds-nav\" aria-label=\"CRM views\"><button aria-current=\"page\">Overview</button><button>Records</button><button>Data quality</button></nav>",
+      "css": ".ds-nav{font-family:Poppins,sans-serif;font-size:13px;display:flex;gap:6px;background:#fff;border-radius:30px;padding:7px;overflow-x:auto;box-shadow:0 7px 20px #00000032}.ds-nav button{font-family:Poppins,sans-serif;font-size:13px;white-space:nowrap;border:0;border-radius:22px;background:transparent;color:#444451;padding:11px 18px}.ds-nav button[aria-current]{background:#2ae9c9;color:#08272c;font-weight:600}.ds-nav button:hover{background:#f0edf3}.ds-nav button[aria-current]:hover{background:#2ae9c9}.ds-nav button:focus-visible{outline:2px solid #147c72;outline-offset:4px;}"
+    },
+    {
+      "name": "Workspace panel",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "Lifted white administrative workspace.",
+      "html": "<section class=\"ds-card\"><h2>Client portfolio health</h2><p>Pipeline exposure and ownership gaps at a glance.</p></section>",
+      "css": ".ds-card{font-family:Poppins,sans-serif;font-size:13px;background:#fff;color:#111522;border-radius:16px;padding:24px 26px;box-shadow:0 12px 32px #00000038, 0 3px 10px #ffffff26}.ds-card h2{font-size:21px;font-weight:500;letter-spacing:-.025em;margin:0 0 8px}.ds-card p{font-size:12px;color:#626879;margin:0}"
+    },
+    {
+      "name": "Quality chip",
+      "kind": "chip",
+      "refersTo": "card",
+      "description": "A compact explicit quality label.",
+      "html": "<span class=\"ds-chip\">1 flagged</span>",
+      "css": ".ds-chip{font-family:Poppins,sans-serif;font-size:13px;display:inline-flex;background:#f6eacb;color:#785423;border-radius:5px;padding:4px 8px;font-size:10px}"
+    },
+    {
+      "name": "Chart inspection",
+      "kind": "custom",
+      "refersTo": "card",
+      "description": "Hover and keyboard focus expose chart values.",
+      "html": "<button class=\"ds-datapoint\">Qualified \u00b7 5 records<span class=\"ds-tooltip\">\u20ac124,500 estimated value</span></button>",
+      "css": ".ds-datapoint{font-family:Poppins,sans-serif;font-size:13px;position:relative;background:#f4edf6;color:#111522;border:0;border-radius:8px;padding:12px 14px}.ds-tooltip{display:none;position:absolute;bottom:calc(100% + 5px);left:0;background:#39233a;color:#fff;border-radius:9px;padding:12px 14px;font-size:11px;white-space:nowrap;box-shadow:0 6px 20px #0003}.ds-datapoint:hover .ds-tooltip,.ds-datapoint:focus-visible .ds-tooltip{display:block}.ds-datapoint:focus-visible{outline:2px solid #147c72;outline-offset:4px;}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The inherited Sales Engine workspace",
+    "overview": "The dashboard and approved social listening implementation establish this visual world. A textured deep teal canvas surrounds lifted white workspaces, with wine analytical surfaces and pale lavender supporting panels. Mint identifies actions and active navigation. CRM inherits that identity rather than establishing a separate palette.\n\nThe interface is compact, analytical, and suited to platform administrators managing client businesses. CRM uses local illustrative data; its management controls are demonstrations that reset on refresh. This document records the implemented system, not a promise of live service behavior.",
+    "keyCharacteristics": [
+      "White workspaces balanced with wine and lavender panels.",
+      "Poppins typography and aligned tabular numerals.",
+      "Rounded controls, soft structural elevation, and visible focus states.",
+      "Scroll-triggered analytics with hover and keyboard inspection."
+    ],
+    "rules": [
+      {
+        "name": "The Balanced Workspace Rule",
+        "body": "Preserve the observed mixture of white, wine, lavender, and teal; the user explicitly rejected an all-green surface.",
+        "section": "colors"
+      }
+    ],
+    "dos": [
+      "Do preserve white workspaces, wine analysis, lavender support, and mint active states.",
+      "Do keep client ownership visible and label analytical definitions.",
+      "Do provide keyboard inspection alongside hover and respect reduced motion.",
+      "Do preserve horizontal table scrolling on narrow screens."
+    ],
+    "donts": [
+      "Don't fill the entire interface with green surfaces.",
+      "Don't imply illustrative CRM values or local changes are live business results.",
+      "Don't rely on chart color alone to convey source, stage, or value."
+    ]
+  }
+}

@@ -1,0 +1,19 @@
+@import "tailwindcss";
+
+html {
+  scroll-behavior: smooth;
+}
+
+:root {
+  --font-poppins: "Poppins", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-montserrat: "Montserrat", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+body {
+  font-family: var(--font-poppins);
+  margin: 0;
+  padding: 0;
+  background: #041014;
+  color: #fdfdfd;
+  min-height: 100vh;
+}

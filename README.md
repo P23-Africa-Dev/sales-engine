@@ -1,3 +1,5 @@
+This repository contains the Sales Engine client frontend at the root, the Laravel API in `backend/`, and the platform admin dashboard in `admin/`.
+
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
 ## Getting Started
