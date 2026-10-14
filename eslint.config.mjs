@@ -19,6 +19,10 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     // Monorepo/backend and generated artifacts not part of Next.js lint scope:
     "backend/**",
+    "admin/.impeccable/**",
+    ".claude/**",
+    ".github/skills/**",
+    ".github/hooks/**",
     "coverage/**",
     "dist/**",
     "the-factory-agent-pwa/**",

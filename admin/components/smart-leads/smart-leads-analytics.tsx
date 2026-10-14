@@ -32,7 +32,14 @@ export function SmartLeadsAnalytics({
   const data = getBusinessVelocityData(business.id);
   const max = Math.max(1, ...data.map((d) => d[metric]));
   const palette = ["#d88bec", "#2ae9c9", "#f4c789"];
-  let offset = 0;
+  const tierFractions = tiers.map(
+    (tier) =>
+      business.prospects.filter((p) => p.tier === tier).length /
+      Math.max(1, business.prospects.length),
+  );
+  const tierStarts = tierFractions.map((_, index) =>
+    tierFractions.slice(0, index).reduce((sum, value) => sum + value, 0),
+  );
   return (
     <>
       <div className="sp-analytics">
@@ -75,9 +82,8 @@ export function SmartLeadsAnalytics({
                 const count = business.prospects.filter(
                   (p) => p.tier === tier,
                 ).length;
-                const fraction = count / Math.max(1, business.prospects.length);
-                const start = offset;
-                offset += fraction;
+                const fraction = tierFractions[i];
+                const start = tierStarts[i];
                 return count ? (
                   <circle
                     key={`${business.id}-${tier}`}

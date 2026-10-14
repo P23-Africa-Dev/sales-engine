@@ -168,7 +168,14 @@ export function ListeningAnalytics({
       (b) => signals.filter((s) => s.businessId === b.id).length,
     ),
   );
-  let accumulated = 0;
+  const sourceStarts = sources.map((_, index) =>
+    sources
+      .slice(0, index)
+      .reduce(
+        (sum, item) => sum + item.count / Math.max(1, signals.length),
+        0,
+      ),
+  );
   const animationKey = `${signals.map((s) => `${s.id}:${s.status}`).join("|")}-${days}`;
   return (
     <div className="sla-grid">
@@ -366,8 +373,7 @@ export function ListeningAnalytics({
             />
             {sources.map((s, i) => {
               const fraction = s.count / Math.max(1, signals.length);
-              const start = accumulated;
-              accumulated += fraction;
+              const start = sourceStarts[i];
               if (!s.count) return null;
               return (
                 <circle

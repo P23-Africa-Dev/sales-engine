@@ -145,7 +145,11 @@ export function CrmCharts({
     count: records.filter((r) => r.source === source).length,
     color: palette[i],
   }));
-  let offset = 0;
+  const sourceStarts = sources.map((_, index) =>
+    sources
+      .slice(0, index)
+      .reduce((sum, item) => sum + item.count / Math.max(1, records.length), 0),
+  );
   const clients = businesses.map((b) => {
     const matches = records.filter((r) => r.businessId === b.id);
     return {
@@ -333,8 +337,7 @@ export function CrmCharts({
             />
             {sources.map((s, i) => {
               const fraction = s.count / Math.max(1, records.length);
-              const start = offset;
-              offset += fraction;
+              const start = sourceStarts[i];
               return s.count > 0 ? (
                 <circle
                   key={`${s.source}-${s.count}`}
