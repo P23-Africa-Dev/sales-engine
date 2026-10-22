@@ -12,19 +12,8 @@ import Button from "@/components/ui/button";
 import Input from "@/components/ui/input";
 import Select from "@/components/ui/select";
 import { SearchableSelect } from "@/components/ui/searchable-select";
-import { getCountries } from "@/lib/api/enterprise";
-import {
-  ApiRequestError,
-  createWorkspace,
-  getMe,
-  type WorkspacePayload,
-} from "@/lib/api/onboarding";
-import {
-  getAuthTokenFromDocument,
-  setAuthSession,
-  setCompanyId,
-} from "@/lib/auth/session";
-import { useAuthStore } from "@/store/auth";
+import { fetchSalesEngineCountries, SalesEngineAuthError, updateCurrentOrganization } from "@/lib/api/sales-engine-native-auth";
+import { getAuthTokenFromDocument } from "@/lib/auth/session";
 
 const onboardingSchema = z.object({
   company_name: z.string().min(2, "Company name must be at least 2 characters."),
@@ -90,7 +79,6 @@ const userTypeOptions = [
 
 export default function SelfServeOnboardingForm() {
   const router = useRouter();
-  const setUser = useAuthStore((s) => s.setUser);
 
   const {
     data: countryOptions = [],
@@ -98,7 +86,7 @@ export default function SelfServeOnboardingForm() {
     isError: isCountriesError,
   } = useQuery({
     queryKey: ["countries"],
-    queryFn: getCountries,
+    queryFn: fetchSalesEngineCountries,
     retry: 1,
     staleTime: Infinity,
   });
@@ -133,86 +121,36 @@ export default function SelfServeOnboardingForm() {
   );
 
   const completeMutation = useMutation({
-    mutationFn: async (payload: WorkspacePayload) => {
+    mutationFn: async (formValues: SelfServeOnboardingValues) => {
       const token = getAuthTokenFromDocument();
       if (!token) {
-        throw new ApiRequestError(
-          "Your session has expired. Please verify OTP again.",
-          401,
-          null
-        );
+        throw new SalesEngineAuthError("Your session has expired. Please sign in again.", 401);
       }
-
-      const workspaceResponse = await createWorkspace(payload, token);
-
-      // Workspace endpoint rotates token. Persist the fresh one first.
-      setAuthSession(workspaceResponse.data.token, true);
-
-      const meResponse = await getMe(workspaceResponse.data.token);
-
-      return {
-        workspaceResponse,
-        meResponse,
-      };
-    },
-    onSuccess: ({ workspaceResponse, meResponse }) => {
-      if (meResponse.data.active_company?.id) {
-        setCompanyId(meResponse.data.active_company.id);
-      }
-
-      setUser({
-        id: meResponse.data.id,
-        name: meResponse.data.name,
-        email: meResponse.data.email,
-        avatar: meResponse.data.avatar,
-        active_company: meResponse.data.active_company,
+      return updateCurrentOrganization(token, {
+        name: formValues.company_name.trim(),
+        country: formValues.country.trim(),
+        team_size: formValues.team_size,
+        purpose: formValues.purpose,
+        user_type: formValues.user_type,
       });
-
-      toast.success(workspaceResponse.message);
-      const billingEnforced =
-        meResponse.data.billing?.billing_enforced ??
-        meResponse.data.active_company?.billing_enforced ??
-        true;
-      const hasActiveSubscription =
-        meResponse.data.billing?.has_active_subscription ??
-        meResponse.data.active_company?.has_active_subscription ??
-        false;
-
-      try {
-        window.sessionStorage.setItem("billing.enforced", billingEnforced ? "1" : "0");
-      } catch {
-        // sessionStorage may be unavailable; silently ignore.
-      }
-
-      router.push(!billingEnforced || hasActiveSubscription ? "/dashboard" : "/subscribe");
+    },
+    onSuccess: () => {
+      toast.success("Workspace saved.");
+      router.push("/sales-engine");
     },
     onError: (error) => {
-      const err = error as ApiRequestError;
-
+      const err = error as SalesEngineAuthError;
       if (err.status === 401) {
-        toast.error("Your session expired. Please verify OTP again.");
-        router.push("/verify-otp");
+        toast.error("Your session expired. Please sign in again.");
+        router.push("/login");
         return;
       }
-
-      if (err.status === 409) {
-        toast.success("Onboarding already completed. Redirecting...");
-        router.push("/dashboard");
-        return;
-      }
-
       toast.error(err.message || "Unable to complete onboarding.");
     },
   });
 
   const submit = (formValues: SelfServeOnboardingValues) => {
-    completeMutation.mutate({
-      company_name: formValues.company_name.trim(),
-      country: formValues.country.trim(),
-      team_size: formValues.team_size,
-      purpose: formValues.purpose,
-      user_type: formValues.user_type,
-    });
+    completeMutation.mutate(formValues);
   };
 
   return (

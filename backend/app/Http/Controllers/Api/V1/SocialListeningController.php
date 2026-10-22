@@ -124,6 +124,53 @@ class SocialListeningController extends Controller
         return response()->json(['data' => new SocialSignalResource($signal)]);
     }
 
+    public function filters(): JsonResponse
+    {
+        $org = OrgContext::require();
+        $icp = $this->icps->active($org);
+        if (! $icp) {
+            return response()->json(['message' => 'Activate an ICP profile first.'], 422);
+        }
+
+        $base = SocialSignal::query()
+            ->where('organization_id', $org->id)
+            ->where('icp_profile_id', $icp->id)
+            ->where('status', '!=', 'dismissed');
+
+        $sources = (clone $base)
+            ->select('source_label')
+            ->selectRaw('count(*) as count')
+            ->groupBy('source_label')
+            ->orderByDesc('count')
+            ->get()
+            ->map(fn ($row) => [
+                'value' => $row->source_label,
+                'label' => $row->source_label,
+                'count' => (int) $row->count,
+            ])
+            ->values();
+
+        $stages = (clone $base)
+            ->whereNotNull('buying_stage')
+            ->select('buying_stage')
+            ->selectRaw('count(*) as count')
+            ->groupBy('buying_stage')
+            ->orderByDesc('count')
+            ->get()
+            ->map(fn ($row) => [
+                'value' => $row->buying_stage,
+                'count' => (int) $row->count,
+            ])
+            ->values();
+
+        return response()->json([
+            'data' => [
+                'sources' => $sources,
+                'buying_stages' => $stages,
+            ],
+        ]);
+    }
+
     public function metrics(): JsonResponse
     {
         $org = OrgContext::require();
@@ -145,11 +192,15 @@ class SocialListeningController extends Controller
         $synced = (clone $base)->where(fn ($q) => $q->where('status', 'synced')->orWhereHas('lead.crmEntry'))->count();
 
         $weekAgo = now()->subWeek();
+        $priorStart = $weekAgo->copy()->subWeek();
         $detectedThisWeek = (clone $base)->where('created_at', '>=', $weekAgo)->count();
-        $detectedPriorWeek = (clone $base)->whereBetween('created_at', [$weekAgo->copy()->subWeek(), $weekAgo])->count();
-        $percent = $detectedPriorWeek > 0
-            ? (int) round((($detectedThisWeek - $detectedPriorWeek) / $detectedPriorWeek) * 100)
-            : ($detectedThisWeek > 0 ? 100 : 0);
+        $detectedPriorWeek = (clone $base)->whereBetween('created_at', [$priorStart, $weekAgo])->count();
+        $percent = $this->signedPercent($detectedThisWeek, $detectedPriorWeek);
+
+        $highThis = (clone $base)->where('score', '>=', $minScore)->where('created_at', '>=', $weekAgo)->count();
+        $highPrior = (clone $base)->where('score', '>=', $minScore)->whereBetween('created_at', [$priorStart, $weekAgo])->count();
+        $crmThis = (clone $base)->where('status', 'synced')->where('updated_at', '>=', $weekAgo)->count();
+        $crmPrior = (clone $base)->where('status', 'synced')->whereBetween('updated_at', [$priorStart, $weekAgo])->count();
 
         $latestRun = $this->runs->latestRun($org, $icp);
 
@@ -159,6 +210,9 @@ class SocialListeningController extends Controller
                 'high_opportunities' => $high,
                 'added_to_crm' => $synced,
                 'percent_change' => $percent,
+                'signals_detected_change_percent' => $percent,
+                'high_opportunities_change_percent' => $this->signedPercent($highThis, $highPrior),
+                'added_to_crm_change_percent' => $this->signedPercent($crmThis, $crmPrior),
                 'last_run_at' => $settings->last_run_at?->toIso8601String(),
                 'cadence_days' => $settings->cadence_days,
                 'freshness_window_days' => (int) ($settings->freshness_window_days ?? 180),
@@ -316,7 +370,7 @@ class SocialListeningController extends Controller
             ->where('id', $id)
             ->firstOrFail();
 
-        $draft = $this->outreachDraft->draftFromSocialSignal($org, $icp, $signal);
+        $draft = $this->outreachDraft->draftFromSocialSignal($org, $icp, $signal, null, $request->user()?->id);
 
         if (! empty($data['send']) && ! empty($data['to_email'])) {
             try {
@@ -442,5 +496,14 @@ class SocialListeningController extends Controller
             'last_run_at' => $setting->last_run_at?->toIso8601String(),
             'source_health' => SocialSourceHealth::describe($setting),
         ];
+    }
+
+    private function signedPercent(int $current, int $previous): int
+    {
+        if ($previous === 0) {
+            return $current > 0 ? 100 : 0;
+        }
+
+        return (int) round((($current - $previous) / $previous) * 100);
     }
 }

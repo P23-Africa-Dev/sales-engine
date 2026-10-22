@@ -15,6 +15,8 @@ class Lead extends Model
 
     public const SAVE_SAVED = 'saved';
 
+    public const SAVE_REJECTED = 'rejected';
+
     protected $fillable = [
         'organization_id',
         'company_id',
@@ -25,6 +27,11 @@ class Lead extends Model
         'summary',
         'stage',
         'save_status',
+        'rejected_at',
+        'rejection_reason',
+        'latitude',
+        'longitude',
+        'geocoded_at',
         'f23_lead_id',
         'synced_to_f23_at',
         'crm_duplicate_of',
@@ -40,6 +47,10 @@ class Lead extends Model
             'meta' => 'array',
             'crm_fields_updated' => 'array',
             'synced_to_f23_at' => 'datetime',
+            'rejected_at' => 'datetime',
+            'geocoded_at' => 'datetime',
+            'latitude' => 'float',
+            'longitude' => 'float',
         ];
     }
 

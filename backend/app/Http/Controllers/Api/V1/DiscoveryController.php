@@ -3,9 +3,12 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
+use App\Models\ChatMessage;
 use App\Models\DiscoveryRun;
 use App\Services\Discovery\DiscoveryOrchestrator;
+use App\Services\Discovery\QueryIntentService;
 use App\Services\Icp\IcpProfileService;
+use App\Services\Usage\UsageService;
 use App\Support\OrgContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -31,6 +34,10 @@ class DiscoveryController extends Controller
             return response()->json(['message' => 'Activate an ICP profile before running discovery.'], 422);
         }
 
+        if (($data['intent'] ?? 'generate_leads') === 'generate_leads') {
+            app(UsageService::class)->assertCanSearch($org);
+        }
+
         $result = $this->discovery->run(
             $org,
             $icp,
@@ -38,7 +45,7 @@ class DiscoveryController extends Controller
             $data['query'] ?? '',
             $data['intent'] ?? 'generate_leads',
             null,
-            $data['limit'] ?? \App\Services\Discovery\QueryIntentService::DEFAULT_LEAD_LIMIT,
+            $data['limit'] ?? QueryIntentService::DEFAULT_LEAD_LIMIT,
         );
 
         return response()->json([
@@ -143,14 +150,14 @@ class DiscoveryController extends Controller
         ]);
     }
 
-    private function pendingAssistantForRun(\App\Models\DiscoveryRun $run): ?\App\Models\ChatMessage
+    private function pendingAssistantForRun(DiscoveryRun $run): ?ChatMessage
     {
-        return \App\Models\ChatMessage::query()
+        return ChatMessage::query()
             ->where('role', 'assistant')
             ->where('chat_session_id', $run->chat_session_id)
             ->orderByDesc('id')
             ->get()
-            ->first(function (\App\Models\ChatMessage $message) use ($run): bool {
+            ->first(function (ChatMessage $message) use ($run): bool {
                 return (int) ($message->meta['discovery_run_id'] ?? 0) === $run->id
                     && (
                         (bool) ($message->meta['pending'] ?? false)

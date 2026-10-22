@@ -328,91 +328,29 @@ function PillDropdown({
 
 /* --- Map Preview Component ------------------------------- */
 
-function MapPreview({ name, location }: { name: string; location: string }) {
-  return (
-    <div className="relative w-full h-full bg-[#E8F0E8] rounded-[14px] overflow-hidden">
-      {/* Fake map grid lines */}
-      <div className="absolute inset-0 opacity-30">
-        {Array.from({ length: 8 }).map((_, i) => (
-          <div
-            key={`h-${i}`}
-            className="absolute w-full h-px bg-[#C5D5C5]"
-            style={{ top: `${(i + 1) * 12}%` }}
-          />
-        ))}
-        {Array.from({ length: 6 }).map((_, i) => (
-          <div
-            key={`v-${i}`}
-            className="absolute h-full w-px bg-[#C5D5C5]"
-            style={{ left: `${(i + 1) * 16}%` }}
-          />
-        ))}
+function MapPreview({
+  name,
+  location,
+  latitude,
+  longitude,
+}: {
+  name: string;
+  location: string;
+  latitude?: number | null;
+  longitude?: number | null;
+}) {
+  const hasCoordinates = typeof latitude === "number" && typeof longitude === "number";
+  if (!hasCoordinates) {
+    return (
+      <div className="flex h-full w-full items-center justify-center bg-[#E8F0E8] px-4 text-center text-sm text-[#3d5c3d]">
+        Location not confirmed{location && location !== "No location" ? ` · ${location}` : ""}
       </div>
-
-      {/* Diagonal "streets" */}
-      <div className="absolute inset-0">
-        <div
-          className="absolute bg-white/60 h-0.5"
-          style={{
-            width: "140%",
-            top: "40%",
-            left: "-20%",
-            transform: "rotate(-25deg)",
-          }}
-        />
-        <div
-          className="absolute bg-white/60 h-0.5"
-          style={{
-            width: "140%",
-            top: "55%",
-            left: "-20%",
-            transform: "rotate(15deg)",
-          }}
-        />
-        {/* Street label */}
-        <div
-          className="absolute text-[8px] text-[#6B8A6B] font-medium"
-          style={{
-            top: "20%",
-            right: "15%",
-            transform: "rotate(-30deg)",
-          }}
-        >
-          Dresta Street
-        </div>
-      </div>
-
-      {/* Location marker pin */}
-      <div className="absolute" style={{ top: "22%", left: "38%" }}>
-        <div className="w-4 h-4 bg-red-500 rounded-full border-2 border-white shadow-md" />
-      </div>
-
-      {/* Avatar + name tooltip */}
-      <div className="absolute bottom-3 left-3 flex items-center gap-2">
-        <div className="w-8 h-8 rounded-full overflow-hidden border-2 border-white shadow-sm">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src="/avatars/default-ghost.svg"
-            alt={name}
-            className="w-full h-full object-cover"
-          />
-        </div>
-        <div className="bg-white/90 backdrop-blur-sm rounded-lg px-2 py-1 shadow-sm">
-          <p className="text-[9px] font-semibold text-[#0B1215]">{name}</p>
-          <p className="text-[7px] text-gray-500 font-normal">
-            {location}
-          </p>
-        </div>
-      </div>
-
-      {/* Compass / location icon */}
-      <div className="absolute bottom-3 right-3 w-7 h-7 bg-[#D8B4FE] rounded-full flex items-center justify-center shadow-sm">
-        <MapPin size={14} className="text-white" />
-      </div>
-    </div>
-  );
+    );
+  }
+  const bbox = `${longitude - 0.02},${latitude - 0.02},${longitude + 0.02},${latitude + 0.02}`;
+  const src = `https://www.openstreetmap.org/export/embed.html?bbox=${encodeURIComponent(bbox)}&layer=mapnik&marker=${latitude}%2C${longitude}`;
+  return <iframe title={`Map of ${name}`} src={src} className="h-full w-full border-0" loading="lazy" />;
 }
-
 
 type EditLeadForm = {
   contacts: LeadContact[];
@@ -713,7 +651,7 @@ export default function LeadDetailsPage() {
                     <div className="relative w-full h-full rounded-[22px] overflow-hidden bg-[#f0bbf7] ring-1 ring-[#c860d2]/40 p-3">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
-                        src="/avatars/default-ghost.svg"
+                        src={leadData.logo_url || "/avatars/default-ghost.svg"}
                         alt={leadData.name}
                         className="w-full h-full object-cover"
                       />
@@ -896,7 +834,12 @@ export default function LeadDetailsPage() {
                 </div>
                 {/* Map */}
                 <div className="w-full h-[160px] sm:flex-1 rounded-[24px] overflow-hidden shadow-inner">
-                  <MapPreview name={leadData.name} location={leadDisplay.mapLocationLabel} />
+                  <MapPreview
+                    name={leadData.name}
+                    location={leadDisplay.mapLocationLabel}
+                    latitude={leadData.latitude}
+                    longitude={leadData.longitude}
+                  />
                 </div>
               </div>
             </div>

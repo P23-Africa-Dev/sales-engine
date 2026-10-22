@@ -6,7 +6,9 @@ use App\Exceptions\AccessRequiredException;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\OrganizationResource;
 use App\Http\Resources\UserResource;
+use App\Models\User;
 use App\Services\Auth\AuthService;
+use App\Services\Auth\EmailVerificationService;
 use App\Services\Auth\Factory23AssertionVerifier;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -19,6 +21,7 @@ class AuthController extends Controller
     public function __construct(
         private readonly AuthService $auth,
         private readonly Factory23AssertionVerifier $verifier,
+        private readonly EmailVerificationService $verification,
     ) {}
 
     public function register(Request $request): JsonResponse
@@ -36,6 +39,8 @@ class AuthController extends Controller
             $data['password'],
             $data['organization_name'] ?? null,
         );
+
+        $this->verification->issue($result['user']);
 
         return response()->json([
             'token' => $result['token'],
@@ -78,14 +83,84 @@ class AuthController extends Controller
     {
         $user = $request->user();
         $orgs = $user->organizations()->get();
+        $current = $request->attributes->get('organization');
 
         return response()->json([
             'user' => new UserResource($user),
             'organizations' => OrganizationResource::collection($orgs),
-            'current_organization' => $request->attributes->get('organization')
-                ? new OrganizationResource($request->attributes->get('organization'))
-                : null,
+            'current_organization' => $current ? new OrganizationResource($current) : null,
+            'onboarding_completed' => $current?->onboarding_completed_at !== null,
         ]);
+    }
+
+    public function updateMe(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'name' => ['sometimes', 'string', 'max:255'],
+            'avatar' => ['sometimes', 'file', 'image', 'max:2048'],
+            'avatar_url' => ['sometimes', 'nullable', 'url', 'max:2048'],
+        ]);
+
+        $user = $request->user();
+        if (array_key_exists('name', $data)) {
+            $user->name = $data['name'];
+        }
+        if ($request->hasFile('avatar')) {
+            $user->avatar_path = $request->file('avatar')->store('avatars', 'public');
+        } elseif (array_key_exists('avatar_url', $data)) {
+            $user->avatar_path = $data['avatar_url'];
+        }
+        $user->save();
+
+        return response()->json(['user' => new UserResource($user->fresh())]);
+    }
+
+    public function updatePassword(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'current_password' => ['required', 'current_password:sanctum'],
+            'password' => ['required', 'confirmed', Password::defaults()],
+        ]);
+
+        $user = $request->user();
+        $user->password = $data['password'];
+        $user->save();
+
+        $currentId = $user->currentAccessToken()?->id;
+        $user->tokens()->when($currentId, fn ($query) => $query->where('id', '!=', $currentId))->delete();
+
+        return response()->json(['message' => 'Password changed.']);
+    }
+
+    public function verifyEmail(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'email' => ['required', 'email'],
+            'code' => ['required', 'string', 'size:6'],
+        ]);
+
+        $user = $this->verification->verify($data['email'], $data['code']);
+
+        return response()->json([
+            'data' => [
+                'verified' => true,
+                'email_verified' => $user->email_verified_at !== null,
+            ],
+        ]);
+    }
+
+    public function resendOtp(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'email' => ['required', 'email'],
+        ]);
+
+        $user = User::query()->where('email', $data['email'])->first();
+        if ($user && $user->email_verified_at === null) {
+            $this->verification->issue($user);
+        }
+
+        return response()->json(['message' => 'Code sent.']);
     }
 
     public function factory23Exchange(Request $request): JsonResponse

@@ -14,6 +14,7 @@ class SignalReminder extends Model
         'remind_at',
         'note',
         'completed_at',
+        'cancelled_at',
     ];
 
     protected function casts(): array
@@ -21,6 +22,7 @@ class SignalReminder extends Model
         return [
             'remind_at' => 'datetime',
             'completed_at' => 'datetime',
+            'cancelled_at' => 'datetime',
         ];
     }
 

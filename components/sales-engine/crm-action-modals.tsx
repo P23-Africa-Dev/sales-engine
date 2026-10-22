@@ -558,9 +558,13 @@ export function SetReminderConfirmModal({
   remindAtLabel: string;
   note: string;
   isConfirming?: boolean;
-  onConfirm: () => void;
+  onConfirm: (remindAt: string) => void;
 }) {
   const initial = (prospectName || "P").trim().charAt(0).toUpperCase();
+  const defaultWhen = new Date(Date.now() + 24 * 60 * 60 * 1000);
+  const [remindAt, setRemindAt] = useState(
+    new Date(defaultWhen.getTime() - defaultWhen.getTimezoneOffset() * 60000).toISOString().slice(0, 16)
+  );
 
   return (
     <ConfirmActionShell
@@ -572,7 +576,7 @@ export function SetReminderConfirmModal({
       icon={<Bell size={18} />}
       confirmLabel="Confirm Reminder"
       isConfirming={isConfirming}
-      onConfirm={onConfirm}
+      onConfirm={() => onConfirm(new Date(remindAt).toISOString())}
     >
       {/* Target Prospect & Company Card */}
       <div className="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50/80 p-3.5">
@@ -602,6 +606,13 @@ export function SetReminderConfirmModal({
           <p className="text-xs font-semibold text-amber-950 mt-0.5">
             {remindAtLabel || "Next scheduled follow up"}
           </p>
+          <input
+            type="datetime-local"
+            aria-label="Reminder date and time"
+            value={remindAt}
+            onChange={(event) => setRemindAt(event.target.value)}
+            className="mt-2 h-8 rounded-lg border border-amber-200 bg-white px-2 text-[11px] text-amber-950"
+          />
         </div>
       </div>
 

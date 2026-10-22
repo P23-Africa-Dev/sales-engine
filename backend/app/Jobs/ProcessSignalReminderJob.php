@@ -22,7 +22,11 @@ class ProcessSignalReminderJob implements ShouldQueue
             ->with(['signal', 'signal.organization'])
             ->find($this->reminderId);
 
-        if (! $reminder || $reminder->completed_at || ! $reminder->signal) {
+        if (! $reminder || $reminder->completed_at || $reminder->cancelled_at || ! $reminder->signal) {
+            return;
+        }
+
+        if ($reminder->remind_at && $reminder->remind_at->isFuture()) {
             return;
         }
 

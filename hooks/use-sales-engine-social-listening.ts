@@ -241,9 +241,9 @@ export function useCreateSignalOutreach() {
 }
 
 export function useSetSignalReminder() {
-  return useSocialMutation(({ id, note }: { id: number; note?: string }) =>
+  return useSocialMutation(({ id, note, remind_at }: { id: number; note?: string; remind_at?: string }) =>
     setSignalReminder(id, {
-      remind_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+      remind_at: remind_at ?? new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
       note,
     })
   );

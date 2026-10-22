@@ -18,11 +18,13 @@ export const SALES_ENGINE_API_BASE_URL =
 export class SalesEngineApiError extends Error {
   status: number;
   reason?: string | null;
+  code?: string | null;
 
-  constructor(message: string, status: number, reason?: string | null) {
+  constructor(message: string, status: number, reason?: string | null, code?: string | null) {
     super(message);
     this.status = status;
     this.reason = reason ?? null;
+    this.code = code ?? null;
   }
 }
 
@@ -259,7 +261,14 @@ export async function seRequest<T>({
       typeof payload.reason === "string"
         ? payload.reason
         : null;
-    throw new SalesEngineApiError(message, response.status, reason);
+    const code =
+      payload &&
+      typeof payload === "object" &&
+      "code" in payload &&
+      typeof payload.code === "string"
+        ? payload.code
+        : null;
+    throw new SalesEngineApiError(message, response.status, reason, code);
   }
 
   if (payload && typeof payload === "object" && "data" in payload) {
@@ -992,8 +1001,11 @@ export async function sendChatMessage(
 
 export type SalesEngineMetrics = {
   leads_discovered: number;
+  leads_discovered_change_percent?: number;
   leads_pending_review: number;
+  leads_pending_review_change_percent?: number;
   leads_in_crm: number;
+  leads_in_crm_change_percent?: number;
   qualified_leads: number;
   companies_cached: number;
   outreach_drafts: number;
@@ -1004,6 +1016,93 @@ export function fetchMetrics(): Promise<SalesEngineMetrics> {
   return withSessionRetry(async () =>
     seRequest<SalesEngineMetrics>({ method: "GET", path: "/metrics" })
   );
+}
+
+export type MetricsTrend = {
+  points: Array<{ date: string; day: string; value: number }>;
+  change_percent: number;
+  direction: "up" | "down" | "flat";
+  highlight_date: string | null;
+};
+
+export function fetchMetricsTrend(
+  metric: "leads_discovered" | "leads_in_crm" | "outreach_sent" = "leads_discovered",
+  range: "7d" | "30d" = "7d"
+): Promise<MetricsTrend> {
+  return withSessionRetry(() =>
+    seRequest<MetricsTrend>({ method: "GET", path: `/metrics/trend?metric=${metric}&range=${range}` })
+  );
+}
+
+export type UsageSnapshot = {
+  searches: { used: number; limit: number };
+  outreach_emails: { used: number; limit: number };
+  enrichment_lookups: { used: number; limit: number };
+};
+
+export function fetchUsage(): Promise<UsageSnapshot> {
+  return withSessionRetry(() => seRequest<UsageSnapshot>({ method: "GET", path: "/usage" }));
+}
+
+export function submitLeadFeedback(id: number, reason?: string): Promise<{ id: number; save_status: string }> {
+  return withSessionRetry(() =>
+    seRequest<{ id: number; save_status: string }>({
+      method: "POST",
+      path: `/leads/${id}/feedback`,
+      body: { verdict: "not_relevant", reason },
+    })
+  );
+}
+
+export function submitLeadFeedbackBulk(leadIds: number[], reason?: string): Promise<{ rejected: number[] }> {
+  return withSessionRetry(() =>
+    seRequest<{ rejected: number[] }>({
+      method: "POST",
+      path: "/leads/feedback",
+      body: { lead_ids: leadIds, verdict: "not_relevant", reason },
+    })
+  );
+}
+
+export function submitChatFeedback(id: number, rating: "up" | "down"): Promise<{ feedback_rating: string }> {
+  return withSessionRetry(() =>
+    seRequest<{ feedback_rating: string }>({
+      method: "POST",
+      path: `/chat/messages/${id}/feedback`,
+      body: { rating },
+    })
+  );
+}
+
+export function fetchSocialFilters(): Promise<{
+  sources: Array<{ value: string; label?: string; count: number }>;
+  buying_stages: Array<{ value: string; count: number }>;
+}> {
+  return withSessionRetry(() =>
+    seRequest({ method: "GET", path: "/social-listening/filters" })
+  );
+}
+
+export type SignalReminderItem = {
+  id: number;
+  remind_at: string;
+  note?: string | null;
+  signal?: { company?: string | null; profile?: string | null };
+};
+
+export function listReminders(status: "upcoming" | "done" = "upcoming"): Promise<SignalReminderItem[]> {
+  return withSessionRetry(async () => {
+    const data = await seRequest<SignalReminderItem[]>({ method: "GET", path: `/reminders?status=${status}` });
+    return data ?? [];
+  });
+}
+
+export function updateReminder(id: number, payload: { remind_at?: string; note?: string }): Promise<SignalReminderItem> {
+  return withSessionRetry(() => seRequest<SignalReminderItem>({ method: "PATCH", path: `/reminders/${id}`, body: payload }));
+}
+
+export function cancelReminder(id: number): Promise<unknown> {
+  return withSessionRetry(() => seRequest({ method: "DELETE", path: `/reminders/${id}` }));
 }
 
 // ── Outreach ────────────────────────────────────────────────────────────────
@@ -1050,7 +1149,14 @@ export function fetchRecentOutreach(): Promise<OutreachActivity[]> {
 
 export function sendOutreachActivity(
   activityId: number,
-  payload: { to_email: string; subject?: string; body: string; inbox_id?: number }
+  payload: {
+    channel?: "email" | "sms" | "whatsapp";
+    to_email?: string;
+    to_phone?: string;
+    subject?: string;
+    body: string;
+    inbox_id?: number;
+  }
 ): Promise<{
   message_id: string | null;
   sent: boolean;
@@ -1086,7 +1192,7 @@ export function fetchOutreachActivity(
 
 export function regenerateOutreachActivity(
   id: number,
-  payload?: { instructions?: string; channel?: "email" | "whatsapp" }
+  payload?: { instructions?: string; channel?: "email" | "sms" | "whatsapp" }
 ): Promise<OutreachDraft & { activity_id: number; regeneration_count?: number }> {
   return withSessionRetry(async () =>
     seRequest<OutreachDraft & { activity_id: number; regeneration_count?: number }>({
@@ -1303,6 +1409,9 @@ export type SocialListeningMetrics = {
   high_opportunities: number;
   added_to_crm: number;
   percent_change: number;
+  signals_detected_change_percent?: number;
+  high_opportunities_change_percent?: number;
+  added_to_crm_change_percent?: number;
   last_run_at?: string | null;
   cadence_days?: number | null;
   freshness_window_days?: number | null;
@@ -1391,6 +1500,8 @@ export type OutreachSenderSettings = {
   setup?: OutreachSetupStatus | null;
   support_request?: { id: number; status: string; domain?: string | null; created_at?: string | null } | null;
   quota?: OutreachQuotaSnapshot | null;
+  sms?: { configured: boolean; from?: string | null; quota?: OutreachQuotaSnapshot | null };
+  whatsapp?: { configured: boolean; from?: string | null; quota?: OutreachQuotaSnapshot | null };
 };
 
 export type OutreachDnsRecord = {
@@ -1415,7 +1526,7 @@ export type OutreachDomainAuthentication = {
 } | null;
 
 export type OutreachDraft = {
-  channel: "email" | "whatsapp";
+  channel: "email" | "sms" | "whatsapp";
   subject?: string | null;
   body: string;
   sent: boolean;
@@ -1503,7 +1614,14 @@ async function seRequestPaginated<T>({
       typeof payload.reason === "string"
         ? payload.reason
         : null;
-    throw new SalesEngineApiError(message, response.status, reason);
+    const code =
+      payload &&
+      typeof payload === "object" &&
+      "code" in payload &&
+      typeof payload.code === "string"
+        ? payload.code
+        : null;
+    throw new SalesEngineApiError(message, response.status, reason, code);
   }
 
   return {
@@ -1670,6 +1788,20 @@ export async function syncSignalToCrm(id: number, opts?: { pipeline_id?: number 
   const result = await withSessionRetry(() => seRequest<NativeSaveBatch>({ method: "POST", path: "/crm/leads/from-social-signal", body: { signal_ids: [id], pipeline_id: opts?.pipeline_id } }));
   if (!result.synced[0]) throw new SalesEngineApiError(result.errors[0] || "Could not save this signal.", 422);
   return result.synced[0];
+}
+
+export async function syncSocialSignalsBatch(ids: number[], pipelineId?: number | string): Promise<NativeSaveBatch> {
+  const result: NativeSaveBatch = { synced: [], errors: [] };
+  for (let offset = 0; offset < ids.length; offset += 25) {
+    const batch = await withSessionRetry(() => seRequest<NativeSaveBatch>({
+      method: "POST",
+      path: "/crm/leads/from-social-signal",
+      body: { signal_ids: ids.slice(offset, offset + 25), pipeline_id: pipelineId },
+    }));
+    result.synced.push(...(batch.synced ?? []));
+    result.errors.push(...(batch.errors ?? []));
+  }
+  return result;
 }
 
 export function dismissSignal(id: number): Promise<SocialSignalApi> {

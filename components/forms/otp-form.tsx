@@ -1,11 +1,12 @@
 "use client";
 
 import {
-  resendEmailOtp,
-  verifyEmailOtp,
-  type ApiRequestError,
-} from "@/lib/api/onboarding";
-import { setAuthSession } from "@/lib/auth/session";
+  fetchSalesEngineAccount,
+  resendSalesEngineOtp,
+  SalesEngineAuthError,
+  verifySalesEngineEmail,
+} from "@/lib/api/sales-engine-native-auth";
+import { getAuthTokenFromDocument } from "@/lib/auth/session";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation } from "@tanstack/react-query";
 import { format } from "date-fns";
@@ -44,21 +45,25 @@ export default function OtpForm() {
   const isFilled = otpCodeValue?.length === 6;
 
   const verifyMutation = useMutation({
-    mutationFn: verifyEmailOtp,
-    onSuccess: (response) => {
-      setAuthSession(
-        response.data.token,
-        response.data.onboarding_completed ?? false
-      );
-
-      router.push(
-        response.data.onboarding_completed ? "/dashboard" : "/complete-onboarding"
-      );
+    mutationFn: (values: OtpFormValues) =>
+      verifySalesEngineEmail({ email, code: values.otp_code }),
+    onSuccess: async () => {
+      const token = getAuthTokenFromDocument();
+      if (!token) {
+        router.push("/login");
+        return;
+      }
+      try {
+        const account = await fetchSalesEngineAccount(token);
+        router.push(account.onboarding_completed ? "/sales-engine" : "/complete-onboarding");
+      } catch {
+        router.push("/sales-engine");
+      }
     },
   });
 
   const resendMutation = useMutation({
-    mutationFn: resendEmailOtp,
+    mutationFn: () => resendSalesEngineOtp(email),
     onSuccess: () => {
       setTimeLeft(60);
     },
@@ -77,15 +82,12 @@ export default function OtpForm() {
   const formattedTime = format(new Date(timeLeft * 1000), "mm:ss");
 
   const onSubmit = (values: OtpFormValues) => {
-    verifyMutation.mutate({
-      email,
-      otp_code: values.otp_code,
-    });
+    verifyMutation.mutate(values);
   };
 
   const canResend = timeLeft <= 0 && !resendMutation.isPending;
-  const verifyError = verifyMutation.error as ApiRequestError | null;
-  const resendError = resendMutation.error as ApiRequestError | null;
+  const verifyError = verifyMutation.error as SalesEngineAuthError | null;
+  const resendError = resendMutation.error as SalesEngineAuthError | null;
 
   return (
     <form className="flex flex-col items-center" onSubmit={handleSubmit(onSubmit)}>
@@ -123,7 +125,7 @@ export default function OtpForm() {
           variant="outline"
           type="button"
           disabled={!canResend || !email}
-          onClick={() => resendMutation.mutate({ email })}
+          onClick={() => resendMutation.mutate()}
         >
           {resendMutation.isPending ? "Sending..." : "Resend OTP"}
         </Button>

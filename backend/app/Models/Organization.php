@@ -11,6 +11,14 @@ class Organization extends Model
     protected $fillable = [
         'name',
         'slug',
+        'country',
+        'team_size',
+        'purpose',
+        'user_type',
+        'onboarding_completed_at',
+        'search_limit_monthly',
+        'outreach_email_limit_monthly',
+        'enrichment_limit_monthly',
         'f23_company_id',
         'factory23_crm_sync_enabled',
         'f23_api_token',
@@ -23,6 +31,10 @@ class Organization extends Model
             'factory23_crm_sync_enabled' => 'boolean',
             'f23_api_token' => 'encrypted',
             'f23_api_token_verified_at' => 'datetime',
+            'onboarding_completed_at' => 'datetime',
+            'search_limit_monthly' => 'integer',
+            'outreach_email_limit_monthly' => 'integer',
+            'enrichment_limit_monthly' => 'integer',
         ];
     }
 

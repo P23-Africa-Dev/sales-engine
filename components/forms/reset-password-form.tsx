@@ -2,8 +2,7 @@
 
 import Button from "@/components/ui/button";
 import Input from "@/components/ui/input";
-import { resetPassword, validateResetPasswordToken } from "@/lib/api/auth";
-import { ApiRequestError } from "@/lib/api/onboarding";
+import { resetSalesEnginePassword, SalesEngineAuthError, validatePasswordResetToken } from "@/lib/api/sales-engine-native-auth";
 import { zodResolver } from "@hookform/resolvers/zod";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -31,13 +30,12 @@ type ResetPasswordFormValues = z.infer<typeof resetPasswordSchema>;
 type ResetPasswordFormProps = {
     token: string;
     email: string;
-    portal: "management" | "agent";
 };
 
-export default function ResetPasswordForm({ token, email, portal }: ResetPasswordFormProps) {
+export default function ResetPasswordForm({ token, email }: ResetPasswordFormProps) {
     const router = useRouter();
     const normalizedEmail = email.trim().toLowerCase();
-    const loginPath = portal === "agent" ? "/agent/login" : "/login";
+    const loginPath = "/login";
 
     const [globalError, setGlobalError] = useState("");
     const [isValidatingToken, setIsValidatingToken] = useState(true);
@@ -47,7 +45,6 @@ export default function ResetPasswordForm({ token, email, portal }: ResetPasswor
     const {
         register,
         handleSubmit,
-        setError,
         formState: { errors, isValid },
     } = useForm<ResetPasswordFormValues>({
         resolver: zodResolver(resetPasswordSchema),
@@ -75,14 +72,14 @@ export default function ResetPasswordForm({ token, email, portal }: ResetPasswor
             setGlobalError("");
 
             try {
-                await validateResetPasswordToken(token, { email: normalizedEmail, portal });
+                await validatePasswordResetToken(token, normalizedEmail);
                 if (mounted) {
                     setIsTokenValid(true);
                 }
             } catch (err) {
                 if (mounted) {
                     setIsTokenValid(false);
-                    if (err instanceof ApiRequestError) {
+                    if (err instanceof SalesEngineAuthError) {
                         setGlobalError(err.message || "This reset link is invalid or has expired.");
                     } else {
                         setGlobalError("Unable to validate reset link. Please try again.");
@@ -100,7 +97,7 @@ export default function ResetPasswordForm({ token, email, portal }: ResetPasswor
         return () => {
             mounted = false;
         };
-    }, [normalizedEmail, portal, token]);
+    }, [normalizedEmail, token]);
 
     const canSubmit = useMemo(() => isValid && isTokenValid && !loading, [isValid, isTokenValid, loading]);
 
@@ -109,33 +106,18 @@ export default function ResetPasswordForm({ token, email, portal }: ResetPasswor
         setLoading(true);
 
         try {
-            const response = await resetPassword({
+            const response = await resetSalesEnginePassword({
                 email: normalizedEmail,
                 token,
                 password: values.password,
                 password_confirmation: values.password_confirmation,
-                portal,
             });
 
             toast.success(response.message || "Password reset successfully.");
             router.push(`${response.data.redirect_path || loginPath}?reset=success`);
         } catch (err) {
-            if (err instanceof ApiRequestError) {
-                if (err.errors?.password) {
-                    setError("password", { type: "server", message: err.errors.password[0] });
-                }
-                if (err.errors?.password_confirmation) {
-                    setError("password_confirmation", {
-                        type: "server",
-                        message: err.errors.password_confirmation[0],
-                    });
-                }
-                if (err.errors?.token) {
-                    setGlobalError(err.errors.token[0]);
-                    setIsTokenValid(false);
-                } else {
-                    setGlobalError(err.message);
-                }
+            if (err instanceof SalesEngineAuthError) {
+                setGlobalError(err.message);
                 toast.error(err.message);
             } else {
                 const msg = "An unexpected error occurred. Please try again.";

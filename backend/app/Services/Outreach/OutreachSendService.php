@@ -19,6 +19,7 @@ class OutreachSendService
         private readonly OutreachQuotaService $quota,
         private readonly DomainIntegrityService $integrity,
         private readonly SendGridOutreachTransport $sendGrid,
+        private readonly InboundReplyAddress $inboundReply,
     ) {}
 
     /**
@@ -42,7 +43,7 @@ class OutreachSendService
 
         $this->assertNotSuppressed($organization, $toEmail);
 
-        $identity = $this->identityResolver->resolve($organization, $user, $inboxId);
+        $identity = $this->withInboundReply($this->identityResolver->resolve($organization, $user, $inboxId), $activity);
         $this->assertSenderAllowed($organization, $identity);
         $this->quota->assertCanSend($organization, $identity->senderType);
 
@@ -110,7 +111,7 @@ class OutreachSendService
             $inboxId = $metaInbox !== null && $metaInbox !== '' ? (int) $metaInbox : null;
         }
 
-        $identity = $this->identityResolver->resolve($organization, $user, $inboxId);
+        $identity = $this->withInboundReply($this->identityResolver->resolve($organization, $user, $inboxId), $activity);
         $this->assertSenderAllowed($organization, $identity);
         $this->quota->assertCanSend($organization, $identity->senderType);
 
@@ -170,6 +171,23 @@ class OutreachSendService
             'queued' => false,
             'delivery_status' => 'sent',
         ];
+    }
+
+    private function withInboundReply(OutboundIdentity $identity, ?OutreachActivity $activity): OutboundIdentity
+    {
+        $replyTo = $this->inboundReply->forActivity($activity);
+        if ($replyTo === null) {
+            return $identity;
+        }
+
+        return new OutboundIdentity(
+            fromEmail: $identity->fromEmail,
+            fromName: $identity->fromName,
+            replyTo: $replyTo,
+            senderType: $identity->senderType,
+            mailboxId: $identity->mailboxId,
+            inboxId: $identity->inboxId,
+        );
     }
 
     private function assertSenderAllowed(Organization $organization, OutboundIdentity $identity): void

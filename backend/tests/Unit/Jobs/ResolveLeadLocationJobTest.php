@@ -6,6 +6,7 @@ use App\Jobs\ResolveLeadLocationJob;
 use App\Models\IcpProfile;
 use App\Models\Lead;
 use App\Services\Discovery\DiscoveryGeo;
+use App\Services\Geo\NominatimGeocoder;
 use App\Services\IcpFiltering\IcpFilterService;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
@@ -36,14 +37,20 @@ class ResolveLeadLocationJobTest extends TestCase
             ],
         ]);
 
-        Http::fake();
+        Http::fake([
+            'nominatim.openstreetmap.org/*' => Http::response([
+                ['lat' => '9.0820', 'lon' => '8.6753'],
+            ], 200),
+        ]);
 
-        (new ResolveLeadLocationJob($lead->id))->handle(new DiscoveryGeo, new IcpFilterService);
+        (new ResolveLeadLocationJob($lead->id))->handle(new DiscoveryGeo, new IcpFilterService, new NominatimGeocoder);
 
         $lead->refresh();
         $this->assertSame('Nigeria', $lead->meta['location'] ?? null);
         $this->assertSame('resolved', $lead->meta['location_status'] ?? null);
-        Http::assertNothingSent();
+        $this->assertEquals(9.082, (float) $lead->latitude);
+        Http::assertSent(fn ($request) => str_contains($request->url(), 'nominatim.openstreetmap.org'));
+        Http::assertNotSent(fn ($request) => str_contains($request->url(), 'serper'));
     }
 
     public function test_marks_outside_territory_when_serper_proves_india(): void
@@ -84,9 +91,12 @@ class ResolveLeadLocationJobTest extends TestCase
                     ],
                 ],
             ], 200),
+            'nominatim.openstreetmap.org/*' => Http::response([
+                ['lat' => '20.5937', 'lon' => '78.9629'],
+            ], 200),
         ]);
 
-        (new ResolveLeadLocationJob($lead->id))->handle(new DiscoveryGeo, new IcpFilterService);
+        (new ResolveLeadLocationJob($lead->id))->handle(new DiscoveryGeo, new IcpFilterService, new NominatimGeocoder);
 
         $lead->refresh();
         $this->assertStringContainsString('India', (string) ($lead->meta['location'] ?? ''));

@@ -9,6 +9,8 @@ use App\Services\Icp\IcpProfileService;
 use App\Services\Outreach\OutreachDraftService;
 use App\Services\Outreach\OutreachSendService;
 use App\Services\Outreach\OutreachSmsSendService;
+use App\Services\Outreach\OutreachWhatsAppSendService;
+use App\Services\Outreach\WhatsAppNotConfiguredException;
 use App\Support\OrgContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -21,6 +23,7 @@ class OutreachController extends Controller
         private readonly OutreachDraftService $outreach,
         private readonly OutreachSendService $sendService,
         private readonly OutreachSmsSendService $smsService,
+        private readonly OutreachWhatsAppSendService $whatsappService,
         private readonly IcpProfileService $icps,
     ) {}
 
@@ -84,10 +87,10 @@ class OutreachController extends Controller
             $prompt = 'whatsapp: '.$prompt;
         }
         if (($data['channel'] ?? null) === 'sms' && ! str_contains(mb_strtolower($prompt), 'sms')) {
-            $prompt = 'sms: ' . $prompt;
+            $prompt = 'sms: '.$prompt;
         }
 
-        $draft = $this->outreach->draftFromPrompt($org, $icp, $prompt);
+        $draft = $this->outreach->draftFromPrompt($org, $icp, $prompt, null, null, [], $request->user()?->id);
 
         if (! empty($data['send']) && ($data['channel'] ?? 'email') === 'email') {
             $user = $request->user();
@@ -191,7 +194,7 @@ class OutreachController extends Controller
     public function sendActivity(Request $request, int $id): JsonResponse
     {
         $data = $request->validate([
-            'channel' => ['nullable', 'string', 'in:email,sms'],
+            'channel' => ['nullable', 'string', 'in:email,sms,whatsapp'],
             'to_email' => ['nullable', 'email'],
             'to_phone' => ['nullable', 'string', 'max:32'],
             'subject' => ['nullable', 'string', 'max:255'],
@@ -214,7 +217,12 @@ class OutreachController extends Controller
         }
 
         $channel = $data['channel']
-            ?? (str_contains(mb_strtolower((string) $activity->channel), 'sms') ? 'sms' : 'email');
+            ?? (str_contains(mb_strtolower((string) $activity->channel), 'sms') ? 'sms'
+                : (str_contains(mb_strtolower((string) $activity->channel), 'whatsapp') ? 'whatsapp' : 'email'));
+
+        if (! $activity->user_id && $user) {
+            $activity->update(['user_id' => $user->id]);
+        }
 
         try {
             $result = DB::transaction(function () use ($org, $user, $data, $id, $channel) {
@@ -223,10 +231,22 @@ class OutreachController extends Controller
                     return ['message_id' => $activity->sendgrid_message_id, 'sent' => $activity->sent_at !== null, 'queued' => $activity->delivery_status === 'queued', 'delivery_status' => $activity->delivery_status, 'activity_id' => $activity->id];
                 }
 
+                if ($channel === 'whatsapp') {
+                    if (! $this->whatsappService->isConfigured()) {
+                        throw new WhatsAppNotConfiguredException;
+                    }
+                    $toPhone = trim((string) ($data['to_phone'] ?? ''));
+                    if ($toPhone === '') {
+                        throw new InvalidArgumentException('to_phone is required to send WhatsApp.');
+                    }
+
+                    return $this->whatsappService->queueWhatsApp($org, $user, $toPhone, $data['body'], $activity) + ['activity_id' => $activity->id];
+                }
+
                 if ($channel === 'sms') {
                     $toPhone = trim((string) ($data['to_phone'] ?? ''));
                     if ($toPhone === '') {
-                        throw new \InvalidArgumentException('to_phone is required to send SMS.');
+                        throw new InvalidArgumentException('to_phone is required to send SMS.');
                     }
 
                     return $this->smsService->queueSms($org, $user, $toPhone, $data['body'], $activity) + ['activity_id' => $activity->id];
@@ -234,7 +254,7 @@ class OutreachController extends Controller
 
                 $toEmail = trim((string) ($data['to_email'] ?? ''));
                 if ($toEmail === '') {
-                    throw new \InvalidArgumentException('to_email is required to send email.');
+                    throw new InvalidArgumentException('to_email is required to send email.');
                 }
 
                 return $this->sendService->queueEmail(
@@ -247,6 +267,8 @@ class OutreachController extends Controller
                     isset($data['inbox_id']) ? (int) $data['inbox_id'] : null,
                 ) + ['activity_id' => $activity->id];
             });
+        } catch (WhatsAppNotConfiguredException $e) {
+            return response()->json(['message' => $e->getMessage(), 'code' => 'whatsapp_not_configured'], 422);
         } catch (\Throwable $e) {
             return response()->json(['message' => $e->getMessage()], 422);
         }

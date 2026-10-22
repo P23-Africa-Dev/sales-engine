@@ -97,6 +97,12 @@ class OutreachSenderController extends Controller
                     'from' => config('services.infobip.sms_from') ?: null,
                     'quota' => $this->quota->snapshot($org, 'sms'),
                 ],
+                'whatsapp' => [
+                    'configured' => trim((string) config('services.infobip.whatsapp_sender')) !== ''
+                        && trim((string) config('services.infobip.api_key')) !== '',
+                    'from' => config('services.infobip.whatsapp_sender') ?: null,
+                    'quota' => $this->quota->snapshot($org, 'whatsapp'),
+                ],
             ],
         ]);
     }

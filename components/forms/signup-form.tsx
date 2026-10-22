@@ -1,13 +1,14 @@
 "use client";
 
 import { registerWithSalesEngine, SalesEngineAuthError } from "@/lib/api/sales-engine-native-auth";
+import { createIcpProfile } from "@/lib/api/sales-engine";
 import { useAuthStore } from "@/store/auth";
 import Button from "@/components/ui/button";
 import Input from "@/components/ui/input";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation } from "@tanstack/react-query";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { useForm, useWatch } from "react-hook-form";
 import { z } from "zod";
@@ -49,6 +50,8 @@ const EyeOff = () => (
 
 export default function SignupForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const profileSeed = (searchParams.get("profile") ?? "").trim();
   const setUser = useAuthStore((state) => state.setUser);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
@@ -87,15 +90,42 @@ export default function SignupForm() {
         password_confirmation: values.password_confirmation,
         organization_name: values.name,
       }),
-    onSuccess: (session) => {
+    onSuccess: async (session) => {
       setUser({
         id: session.user.id,
         name: session.user.name,
         email: session.user.email,
-        avatar: null,
+        avatar: session.user.avatar_url ?? null,
         active_company: null,
       });
+      if (profileSeed) {
+        try {
+          await createIcpProfile({
+            name: profileSeed.slice(0, 255),
+            description: profileSeed,
+            config: {
+              profileName: profileSeed.slice(0, 255),
+              description: profileSeed,
+              industries: [],
+              companySizes: [],
+              revenueRanges: [],
+              territories: [],
+              decisionMakers: [],
+              minMatchScore: 60,
+              autoSyncCrm: false,
+              enrichContactDetails: true,
+              customPrompt: profileSeed,
+            },
+          });
+        } catch {
+          toast.error("Account created. The profile can be finished from Smart Leads.");
+        }
+      }
       toast.success("Account created.");
+      if (session.user.email_verified === false) {
+        router.push(`/verify-otp?email=${encodeURIComponent(session.user.email)}`);
+        return;
+      }
       router.push("/sales-engine");
     },
     onError: (err: SalesEngineAuthError) => {

@@ -23,7 +23,7 @@ export default function AuthInitializer({
           id: user.id,
           name: user.name,
           email: user.email,
-          avatar: null,
+          avatar: user.avatar_url ?? null,
           access_role: user.organization_role,
           active_company: null,
         });

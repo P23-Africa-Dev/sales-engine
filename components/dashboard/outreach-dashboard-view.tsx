@@ -314,6 +314,7 @@ export function OutreachDashboardView({
   data,
   loading = false,
   error = false,
+  onRetry,
 }: {
   data: OutreachDashboardData;
   loading?: boolean;
@@ -413,7 +414,7 @@ export function OutreachDashboardView({
       `}} />
       <h1>Outreach</h1>
       <div className="outreach-metrics">
-        {data.metrics.map(card => <article className="outreach-metric" key={card.id}>
+        {data.metrics.filter((card) => card.configured !== false).map(card => <article className="outreach-metric" key={card.id}>
           <h2>{card.title}</h2>
           <p className="metric-number">{number(card.total)}</p>
           <div className="outreach-progress">
@@ -537,7 +538,12 @@ export function OutreachDashboardView({
 
             {loading ? (
               <p className="dashboard-state" role="status">Loading activity…</p>
-            ) : error || empty ? (
+            ) : error ? (
+              <div className="prospects-empty">
+                <p>Could not load the dashboard.</p>
+                <button type="button" onClick={onRetry}>Try again</button>
+              </div>
+            ) : empty ? (
               <div className="prospects-empty">
                 <EmptyIllustration />
                 <p>{query.trim() || selectedLeadFilterId || selectedPipeline !== "all" ? "No matching results" : "No Available Prospects"}</p>

@@ -1,29 +1,39 @@
 <?php
 
 use App\Http\Controllers\Api\V1\Auth\AuthController;
+use App\Http\Controllers\Api\V1\Auth\PasswordResetController;
+use App\Http\Controllers\Api\V1\CallController;
 use App\Http\Controllers\Api\V1\ChatController;
 use App\Http\Controllers\Api\V1\CompanyController;
+use App\Http\Controllers\Api\V1\CountryController;
 use App\Http\Controllers\Api\V1\CrmController;
 use App\Http\Controllers\Api\V1\DiscoveryController;
 use App\Http\Controllers\Api\V1\GeoController;
 use App\Http\Controllers\Api\V1\HealthController;
 use App\Http\Controllers\Api\V1\IcpProfileController;
+use App\Http\Controllers\Api\V1\InfobipSmsWebhookController;
+use App\Http\Controllers\Api\V1\InfobipVoiceWebhookController;
+use App\Http\Controllers\Api\V1\InfobipWhatsAppWebhookController;
 use App\Http\Controllers\Api\V1\IntegrationController;
+use App\Http\Controllers\Api\V1\LeadFeedbackController;
 use App\Http\Controllers\Api\V1\LeadSyncController;
 use App\Http\Controllers\Api\V1\MetricsController;
 use App\Http\Controllers\Api\V1\NativeCrmController;
 use App\Http\Controllers\Api\V1\NativeCrmEmailController;
 use App\Http\Controllers\Api\V1\OrganizationController;
+use App\Http\Controllers\Api\V1\OrganizationMemberController;
 use App\Http\Controllers\Api\V1\OutreachController;
 use App\Http\Controllers\Api\V1\OutreachDashboardController;
 use App\Http\Controllers\Api\V1\OutreachDomainController;
 use App\Http\Controllers\Api\V1\OutreachInboxController;
 use App\Http\Controllers\Api\V1\OutreachSenderController;
 use App\Http\Controllers\Api\V1\OutreachSetupRequestController;
-use App\Http\Controllers\Api\V1\InfobipSmsWebhookController;
+use App\Http\Controllers\Api\V1\ReminderController;
+use App\Http\Controllers\Api\V1\SendGridInboundController;
 use App\Http\Controllers\Api\V1\SendGridWebhookController;
 use App\Http\Controllers\Api\V1\SignalTypeController;
 use App\Http\Controllers\Api\V1\SocialListeningController;
+use App\Http\Controllers\Api\V1\UsageController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -37,11 +47,21 @@ Route::get('/health', HealthController::class);
 // Public: SendGrid posts delivery/open/click/bounce events here. Verified via
 // ECDSA signature inside the controller, not session/token auth.
 Route::post('/webhooks/sendgrid', [SendGridWebhookController::class, 'handle']);
+Route::post('/webhooks/sendgrid/inbound', [SendGridInboundController::class, 'handle']);
 Route::post('/webhooks/infobip/sms', [InfobipSmsWebhookController::class, 'handle']);
+Route::post('/webhooks/infobip/whatsapp', [InfobipWhatsAppWebhookController::class, 'handle']);
+Route::post('/webhooks/infobip/voice', [InfobipVoiceWebhookController::class, 'handle']);
+
+Route::get('/countries', [CountryController::class, 'index']);
 
 Route::prefix('auth')->group(function () {
     Route::post('/register', [AuthController::class, 'register']);
     Route::post('/login', [AuthController::class, 'login']);
+    Route::post('/forgot-password', [PasswordResetController::class, 'sendLink'])->middleware('throttle:5,1');
+    Route::get('/reset-password/{token}', [PasswordResetController::class, 'validateToken']);
+    Route::post('/reset-password', [PasswordResetController::class, 'reset'])->middleware('throttle:10,1');
+    Route::post('/verify-email', [AuthController::class, 'verifyEmail'])->middleware('throttle:10,1');
+    Route::post('/resend-otp', [AuthController::class, 'resendOtp'])->middleware('throttle:3,10');
     Route::post('/factory23/exchange', [AuthController::class, 'factory23Exchange']);
     Route::post('/factory23/provision', [AuthController::class, 'factory23Provision']);
     Route::post('/factory23/login-link', [AuthController::class, 'factory23LoginLink']);
@@ -49,18 +69,32 @@ Route::prefix('auth')->group(function () {
     Route::middleware('auth:sanctum')->group(function () {
         Route::post('/logout', [AuthController::class, 'logout']);
         Route::get('/me', [AuthController::class, 'me'])->middleware('org.resolve');
+        Route::patch('/me', [AuthController::class, 'updateMe']);
+        Route::put('/password', [AuthController::class, 'updatePassword']);
     });
 });
+
+Route::post('/invitations/preview', [OrganizationMemberController::class, 'previewInvitation'])->middleware('throttle:20,1');
+Route::post('/invitations/accept', [OrganizationMemberController::class, 'acceptInvitation'])->middleware('throttle:10,1');
 
 Route::middleware(['auth:sanctum', 'org.resolve'])->group(function () {
     Route::get('/organizations', [OrganizationController::class, 'index']);
     Route::post('/organizations', [OrganizationController::class, 'store']);
     Route::get('/organizations/current', [OrganizationController::class, 'current']);
+    Route::patch('/organizations/current', [OrganizationController::class, 'update']);
+    Route::get('/organizations/current/members', [OrganizationMemberController::class, 'index']);
+    Route::patch('/organizations/current/members/{userId}', [OrganizationMemberController::class, 'update']);
+    Route::delete('/organizations/current/members/{userId}', [OrganizationMemberController::class, 'destroy']);
+    Route::get('/organizations/current/invitations', [OrganizationMemberController::class, 'invitations']);
+    Route::post('/organizations/current/invitations', [OrganizationMemberController::class, 'invite']);
+    Route::delete('/organizations/current/invitations/{id}', [OrganizationMemberController::class, 'revokeInvitation']);
+    Route::post('/organizations/current/invitations/{id}/resend', [OrganizationMemberController::class, 'resendInvitation']);
 
     Route::get('/signal-types', [SignalTypeController::class, 'index']);
     Route::get('/geo/places', [GeoController::class, 'places']);
     Route::post('/icp-profiles/suggest-search-brief', [IcpProfileController::class, 'suggestSearchBrief'])
         ->middleware('throttle:20,1');
+    Route::get('/icp-profiles/options', [IcpProfileController::class, 'options']);
     Route::get('/icp-profiles/active', [IcpProfileController::class, 'active']);
     Route::get('/icp-profiles', [IcpProfileController::class, 'index']);
     Route::post('/icp-profiles', [IcpProfileController::class, 'store']);
@@ -76,6 +110,7 @@ Route::middleware(['auth:sanctum', 'org.resolve'])->group(function () {
     Route::delete('/chat/sessions/{id}/messages', [ChatController::class, 'clearMessages']);
     Route::post('/chat/sessions/{id}/messages', [ChatController::class, 'postMessage'])
         ->middleware('throttle:30,1');
+    Route::post('/chat/messages/{id}/feedback', [ChatController::class, 'feedback']);
 
     Route::post('/discovery/runs', [DiscoveryController::class, 'store'])
         ->middleware('throttle:20,1');
@@ -86,10 +121,14 @@ Route::middleware(['auth:sanctum', 'org.resolve'])->group(function () {
     Route::get('/companies', [CompanyController::class, 'index']);
     Route::get('/companies/{id}', [CompanyController::class, 'show']);
     Route::get('/leads', [CompanyController::class, 'leads']);
+    Route::post('/leads/feedback', [LeadFeedbackController::class, 'storeMany']);
+    Route::post('/leads/{id}/feedback', [LeadFeedbackController::class, 'store']);
     Route::post('/leads/{id}/sync-to-crm', [LeadSyncController::class, 'syncToCrm']);
     Route::post('/leads/sync-to-crm', [LeadSyncController::class, 'syncBatch']);
 
     Route::get('/metrics', [MetricsController::class, 'index']);
+    Route::get('/metrics/trend', [MetricsController::class, 'trend']);
+    Route::get('/usage', [UsageController::class, 'show']);
     Route::get('/dashboard', [MetricsController::class, 'index']);
     Route::get('/outreach/recent', [OutreachController::class, 'recent']);
     Route::post('/outreach/draft', [OutreachController::class, 'draft']);
@@ -116,6 +155,7 @@ Route::middleware(['auth:sanctum', 'org.resolve'])->group(function () {
     Route::post('/outreach/setup-request', [OutreachSetupRequestController::class, 'store']);
 
     Route::get('/social-listening/signals', [SocialListeningController::class, 'indexSignals']);
+    Route::get('/social-listening/filters', [SocialListeningController::class, 'filters']);
     Route::get('/social-listening/signals/{id}', [SocialListeningController::class, 'showSignal']);
     Route::get('/social-listening/metrics', [SocialListeningController::class, 'metrics']);
     Route::get('/social-listening/settings', [SocialListeningController::class, 'showSettings']);
@@ -132,6 +172,10 @@ Route::middleware(['auth:sanctum', 'org.resolve'])->group(function () {
 
     Route::get('/outreach/dashboard', [OutreachDashboardController::class, 'dashboard']);
     Route::get('/outreach/activities', [OutreachDashboardController::class, 'index']);
+    Route::get('/reminders', [ReminderController::class, 'index']);
+    Route::patch('/reminders/{id}', [ReminderController::class, 'update']);
+    Route::delete('/reminders/{id}', [ReminderController::class, 'destroy']);
+    Route::post('/calls', [CallController::class, 'store']);
     Route::prefix('crm')->group(function () {
         Route::get('/discovery-pending', [NativeCrmController::class, 'pending']);
         Route::get('/pipelines', [NativeCrmController::class, 'pipelines']);

@@ -14,6 +14,9 @@ class ChatMessage extends Model
         'intent',
         'leads',
         'meta',
+        'feedback_rating',
+        'feedback_comment',
+        'feedback_at',
     ];
 
     protected function casts(): array
@@ -21,6 +24,7 @@ class ChatMessage extends Model
         return [
             'leads' => 'array',
             'meta' => 'array',
+            'feedback_at' => 'datetime',
         ];
     }
 

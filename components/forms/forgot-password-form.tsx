@@ -2,8 +2,7 @@
 
 import Button from "@/components/ui/button";
 import Input from "@/components/ui/input";
-import { forgotPassword } from "@/lib/api/auth";
-import { ApiRequestError } from "@/lib/api/onboarding";
+import { requestPasswordReset, SalesEngineAuthError } from "@/lib/api/sales-engine-native-auth";
 import { zodResolver } from "@hookform/resolvers/zod";
 import Link from "next/link";
 import { useState } from "react";
@@ -19,12 +18,10 @@ type ForgotPasswordFormValues = z.infer<typeof forgotPasswordSchema>;
 
 type ForgotPasswordFormProps = {
   prefilledEmail?: string;
-  portal?: "management" | "agent";
 };
 
 export default function ForgotPasswordForm({
   prefilledEmail = "",
-  portal = "management",
 }: ForgotPasswordFormProps) {
   const normalizedPrefilledEmail = prefilledEmail.trim();
   const [globalError, setGlobalError] = useState("");
@@ -33,7 +30,6 @@ export default function ForgotPasswordForm({
   const {
     register,
     handleSubmit,
-    setError,
     formState: { errors, isValid },
   } = useForm<ForgotPasswordFormValues>({
     resolver: zodResolver(forgotPasswordSchema),
@@ -50,18 +46,11 @@ export default function ForgotPasswordForm({
     setLoading(true);
 
     try {
-      const res = await forgotPassword({
-        email: values.email.trim(),
-        portal,
-      });
+      const res = await requestPasswordReset(values.email.trim());
       toast.success(res.message || "Check your email for reset instructions.");
     } catch (err) {
-      if (err instanceof ApiRequestError) {
-        if (err.errors?.email) {
-          setError("email", { type: "server", message: err.errors.email[0] });
-        } else {
-          setGlobalError(err.message);
-        }
+      if (err instanceof SalesEngineAuthError) {
+        setGlobalError(err.message);
         toast.error(err.message);
       } else {
         const msg = "An unexpected error occurred. Please try again.";
@@ -94,7 +83,7 @@ export default function ForgotPasswordForm({
       <p className="text-center text-xs mt-6 text-[#A9AAAB]">
         Remember your password?{" "}
         <Link
-          href={portal === "agent" ? "/agent/login" : "/login"}
+          href="/login"
           className="font-bold text-[#34373C] cursor-pointer hover:underline"
         >
           Log In.

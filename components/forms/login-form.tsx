@@ -83,7 +83,7 @@ export default function LoginForm() {
         id: session.user.id,
         name: session.user.name,
         email: session.user.email,
-        avatar: null,
+        avatar: session.user.avatar_url ?? null,
         active_company: null,
       });
 

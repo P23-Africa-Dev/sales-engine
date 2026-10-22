@@ -12,6 +12,8 @@ return [
         'organization_warmup_start' => (int) env('OUTREACH_ORG_WARMUP_START', 50),
         'organization_daily_ceiling' => (int) env('OUTREACH_ORG_DAILY_CEILING', 500),
         'sms_daily' => (int) env('OUTREACH_SMS_DAILY_CAP', 20),
+        'whatsapp_daily' => (int) env('OUTREACH_WHATSAPP_DAILY_CAP', 20),
+        'voice_daily' => (int) env('OUTREACH_VOICE_DAILY_CAP', 30),
     ],
 
     /*

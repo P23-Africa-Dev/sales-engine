@@ -65,6 +65,8 @@ class OutreachQuotaService
         return match ($senderType) {
             'organization' => $this->organizationLimit($organization),
             'sms' => (int) config('outreach.quota.sms_daily', 20),
+            'whatsapp' => (int) config('outreach.quota.whatsapp_daily', 20),
+            'voice' => (int) config('outreach.quota.voice_daily', 30),
             default => (int) config('outreach.quota.platform_daily', 30),
         };
     }

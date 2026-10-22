@@ -17,7 +17,7 @@ export function AgentGuard({ children }: { children: React.ReactNode }) {
     if (!user && !supportActive) {
       // Also clear the cookie so the login page server doesn't bounce back here.
       clearAuthSession();
-      router.replace("/agent/login");
+      router.replace("/login");
       return;
     }
     if (!user) return;

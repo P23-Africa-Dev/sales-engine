@@ -33,6 +33,7 @@ class OutreachDraftService
         ?string $clientTimezone = null,
         ?int $chatSessionId = null,
         array $historySlice = [],
+        ?int $userId = null,
     ): array {
         $channel = $this->channelFromText($prompt);
 
@@ -55,6 +56,7 @@ class OutreachDraftService
             $toEmail = $this->resolveLeadEmail($lead);
             $activity = OutreachActivity::query()->create([
                 'organization_id' => $organization->id,
+                'user_id' => $userId,
                 'lead_id' => $lead->id,
                 'company_id' => $lead->company_id,
                 'name' => $lead->name,
@@ -126,6 +128,7 @@ class OutreachDraftService
         IcpProfile $icp,
         SocialSignal $signal,
         ?string $clientTimezone = null,
+        ?int $userId = null,
     ): array {
         $prompt = "Respond to this social post with a compliant email outreach draft.\n\nPost: {$signal->post_text}\nPersona: {$signal->persona}\nProblem: {$signal->problem}";
 
@@ -137,6 +140,7 @@ class OutreachDraftService
 
         $activity = OutreachActivity::query()->create([
             'organization_id' => $organization->id,
+            'user_id' => $userId,
             'social_signal_id' => $signal->id,
             'lead_id' => $signal->lead_id,
             'company_id' => $signal->lead?->company_id,
@@ -487,7 +491,7 @@ class OutreachDraftService
         }
 
         try {
-            $system = "Draft a concise {$channel} outreach message for the user's specific request. Do not claim the message was sent. Professional tone for African B2B. " . TimeGreeting::promptContext($clientTimezone) . ' Use the active ICP industries, territories, and decision makers to tailor the angle. Reference the provided lead context when relevant. When prior chat turns are provided, keep continuity with that conversation. Output ONLY the sendable message body. No subject line, no "Subject:" header, no To/From headers, and no ICP analysis preamble.';
+            $system = "Draft a concise {$channel} outreach message for the user's specific request. Do not claim the message was sent. Professional tone for African B2B. ".TimeGreeting::promptContext($clientTimezone).' Use the active ICP industries, territories, and decision makers to tailor the angle. Reference the provided lead context when relevant. When prior chat turns are provided, keep continuity with that conversation. Output ONLY the sendable message body. No subject line, no "Subject:" header, no To/From headers, and no ICP analysis preamble.';
             if ($channel === 'sms') {
                 $system .= ' This is an SMS. Keep it under 320 characters. No subject line.';
             }

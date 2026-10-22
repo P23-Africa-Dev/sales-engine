@@ -69,9 +69,11 @@ describe("outreach dashboard interaction", () => {
     expect(screen.queryByText("220,000")).toBeNull();
     expect(screen.queryByText("Nord Tech")).toBeNull();
     expect(screen.queryByText("Sample data")).toBeNull();
-    expect(screen.getByText("No Available Prospects")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Click to create your ICP" })).toBeTruthy();
-    expect(screen.queryByText("Unable to load activity.")).toBeNull();
+    expect(screen.getByText("Could not load the dashboard.")).toBeTruthy();
+    expect(screen.queryByText("No Available Prospects")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Click to create your ICP" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(retry).toHaveBeenCalled();
     expect(screen.getAllByText("No of Emails")).toHaveLength(2);
     expect(screen.getByText("No of SMS")).toBeTruthy();
   });

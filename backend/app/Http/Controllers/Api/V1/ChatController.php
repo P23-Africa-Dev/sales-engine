@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use App\Http\Resources\ChatMessageResource;
+use App\Models\ChatMessage;
 use App\Models\ChatSession;
 use App\Models\IcpProfile;
 use App\Models\Lead;
@@ -12,6 +13,7 @@ use App\Support\OrgContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use InvalidArgumentException;
+use Symfony\Component\HttpKernel\Exception\HttpException;
 
 class ChatController extends Controller
 {
@@ -127,6 +129,8 @@ class ChatController extends Controller
                 $data['intent'] ?? 'freeform',
                 $data['timezone'] ?? null,
             );
+        } catch (HttpException $e) {
+            return response()->json(['message' => $e->getMessage()], $e->getStatusCode());
         } catch (InvalidArgumentException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
         }
@@ -144,6 +148,30 @@ class ChatController extends Controller
         $statusCode = ($result['status'] ?? 'completed') === 'processing' ? 202 : 200;
 
         return response()->json(['data' => $payload], $statusCode);
+    }
+
+    public function feedback(Request $request, int $id): JsonResponse
+    {
+        $data = $request->validate([
+            'rating' => ['required', 'in:up,down'],
+            'comment' => ['nullable', 'string', 'max:2000'],
+        ]);
+
+        $message = ChatMessage::query()
+            ->whereHas('session', fn ($query) => $query->where('organization_id', OrgContext::require()->id))
+            ->find($id);
+
+        if (! $message) {
+            return response()->json(['message' => 'Message not found.'], 404);
+        }
+
+        $message->update([
+            'feedback_rating' => $data['rating'],
+            'feedback_comment' => $data['comment'] ?? null,
+            'feedback_at' => now(),
+        ]);
+
+        return response()->json(['data' => new ChatMessageResource($message->fresh())]);
     }
 
     private function ownedSession(int $id): ChatSession

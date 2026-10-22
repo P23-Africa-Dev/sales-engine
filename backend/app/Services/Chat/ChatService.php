@@ -2,24 +2,26 @@
 
 namespace App\Services\Chat;
 
+use App\Jobs\ContinueDiscoveryJob;
+use App\Jobs\ProcessChatIntentJob;
+use App\Jobs\ProcessQuickResearchJob;
 use App\Models\ChatMessage;
 use App\Models\ChatSession;
 use App\Models\DiscoveryRun;
 use App\Models\IcpProfile;
+use App\Models\Lead;
 use App\Models\Organization;
 use App\Models\User;
-use App\Services\Discovery\DTO\IcpBrief;
 use App\Services\Discovery\DiscoveryOrchestrator;
 use App\Services\Discovery\DiscoveryProviderHealth;
+use App\Services\Discovery\DTO\IcpBrief;
+use App\Services\Discovery\LeadQueryNormalizer;
 use App\Services\Discovery\QueryIntentService;
 use App\Services\Icp\IcpProfileService;
 use App\Services\Llm\GlmClient;
 use App\Services\Outreach\OutreachDraftService;
 use App\Services\Research\ResearchOrchestrator;
-use App\Support\TimeGreeting;
-use App\Jobs\ContinueDiscoveryJob;
-use App\Jobs\ProcessChatIntentJob;
-use App\Jobs\ProcessQuickResearchJob;
+use App\Services\Usage\UsageService;
 use InvalidArgumentException;
 
 class ChatService
@@ -40,7 +42,7 @@ class ChatService
         private readonly FreeformOpportunityRetriever $opportunityRetriever,
         private readonly ChatListNumbering $listNumbering,
         private readonly ConversationMemoryService $memory,
-        private readonly \App\Services\Discovery\LeadQueryNormalizer $leadQueryNormalizer,
+        private readonly LeadQueryNormalizer $leadQueryNormalizer,
         private readonly QueryIntentService $queryIntent = new QueryIntentService,
     ) {}
 
@@ -128,6 +130,10 @@ class ChatService
 
         if (! $icp && in_array($intent, ['quick_research', 'generate_leads', 'generate_more_leads', 'create_outreach'], true)) {
             throw new InvalidArgumentException('An active ICP profile is required for this intent.');
+        }
+
+        if (in_array($intent, ['generate_leads', 'generate_more_leads'], true)) {
+            app(UsageService::class)->assertCanSearch($organization);
         }
 
         $queryNormalized = false;
@@ -271,13 +277,13 @@ class ChatService
                     ->where('id', '>', $userMessage->id)
                     ->orderByDesc('id')
                     ->get()
-                    ->first(fn(ChatMessage $message) => ! ($message->meta['pending'] ?? false))
+                    ->first(fn (ChatMessage $message) => ! ($message->meta['pending'] ?? false))
                     ?? ChatMessage::query()
-                    ->where('chat_session_id', $session->id)
-                    ->where('role', 'assistant')
-                    ->where('id', '>', $userMessage->id)
-                    ->orderByDesc('id')
-                    ->first();
+                        ->where('chat_session_id', $session->id)
+                        ->where('role', 'assistant')
+                        ->where('id', '>', $userMessage->id)
+                        ->orderByDesc('id')
+                        ->first();
 
                 return [
                     'user_message' => $userMessage,
@@ -361,11 +367,11 @@ class ChatService
                 ] as $notice
             ) {
                 if ($notice !== '') {
-                    $assistantBody = $assistantBody . "\n\n" . $notice;
+                    $assistantBody = $assistantBody."\n\n".$notice;
                 }
             }
             if ($degradedMeta !== []) {
-                $assistantBody = $degradedMeta['retrieval_degraded']['notice'] . "\n\n" . $assistantBody;
+                $assistantBody = $degradedMeta['retrieval_degraded']['notice']."\n\n".$assistantBody;
             }
         } elseif ($intent === 'create_outreach' && $icp) {
             $draft = $this->outreach->draftFromPrompt(
@@ -375,6 +381,7 @@ class ChatService
                 $clientTimezone,
                 $session->id,
                 $historySlice,
+                $user->id,
             );
             $alignmentNote = trim((string) ($draft['icp_alignment_note'] ?? ''));
             $draftBody = (string) ($draft['body'] ?? '');
@@ -576,11 +583,11 @@ class ChatService
                     ] as $notice
                 ) {
                     if ($notice !== '') {
-                        $assistantBody = $assistantBody . "\n\n" . $notice;
+                        $assistantBody = $assistantBody."\n\n".$notice;
                     }
                 }
                 if ($degradedMeta !== []) {
-                    $assistantBody = $degradedMeta['retrieval_degraded']['notice'] . "\n\n" . $assistantBody;
+                    $assistantBody = $degradedMeta['retrieval_degraded']['notice']."\n\n".$assistantBody;
                 }
             } else {
                 $run->update(['status' => 'failed', 'error' => 'Unsupported async intent.', 'finished_at' => now()]);
@@ -643,7 +650,7 @@ class ChatService
 
             if ($placeholder) {
                 $placeholder->update([
-                    'body' => 'Sorry, that request failed: ' . $e->getMessage(),
+                    'body' => 'Sorry, that request failed: '.$e->getMessage(),
                     'intent' => $intent,
                     'meta' => array_merge($meta, ['error' => $e->getMessage(), 'pending' => false]),
                 ]);
@@ -651,7 +658,7 @@ class ChatService
                 ChatMessage::query()->create([
                     'chat_session_id' => $session->id,
                     'role' => 'assistant',
-                    'body' => 'Sorry, that request failed: ' . $e->getMessage(),
+                    'body' => 'Sorry, that request failed: '.$e->getMessage(),
                     'intent' => $intent,
                     'meta' => array_merge($meta, ['error' => $e->getMessage(), 'pending' => false]),
                 ]);
@@ -670,13 +677,13 @@ class ChatService
             ->get();
 
         $forRun = $messages->first(
-            fn(ChatMessage $message) => (int) ($message->meta['discovery_run_id'] ?? 0) === $runId
+            fn (ChatMessage $message) => (int) ($message->meta['discovery_run_id'] ?? 0) === $runId
         );
         if ($forRun) {
             return $forRun;
         }
 
-        return $messages->first(fn(ChatMessage $message) => (bool) ($message->meta['pending'] ?? false));
+        return $messages->first(fn (ChatMessage $message) => (bool) ($message->meta['pending'] ?? false));
     }
 
     /**
@@ -830,7 +837,7 @@ class ChatService
         );
         $spread = $this->countrySpreadNotice($result['run'], $merged);
         if ($spread !== '') {
-            $assistantBody .= "\n\n" . $spread;
+            $assistantBody .= "\n\n".$spread;
         }
 
         $meta = is_array($placeholder->meta) ? $placeholder->meta : [];
@@ -969,7 +976,22 @@ class ChatService
             }
         }
 
-        return array_values($names);
+        return array_values(array_unique(array_merge($names, $this->rejectedLeadNames($session))));
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function rejectedLeadNames(ChatSession $session): array
+    {
+        return Lead::query()
+            ->where('organization_id', $session->organization_id)
+            ->where('save_status', Lead::SAVE_REJECTED)
+            ->pluck('name')
+            ->filter(fn ($name) => is_string($name) && trim($name) !== '')
+            ->map(fn (string $name) => trim($name))
+            ->values()
+            ->all();
     }
 
     private function recentGenerateQueryFromSession(ChatSession $session): ?string
@@ -1026,7 +1048,7 @@ class ChatService
      *
      * @return array{retrieval_degraded?: array{web_search: bool, reason: string, notice: string}}
      */
-    private function retrievalDegradedMeta(\App\Models\DiscoveryRun $run): array
+    private function retrievalDegradedMeta(DiscoveryRun $run): array
     {
         $summary = is_array($run->result_summary) ? $run->result_summary : [];
         if (! ($summary['retrieval_degraded'] ?? false)) {
@@ -1048,7 +1070,7 @@ class ChatService
      * Say which markets the batch actually came from, so a four-country ICP is not
      * silently answered with one country's leads.
      */
-    private function countrySpreadNotice(\App\Models\DiscoveryRun $run, array $leads): string
+    private function countrySpreadNotice(DiscoveryRun $run, array $leads): string
     {
         if (count($leads) < 2) {
             return '';
@@ -1070,11 +1092,11 @@ class ChatService
             $parts[] = "{$count} {$label}";
         }
 
-        $notice = 'Spread: ' . implode(', ', $parts) . '.';
+        $notice = 'Spread: '.implode(', ', $parts).'.';
 
         $missing = array_values(array_diff($selected, array_keys($byCountry)));
         if ($missing !== []) {
-            $notice .= ' Nothing qualified in ' . implode(', ', $missing) . ' this run.';
+            $notice .= ' Nothing qualified in '.implode(', ', $missing).' this run.';
         }
 
         return $notice;
@@ -1085,7 +1107,7 @@ class ChatService
      *
      * @param  list<array<string, mixed>>  $leads
      */
-    private function retrievalGateNotice(\App\Models\DiscoveryRun $run, array $leads): string
+    private function retrievalGateNotice(DiscoveryRun $run, array $leads): string
     {
         if ($leads !== []) {
             return '';
@@ -1102,7 +1124,7 @@ class ChatService
         $retrievedText = $retrieved > 0 ? "We retrieved {$retrieved} companies" : 'We retrieved companies';
 
         return "{$retrievedText}, and dropped {$unverified} because their country could not be confirmed. "
-            . 'Company databases often omit location, so they were not shown against your territories.';
+            .'Company databases often omit location, so they were not shown against your territories.';
     }
 
     private function retrievalDegradedNotice(string $reason): string
@@ -1123,7 +1145,7 @@ class ChatService
      * @param  list<array<string, mixed>>  $leads
      * @return array{icp_tighten?: array{suggested: bool, reason: string}}
      */
-    private function icpTightenMeta(\App\Models\DiscoveryRun $run, array $leads, int $requestedLimit): array
+    private function icpTightenMeta(DiscoveryRun $run, array $leads, int $requestedLimit): array
     {
         $summary = is_array($run->result_summary) ? $run->result_summary : [];
         $leadCount = count($leads);
@@ -1203,7 +1225,7 @@ class ChatService
 
         $icpRecommendedCount = count(array_filter(
             $leads,
-            fn(array $lead) => (bool) ($lead['icp_recommended'] ?? false) && ! (bool) ($lead['low_confidence'] ?? false),
+            fn (array $lead) => (bool) ($lead['icp_recommended'] ?? false) && ! (bool) ($lead['low_confidence'] ?? false),
         ));
         $reviewCount = $count - $icpRecommendedCount;
         $advisoryNote = $this->buildIcpAdvisoryNote($icp, $count, $icpRecommendedCount, $reviewCount);
@@ -1220,10 +1242,10 @@ class ChatService
         $config = is_array($icp->config) ? $icp->config : [];
         $territories = array_values(array_filter(
             array_map(
-                static fn($value): string => is_string($value) ? trim($value) : '',
+                static fn ($value): string => is_string($value) ? trim($value) : '',
                 $config['territories'] ?? [],
             ),
-            static fn(string $value): bool => $value !== '',
+            static fn (string $value): bool => $value !== '',
         ));
 
         return implode(', ', array_slice($territories, 0, 3));
@@ -1254,12 +1276,12 @@ class ChatService
             }
             // Keep bullet bodies short so the cards remain the detailed view.
             if (mb_strlen($why) > 220) {
-                $why = rtrim(mb_substr($why, 0, 217)) . '…';
+                $why = rtrim(mb_substr($why, 0, 217)).'…';
             }
 
-            $heading = ($index + 1) . '. ' . $name;
+            $heading = ($index + 1).'. '.$name;
             if ($role !== '') {
-                $heading .= ', ' . $role;
+                $heading .= ', '.$role;
             }
             $lines[] = $heading;
             if ($why !== '') {
@@ -1268,7 +1290,7 @@ class ChatService
             $lines[] = '';
         }
 
-        $lines[] = 'Review the cards below (Overall / Search / ICP / Intent scores) and save selected leads to CRM.' . $advisoryNote;
+        $lines[] = 'Review the cards below (Overall / Search / ICP / Intent scores) and save selected leads to CRM.'.$advisoryNote;
 
         return trim(implode("\n", $lines));
     }
@@ -1310,7 +1332,7 @@ class ChatService
         $firstName = trim(explode(' ', trim($user->name ?? ''), 2)[0] ?? '');
         $system = $this->icpChatContext->buildFreeformSystemPrompt($icp, $firstName, $clientTimezone);
         if ($summary) {
-            $system .= "\n\nConversation memory (older turns summarized):\n" . $summary;
+            $system .= "\n\nConversation memory (older turns summarized):\n".$summary;
         }
 
         $messages = [['role' => 'system', 'content' => $system]];
@@ -1328,7 +1350,7 @@ class ChatService
         try {
             return $this->listNumbering->normalize($this->glm->chat($messages, 'chat', $organization));
         } catch (\Throwable $e) {
-            return 'Chat temporarily unavailable: ' . $e->getMessage();
+            return 'Chat temporarily unavailable: '.$e->getMessage();
         }
     }
 }

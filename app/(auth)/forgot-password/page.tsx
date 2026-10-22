@@ -1,13 +1,12 @@
 import ForgotPasswordForm from "@/components/forms/forgot-password-form";
 
 type ForgotPasswordPageProps = {
-  searchParams: Promise<{ email?: string; portal?: string }>;
+  searchParams: Promise<{ email?: string }>;
 };
 
 export default async function ForgotPasswordPage({ searchParams }: ForgotPasswordPageProps) {
   const params = await searchParams;
   const prefilledEmail = (params.email ?? "").trim();
-  const portal = params.portal === "agent" ? "agent" : "management";
 
   return (
     <div className="w-full max-w-[460px] flex flex-col gap-8">
@@ -20,7 +19,7 @@ export default async function ForgotPasswordPage({ searchParams }: ForgotPasswor
         </p>
       </div>
 
-      <ForgotPasswordForm prefilledEmail={prefilledEmail} portal={portal} />
+      <ForgotPasswordForm prefilledEmail={prefilledEmail} />
     </div>
   );
 }

@@ -98,6 +98,10 @@ export type LeadApiItem = {
     } | null;
     notes?: LeadNote[];
     activities?: LeadActivity[];
+    latitude?: number | null;
+    longitude?: number | null;
+    logo_url?: string | null;
+    map_url?: string | null;
     created_at?: string;
     updated_at?: string;
 };

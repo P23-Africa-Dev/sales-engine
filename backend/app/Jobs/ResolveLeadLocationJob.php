@@ -5,8 +5,10 @@ namespace App\Jobs;
 use App\Models\Lead;
 use App\Services\Discovery\DiscoveryGeo;
 use App\Services\Discovery\DTO\IcpBrief;
+use App\Services\Geo\NominatimGeocoder;
 use App\Services\IcpFiltering\DTO\CandidateCompany;
 use App\Services\IcpFiltering\IcpFilterService;
+use App\Support\CompanyLogo;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Http;
@@ -29,9 +31,9 @@ class ResolveLeadLocationJob implements ShouldQueue
         $this->onQueue('discovery');
     }
 
-    public function handle(DiscoveryGeo $geo, IcpFilterService $filter): void
+    public function handle(DiscoveryGeo $geo, IcpFilterService $filter, NominatimGeocoder $geocoder): void
     {
-        $lead = Lead::query()->find($this->leadId);
+        $lead = Lead::query()->with('company')->find($this->leadId);
         if (! $lead) {
             return;
         }
@@ -40,6 +42,8 @@ class ResolveLeadLocationJob implements ShouldQueue
         $existing = trim((string) ($meta['location'] ?? ''));
         $status = (string) ($meta['location_status'] ?? '');
         if ($existing !== '' && $status !== 'unknown') {
+            $this->storeCoordinates($lead, $existing, $geocoder);
+
             return;
         }
 
@@ -73,6 +77,33 @@ class ResolveLeadLocationJob implements ShouldQueue
         }
 
         $lead->update(['meta' => $meta]);
+        $this->storeCoordinates($lead->fresh('company'), (string) $meta['location'], $geocoder);
+    }
+
+    private function storeCoordinates(Lead $lead, string $location, NominatimGeocoder $geocoder): void
+    {
+        $company = $lead->company;
+        if ($company && ! $company->logo_url) {
+            $logo = CompanyLogo::fromWebsite($company->website);
+            if ($logo) {
+                $company->update(['logo_url' => $logo]);
+            }
+        }
+
+        if ($lead->latitude !== null || trim($location) === '') {
+            return;
+        }
+
+        $point = $geocoder->geocode($location);
+        if (! $point) {
+            return;
+        }
+
+        $lead->update([
+            'latitude' => $point['latitude'],
+            'longitude' => $point['longitude'],
+            'geocoded_at' => now(),
+        ]);
     }
 
     private function serperHeadquarters(string $name, DiscoveryGeo $geo): ?string

@@ -73,7 +73,9 @@ export function useSendOutreachActivity() {
       ...payload
     }: {
       activityId: number;
-      to_email: string;
+      channel?: "email" | "sms" | "whatsapp";
+      to_email?: string;
+      to_phone?: string;
       subject?: string;
       body: string;
       inbox_id?: number;
@@ -99,7 +101,7 @@ export function useRegenerateOutreach() {
     }: {
       activityId: number;
       instructions?: string;
-      channel?: "email" | "whatsapp";
+      channel?: "email" | "sms" | "whatsapp";
     }) => regenerateOutreachActivity(activityId, { instructions, channel }),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: SALES_ENGINE_OUTREACH_KEYS.all });
@@ -129,7 +131,7 @@ export function useDeleteOutreachActivity() {
   });
 }
 
-export type OutreachListMetrics = { total: number; deliveredCount: number; openedCount: number; clickedCount: number; failedCount: number; emailCount: number; whatsappCount: number };
+export type OutreachListMetrics = { total: number; deliveredCount: number; openedCount: number; clickedCount: number; failedCount: number; emailCount: number; whatsappCount: number; smsCount?: number };
 export function useOutreachActivities(params: { page: number; per_page: number; search: string; channel: string; status: string; sort: string }) {
   const auth = useSalesEngineAuth();
   const query = useQuery({

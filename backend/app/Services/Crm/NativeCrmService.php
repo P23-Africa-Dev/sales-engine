@@ -10,6 +10,7 @@ use App\Models\Organization;
 use App\Models\SocialSignal;
 use App\Models\User;
 use App\Services\Intent\SignalToLeadService;
+use App\Support\CompanyLogo;
 use App\Support\OrgContext;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
@@ -189,6 +190,11 @@ class NativeCrmService
             'pipeline_id' => $entry->pipeline_id, 'name' => $lead->name, 'source' => $lead->source, 'summary' => $lead->summary,
             'status' => $entry->stage->slug, 'priority' => $entry->priority, 'budget_amount' => $entry->budget_amount, 'budget_currency' => $entry->budget_currency,
             'email' => $meta['email'] ?? null, 'phone' => $meta['phone'] ?? null, 'location' => $meta['location'] ?? null,
+            'latitude' => $lead->latitude, 'longitude' => $lead->longitude,
+            'location_status' => $meta['location_status'] ?? ($lead->latitude !== null ? 'resolved' : 'unknown'),
+            'map_url' => $lead->latitude !== null && $lead->longitude !== null ? 'https://maps.google.com/?q='.$lead->latitude.','.$lead->longitude : null,
+            'linked_to_map' => $lead->latitude !== null && $lead->longitude !== null,
+            'logo_url' => $lead->company?->logo_url ?: CompanyLogo::fromWebsite($lead->company?->website ?? ($meta['website'] ?? null)),
             'contacts' => $meta['contacts'] ?? [], 'company_name' => $meta['company_name'] ?? $meta['company'] ?? $lead->company?->name,
             'position' => $meta['position'] ?? $meta['title'] ?? null, 'profile_urls' => $meta['profile_urls'] ?? [],
             'created_by_user_id' => $entry->created_by_user_id, 'assigned_to_user_id' => $entry->assigned_to_user_id,

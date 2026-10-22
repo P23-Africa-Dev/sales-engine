@@ -71,7 +71,7 @@ return [
         'internal_token' => env('FACTORY23_INTERNAL_TOKEN', env('FACTORY23_API_TOKEN')),
         'company_tokens' => array_filter(
             json_decode((string) env('FACTORY23_COMPANY_TOKENS', '{}'), true) ?: [],
-            fn($token) => is_string($token) && trim($token) !== '',
+            fn ($token) => is_string($token) && trim($token) !== '',
         ),
     ],
 
@@ -119,6 +119,8 @@ return [
         'webhook_secret' => env('SENDGRID_WEBHOOK_SECRET'),
         'webhook_public_key' => env('SENDGRID_WEBHOOK_PUBLIC_KEY'),
         'unsubscribe_group_id' => env('SENDGRID_UNSUBSCRIBE_GROUP_ID'),
+        'inbound_domain' => env('SENDGRID_INBOUND_DOMAIN'),
+        'inbound_secret' => env('SENDGRID_INBOUND_SECRET'),
     ],
 
     'infobip' => [
@@ -126,6 +128,15 @@ return [
         'api_key' => env('INFOBIP_API_KEY'),
         'sms_from' => env('INFOBIP_SMS_FROM'),
         'webhook_token' => env('INFOBIP_SMS_WEBHOOK_TOKEN'),
+        'whatsapp_sender' => env('INFOBIP_WHATSAPP_SENDER'),
+        'whatsapp_template' => env('INFOBIP_WHATSAPP_TEMPLATE'),
+        'whatsapp_webhook_token' => env('INFOBIP_WHATSAPP_WEBHOOK_TOKEN'),
+        'voice_from' => env('INFOBIP_VOICE_FROM'),
+        'voice_webhook_token' => env('INFOBIP_VOICE_WEBHOOK_TOKEN'),
+    ],
+
+    'nominatim' => [
+        'user_agent' => env('NOMINATIM_USER_AGENT', 'SalesEngine/1.0 (sales-engine@thefactory23.com)'),
     ],
 
     'social_listening' => [

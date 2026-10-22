@@ -8,7 +8,7 @@ import { useAuthStore } from "@/store/auth";
 import { clearAuthSession, getAuthTokenFromDocument } from "@/lib/auth/session";
 import { logoutFromSalesEngine } from "@/lib/api/sales-engine-native-auth";
 import { getSalesEngineToken, clearSalesEngineSession } from "@/lib/sales-engine/session";
-import { ChevronDown, Menu, X, LogOut } from "lucide-react";
+import { ChevronDown, Menu, X, LogOut, Settings } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils/sample";
 import LogoutModal from "@/components/ui/logout-modal";
@@ -199,6 +199,14 @@ export function Navbar() {
 
                 {/* Menu items */}
                 <div className="p-1.5">
+                  <Link
+                    href="/settings"
+                    onClick={() => setProfileOpen(false)}
+                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-white/80 hover:text-white hover:bg-white/5 transition-colors text-sm font-medium"
+                  >
+                    <Settings size={15} />
+                    Settings
+                  </Link>
                   <button
                     onClick={() => {
                       setProfileOpen(false);

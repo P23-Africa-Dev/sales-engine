@@ -40,14 +40,14 @@ class SocialSignalEnricher
 
     /**
      * @param  ?SignalTypeDefinition  $signalType  When the hit was found via a dedicated Stage 2
-     *                                              signal-type query (see SocialListeningOrchestrator::
-     *                                              buildSignalTypeQueries), the matched definition —
-     *                                              sharpens extraction toward that type's own trigger
-     *                                              pattern and, for types that name a person
-     *                                              (feeds_enrichment), toward pulling out named_people
-     *                                              precisely so Stage 3 has something real to enrich.
-     *                                              Null for the default/general query path — behavior
-     *                                              there is unchanged except for the new named_people key.
+     *                                             signal-type query (see SocialListeningOrchestrator::
+     *                                             buildSignalTypeQueries), the matched definition —
+     *                                             sharpens extraction toward that type's own trigger
+     *                                             pattern and, for types that name a person
+     *                                             (feeds_enrichment), toward pulling out named_people
+     *                                             precisely so Stage 3 has something real to enrich.
+     *                                             Null for the default/general query path — behavior
+     *                                             there is unchanged except for the new named_people key.
      * @return array<string, mixed>
      */
     public function enrich(
@@ -61,24 +61,25 @@ class SocialSignalEnricher
         if ($this->glm->isConfigured()) {
             try {
                 $systemPrompt = 'Extract a structured opportunity from a social post for a specific viewing user, grounded in their ICP / stated interests. '
-                    . 'Return JSON only with keys: profile_name, persona, company_name, location_text, entity_type, industry, key_topics, competitors, '
-                    . 'signal_type, buying_stage, intent_label, intent_description, problem, urgency, buying_intent_score (0-100 integer for overall relevance/opportunity strength for this user), '
-                    . 'reasons (array of strings citing ICP/interest match when applicable), suggested_message, recommended_action_title, recommended_action_detail, follow_up_strategy, '
-                    . 'summary (concise neutral summary of the signal), why_this_matters_to_you (2nd person, cite the user\'s ICP/interest fields explicitly), '
-                    . 'benefits (array of concrete personal/user gains), personal_recommended_action_title, personal_recommended_action_detail (the single best next step for THIS user), '
-                    . 'named_people (array of full names of real people explicitly named in the post as taking an action — being hired, appointed, quoted, founding, leading; empty array if none are named). '
-                    . 'signal_type MUST be exactly one of: recommendation, switching, pricing, hiring_expansion, investment_opportunity, market_signal, partnership_opportunity, competitive_move, funding_event, regulatory_change, other. '
-                    . 'Use investment_opportunity/funding_event for funding rounds, capital raises, or investable openings. Use market_signal for market shifts, expansions, or trend news relevant to the user\'s interests. '
-                    . 'Use partnership_opportunity for potential collaborations. Use competitive_move for competitor actions worth knowing about. Use regulatory_change for policy/regulatory news. '
-                    . 'Use hiring_expansion for hiring/recruiting/expansion posts. Use recommendation/switching/pricing when the author is asking for vendors, alternatives, costs, or tools. '
-                    . 'Use other only for content with no plausible relevance to the user\'s ICP/interests, or spam. Do not force unrelated content into a sales bucket — pick the type that best matches WHY this matters to the user. '
-                    . 'Prefer timely angles: if the post is recent or time-sensitive, say so in why_this_matters_to_you and urgency. '
-                    . 'buying_intent_score answers: would the person behind this active ICP be worse off if this post slid by this week? Score under 40 and use signal_type other when it would not help them. '
-                    . 'Every field must be populated (use empty string/array rather than omitting a key).';
+                    .'Return JSON only with keys: profile_name, persona, company_name, location_text, entity_type, industry, key_topics, competitors, '
+                    .'signal_type, buying_stage, intent_label, intent_description, problem, urgency, buying_intent_score (0-100 integer for overall relevance/opportunity strength for this user), '
+                    .'buying_stage MUST be exactly one of: Awareness, Consideration, Vendor Evaluation, Decision. '
+                    .'reasons (array of strings citing ICP/interest match when applicable), suggested_message, recommended_action_title, recommended_action_detail, follow_up_strategy, '
+                    .'summary (concise neutral summary of the signal), why_this_matters_to_you (2nd person, cite the user\'s ICP/interest fields explicitly), '
+                    .'benefits (array of concrete personal/user gains), personal_recommended_action_title, personal_recommended_action_detail (the single best next step for THIS user), '
+                    .'named_people (array of full names of real people explicitly named in the post as taking an action — being hired, appointed, quoted, founding, leading; empty array if none are named). '
+                    .'signal_type MUST be exactly one of: recommendation, switching, pricing, hiring_expansion, investment_opportunity, market_signal, partnership_opportunity, competitive_move, funding_event, regulatory_change, other. '
+                    .'Use investment_opportunity/funding_event for funding rounds, capital raises, or investable openings. Use market_signal for market shifts, expansions, or trend news relevant to the user\'s interests. '
+                    .'Use partnership_opportunity for potential collaborations. Use competitive_move for competitor actions worth knowing about. Use regulatory_change for policy/regulatory news. '
+                    .'Use hiring_expansion for hiring/recruiting/expansion posts. Use recommendation/switching/pricing when the author is asking for vendors, alternatives, costs, or tools. '
+                    .'Use other only for content with no plausible relevance to the user\'s ICP/interests, or spam. Do not force unrelated content into a sales bucket — pick the type that best matches WHY this matters to the user. '
+                    .'Prefer timely angles: if the post is recent or time-sensitive, say so in why_this_matters_to_you and urgency. '
+                    .'buying_intent_score answers: would the person behind this active ICP be worse off if this post slid by this week? Score under 40 and use signal_type other when it would not help them. '
+                    .'Every field must be populated (use empty string/array rather than omitting a key).';
 
                 if ($signalType !== null) {
                     $systemPrompt .= " This post was found via a dedicated search for the \"{$signalType->label}\" signal type: {$signalType->trigger_description} "
-                        . 'If the post genuinely does not match that trigger pattern on closer reading, say so honestly — set signal_type to the best-fitting type anyway (or "other") and explain the mismatch in intent_description. Do not force a fit.';
+                        .'If the post genuinely does not match that trigger pattern on closer reading, say so honestly — set signal_type to the best-fitting type anyway (or "other") and explain the mismatch in intent_description. Do not force a fit.';
 
                     if ($signalType->feeds_enrichment) {
                         $systemPrompt .= ' This signal type is expected to name a real person (e.g. a new hire or appointee) — extract every such name into named_people as precisely as possible; this is used to look up their contact details next.';
@@ -168,7 +169,7 @@ class SocialSignalEnricher
 
     private function extractIndustryFromHit(RawSocialHit $hit): string
     {
-        $text = $hit->postText . ' ' . $hit->title . ' ' . $hit->snippet;
+        $text = $hit->postText.' '.$hit->title.' '.$hit->snippet;
         if (preg_match('/\b(FMCG|FinTech|fintech|SaaS|textile|logistics|pharma|healthcare|manufacturing)\b/u', $text, $match)) {
             return $match[1];
         }
@@ -178,7 +179,7 @@ class SocialSignalEnricher
 
     private function extractLocationFromHit(RawSocialHit $hit): string
     {
-        $text = $hit->postText . ' ' . $hit->title . ' ' . $hit->snippet;
+        $text = $hit->postText.' '.$hit->title.' '.$hit->snippet;
         if (preg_match('/\b(Lagos|Nairobi|Kenya|Nigeria|Africa|London|Accra|Cairo)\b/u', $text, $match)) {
             return $match[1];
         }
@@ -279,7 +280,6 @@ class SocialSignalEnricher
     }
 
     /**
-     * @param  mixed  $value
      * @return list<string>
      */
     private function stringList(mixed $value, int $limit): array
@@ -289,9 +289,9 @@ class SocialSignalEnricher
         }
 
         $items = array_values(array_filter(array_map(
-            static fn($item) => trim((string) $item),
+            static fn ($item) => trim((string) $item),
             $value
-        ), static fn($item) => $item !== ''));
+        ), static fn ($item) => $item !== ''));
 
         return array_slice($items, 0, $limit);
     }
@@ -336,7 +336,7 @@ class SocialSignalEnricher
         // "expansion" alone is ambiguous (market expansion ≠ hiring). Only keep the hiring
         // alias when the label clearly means recruiting.
         if ($normalized === 'expansion' || $normalized === 'expanding') {
-            $probe = mb_strtolower(trim($intentLabel . ' ' . $postText));
+            $probe = mb_strtolower(trim($intentLabel.' '.$postText));
             if (preg_match('/\b(hiring|hire|recruit|job|vacancy|headcount|open role|we.?re hiring)\b/u', $probe)) {
                 return 'hiring_expansion';
             }
@@ -348,7 +348,7 @@ class SocialSignalEnricher
             return $normalized;
         }
 
-        $haystack = mb_strtolower(trim($signalType . ' ' . $intentLabel . ' ' . $postText));
+        $haystack = mb_strtolower(trim($signalType.' '.$intentLabel.' '.$postText));
 
         if ($haystack === '') {
             return 'other';
@@ -357,7 +357,7 @@ class SocialSignalEnricher
         // ICP interest language takes priority: if the user's custom prompt / description
         // signals a non-sales focus (e.g. investing), classify opportunity-shaped content
         // into that bucket instead of defaulting to sales buckets or discarding it.
-        $interest = $brief !== null ? mb_strtolower(trim($brief->customPrompt . ' ' . $brief->description)) : '';
+        $interest = $brief !== null ? mb_strtolower(trim($brief->customPrompt.' '.$brief->description)) : '';
 
         if (preg_match('/\b(raises?|raised|funding round|series [a-e]|seed round|venture capital|invest(or|ment|ing)?)\b/u', $haystack)) {
             return 'funding_event';
@@ -475,7 +475,7 @@ class SocialSignalEnricher
      */
     private function interestTokens(IcpBrief $brief): array
     {
-        $raw = mb_strtolower(trim($brief->customPrompt . ' ' . $brief->description));
+        $raw = mb_strtolower(trim($brief->customPrompt.' '.$brief->description));
         if ($raw === '') {
             return [];
         }
@@ -483,7 +483,7 @@ class SocialSignalEnricher
         $words = preg_split('/[^\p{L}\p{N}]+/u', $raw) ?: [];
         $stopwords = ['the', 'and', 'for', 'with', 'that', 'this', 'from', 'want', 'looking', 'high', 'outside', 'home', 'market'];
 
-        return array_values(array_filter($words, static fn($w) => mb_strlen($w) >= 4 && ! in_array($w, $stopwords, true)));
+        return array_values(array_filter($words, static fn ($w) => mb_strlen($w) >= 4 && ! in_array($w, $stopwords, true)));
     }
 
     private function intentLabelForType(string $signalType, string $fallback): string

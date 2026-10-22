@@ -41,7 +41,7 @@ import { OutreachSettingsModal } from "./outreach-settings-modal";
 
 type OutreachPreviewState = {
   activityId: number | null;
-  channel: "email" | "whatsapp";
+  channel: "email" | "sms" | "whatsapp";
   subject?: string | null;
   body: string;
   toEmail?: string;
@@ -156,7 +156,7 @@ export function SalesEngineOutreachView() {
 
   // Compute metrics
   const metrics = useMemo(() => {
-    const totals = pageData?.metrics ?? { total: 0, deliveredCount: 0, openedCount: 0, clickedCount: 0, failedCount: 0, emailCount: 0, whatsappCount: 0 };
+    const totals = pageData?.metrics ?? { total: 0, deliveredCount: 0, openedCount: 0, clickedCount: 0, failedCount: 0, emailCount: 0, whatsappCount: 0, smsCount: 0 };
     return { ...totals, deliveryRate: percentOf(totals.deliveredCount, totals.total), openRate: percentOf(totals.openedCount, totals.total), avatars: { total: [], delivered: [], opened: [] } };
   }, [pageData]);
 
@@ -167,6 +167,7 @@ export function SalesEngineOutreachView() {
       total: metrics.total,
       tracks: [
         { label: "Email", count: metrics.emailCount, percent: percentOf(metrics.emailCount, metrics.total) },
+        { label: "SMS", count: metrics.smsCount ?? 0, percent: percentOf(metrics.smsCount ?? 0, metrics.total) },
         { label: "WhatsApp", count: metrics.whatsappCount, percent: percentOf(metrics.whatsappCount, metrics.total) },
       ],
       avatars: metrics.avatars.total,
@@ -211,7 +212,7 @@ export function SalesEngineOutreachView() {
       const normalized = normalizeOutreachSubjectBody(draft.body || item.preview, draft.subject);
       setPreview({
         activityId: draft.activity_id ?? item.id,
-        channel: draft.channel === "whatsapp" ? "whatsapp" : "email",
+        channel: draft.channel === "whatsapp" ? "whatsapp" : draft.channel === "sms" ? "sms" : "email",
         subject: normalized.subject,
         body: normalized.body,
         toEmail: draft.to_email ?? "",
@@ -394,6 +395,7 @@ export function SalesEngineOutreachView() {
               [
                 { value: "all", label: "All", count: recordTotal, icon: null },
                 { value: "email", label: "Email", count: metrics.emailCount, icon: <Mail size={12} /> },
+                { value: "sms", label: "SMS", count: metrics.smsCount ?? 0, icon: <MessageCircle size={12} /> },
                 {
                   value: "whatsapp",
                   label: "WhatsApp",

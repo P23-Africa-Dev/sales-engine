@@ -17,6 +17,7 @@ class Company extends Model
         'location',
         'country_code',
         'website',
+        'logo_url',
         'email',
         'phone',
         'source',

@@ -43,7 +43,7 @@ class NativeCrmController extends Controller
     public function pending(Request $request): JsonResponse
     {
         $request->validate(['per_page' => ['sometimes', 'integer', 'min:1', 'max:100'], 'page' => ['sometimes', 'integer', 'min:1'], 'icp_profile_id' => ['sometimes', 'integer']]);
-        $query = Lead::query()->where('organization_id', OrgContext::require()->id)->whereDoesntHave('crmEntry')->whereNull('meta->native_crm_lead_id')->with('crmEntry');
+        $query = Lead::query()->where('organization_id', OrgContext::require()->id)->where('save_status', '!=', Lead::SAVE_REJECTED)->whereDoesntHave('crmEntry')->whereNull('meta->native_crm_lead_id')->with('crmEntry');
         if ($request->filled('icp_profile_id')) {
             $query->where('icp_profile_id', $request->integer('icp_profile_id'));
         }

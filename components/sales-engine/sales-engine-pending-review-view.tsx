@@ -44,7 +44,7 @@ import {
   formatLeadRoleLine,
   leadEntityBadge,
 } from "@/lib/enriched-lead-card";
-import type { ChatLead } from "@/lib/api/sales-engine";
+import { submitLeadFeedbackBulk, type ChatLead } from "@/lib/api/sales-engine";
 
 type FitFilter = "all" | "high" | "medium" | "contact_ready";
 type SortOption = "highest_score" | "lowest_score" | "name_asc" | "company_asc";
@@ -178,8 +178,25 @@ export function SalesEnginePendingReviewView() {
 
   // Selected leads list
   const selectedCount = selectedLeadIds.size;
+  const [isRejecting, setIsRejecting] = useState(false);
   const allFilteredSelected =
     filteredLeads.length > 0 && filteredLeads.every((l) => selectedLeadIds.has(l.id));
+
+  const handleRejectSelected = async () => {
+    const ids = Array.from(selectedLeadIds);
+    if (ids.length === 0 || isRejecting) return;
+    setIsRejecting(true);
+    try {
+      await submitLeadFeedbackBulk(ids);
+      removeLeadsLocally(ids);
+      setSelectedLeadIds(new Set());
+      toast.success(`Marked ${ids.length} lead${ids.length === 1 ? "" : "s"} as not relevant.`);
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, "Could not reject those leads."));
+    } finally {
+      setIsRejecting(false);
+    }
+  };
 
   const toggleSelectAll = () => {
     if (allFilteredSelected) {
@@ -680,6 +697,15 @@ export function SalesEnginePendingReviewView() {
                 className="text-xs text-white/60 hover:text-white cursor-pointer ml-1"
               >
                 Clear
+              </button>
+
+              <button
+                type="button"
+                disabled={isRejecting || selectedCount === 0}
+                onClick={() => { void handleRejectSelected(); }}
+                className="ml-2 rounded-xl border border-white/30 px-3 py-2 text-xs font-semibold text-white hover:bg-white/10 disabled:opacity-60 cursor-pointer"
+              >
+                {isRejecting ? "Rejecting…" : `Reject (${selectedCount})`}
               </button>
 
               <button

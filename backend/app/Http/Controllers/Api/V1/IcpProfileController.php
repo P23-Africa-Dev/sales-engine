@@ -169,4 +169,18 @@ class IcpProfileController extends Controller
             ->where('id', $id)
             ->firstOrFail();
     }
+
+    public function options(): JsonResponse
+    {
+        return response()->json([
+            'data' => [
+                'industries' => config('icp_options.industries', []),
+                'company_sizes' => config('icp_options.company_sizes', []),
+                'revenue_ranges' => config('icp_options.revenue_ranges', []),
+                'suggested_territories' => config('icp_options.suggested_territories', []),
+                'decision_makers' => config('icp_options.decision_makers', []),
+                'signal_type_packs' => config('icp_options.signal_type_packs', []),
+            ],
+        ]);
+    }
 }

@@ -363,6 +363,8 @@ export function OutreachSettingsModal({ open, onClose }: OutreachSettingsModalPr
                   Recommended: connect your organization domain. Platform sending stays available
                   until you are ready.
                   {quotaLabel ? ` · ${quotaLabel}` : ""}
+                  {senderSettings?.sms?.quota ? ` · SMS ${senderSettings.sms.quota.used}/${senderSettings.sms.quota.limit}` : ""}
+                  {senderSettings?.whatsapp?.quota ? ` · WhatsApp ${senderSettings.whatsapp.quota.used}/${senderSettings.whatsapp.quota.limit}` : ""}
                 </p>
               </div>
               <button

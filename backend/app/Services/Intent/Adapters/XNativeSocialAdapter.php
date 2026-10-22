@@ -98,7 +98,7 @@ class XNativeSocialAdapter implements SocialSourceInterface
 
                 return new RawSocialHit(
                     platform: 'x',
-                    sourceLabel: 'X Post',
+                    sourceLabel: 'X/Twitter Post',
                     sourceIcon: 'x',
                     postText: $text,
                     postUrl: $id !== '' ? 'https://x.com/i/status/'.$id : null,

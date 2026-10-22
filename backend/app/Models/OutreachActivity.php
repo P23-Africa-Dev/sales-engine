@@ -9,6 +9,7 @@ class OutreachActivity extends Model
 {
     protected $fillable = [
         'organization_id',
+        'user_id',
         'lead_id',
         'company_id',
         'social_signal_id',
@@ -41,6 +42,11 @@ class OutreachActivity extends Model
             'meta' => 'array',
             'regeneration_count' => 'integer',
         ];
+    }
+
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(User::class);
     }
 
     public function organization(): BelongsTo

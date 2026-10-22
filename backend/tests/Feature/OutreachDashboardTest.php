@@ -35,7 +35,7 @@ class OutreachDashboardTest extends TestCase
         OutreachActivity::query()->create(['organization_id' => $org->id, 'company_id' => $company->id, 'lead_id' => $lead->id, 'name' => 'Acme introduction', 'channel' => 'email', 'sent_at' => now(), 'delivery_status' => 'sent']);
         OutreachActivity::query()->create(['organization_id' => $org->id, 'company_id' => $company->id, 'name' => 'Draft', 'channel' => 'email']);
 
-        $this->getJson('/api/v1/outreach/dashboard')->assertOk()->assertJsonPath('data.source', 'live')->assertJsonPath('data.businesses.0.industry', 'Software')->assertJsonPath('data.businesses.0.emailsSent', 1)->assertJsonPath('data.businesses.0.prospects', 1)->assertJsonPath('data.metrics.0.primaryPercent', 50)->assertJsonPath('data.metrics.1.total', null)->assertJsonPath('data.outreach.0.businessId', (string) $company->id);
+        $this->getJson('/api/v1/outreach/dashboard')->assertOk()->assertJsonPath('data.source', 'live')->assertJsonPath('data.businesses.0.industry', 'Software')->assertJsonPath('data.businesses.0.emailsSent', 1)->assertJsonPath('data.businesses.0.prospects', 1)->assertJsonPath('data.metrics.0.primaryPercent', 50)->assertJsonPath('data.metrics.1.id', 'sms')->assertJsonPath('data.metrics.1.total', 0)->assertJsonPath('data.metrics.1.primaryLabel', 'Sent')->assertJsonPath('data.outreach.0.businessId', (string) $company->id);
     }
 
     public function test_dashboard_distinguishes_people_from_businesses_and_scopes_person_history(): void

@@ -11,7 +11,7 @@ const empty: OutreachDashboardData = {
   source: "live", counts: { outreach: 0, businesses: 0 }, defaultBusinessId: null, businesses: [], outreach: [], metrics: [
     { id: "email", title: "No of Emails", total: 0, primaryLabel: "Sent", secondaryLabel: "Received", primaryPercent: 0, secondaryPercent: 0, avatars: 0 },
     { id: "sms", title: "No of SMS", total: 0, primaryLabel: "Sent", secondaryLabel: "Received", primaryPercent: 0, secondaryPercent: 0, avatars: 0 },
-    { id: "voice-calls", title: "Number of Voice Calls", total: null, primaryLabel: "Incoming", secondaryLabel: "Outgoing", primaryPercent: null, secondaryPercent: null, primaryCount: null, secondaryCount: null, avatars: 0 },
+    { id: "voice-calls", title: "Number of Voice Calls", total: null, primaryLabel: "Incoming", secondaryLabel: "Outgoing", primaryPercent: null, secondaryPercent: null, primaryCount: null, secondaryCount: null, avatars: 0, configured: false },
   ]
 };
 

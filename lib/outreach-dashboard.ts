@@ -9,6 +9,7 @@ export type OutreachDashboardMetric = {
   avatars: number;
   primaryCount?: number | null;
   secondaryCount?: number | null;
+  configured?: boolean;
 };
 
 export type OutreachBusiness = {

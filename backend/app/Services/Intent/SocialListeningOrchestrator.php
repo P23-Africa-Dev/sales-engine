@@ -3,8 +3,10 @@
 namespace App\Services\Intent;
 
 use App\Jobs\EnrichSocialSignalJob;
+use App\Models\ApiUsage;
 use App\Models\IcpProfile;
 use App\Models\Organization;
+use App\Models\SignalTypeDefinition;
 use App\Models\SocialListeningRun;
 use App\Models\SocialListeningSetting;
 use App\Models\SocialSignal;
@@ -22,6 +24,7 @@ use App\Services\SignalDetection\SignalGroundingGate;
 use App\Services\SignalDetection\SignalQueryBuilder;
 use App\Services\SignalDetection\SignalTypeRegistry;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Log;
 
 class SocialListeningOrchestrator
 {
@@ -70,7 +73,7 @@ class SocialListeningOrchestrator
         $this->dailyCap = (int) config('services.social_listening.daily_api_cap', 200);
         $this->usageAtStart = 0;
         if ($this->dailyCap > 0) {
-            $this->usageAtStart = \App\Models\ApiUsage::query()
+            $this->usageAtStart = ApiUsage::query()
                 ->where('organization_id', $organization->id)
                 ->where(function ($q) {
                     $q->where(function ($inner) {
@@ -176,7 +179,7 @@ class SocialListeningOrchestrator
 
                 $postedAt = $hit->postedAt ?? $detected?->sourceDate;
                 if ($postedAt === null && $hit->postUrl) {
-                    $postedAt = app(\App\Services\Intent\LinkedInActivityDateExtractor::class)->fromUrl($hit->postUrl);
+                    $postedAt = app(LinkedInActivityDateExtractor::class)->fromUrl($hit->postUrl);
                 }
 
                 $typeWindow = max(1, (int) ($signalTypeDefinition?->default_recency_window_days ?? $settingsWindow));
@@ -309,7 +312,7 @@ class SocialListeningOrchestrator
                     'intent_color' => SocialSignalEnricher::intentColor($intentLabel),
                     'intent_description' => $this->clip((string) ($enriched['intent_description'] ?? ''), 1000),
                     'signal_type' => $this->clip((string) ($enriched['signal_type'] ?? ''), 64),
-                    'buying_stage' => $this->clip((string) ($enriched['buying_stage'] ?? ''), 64),
+                    'buying_stage' => $this->normalizeBuyingStage((string) ($enriched['buying_stage'] ?? '')),
                     'problem' => $this->clip((string) ($enriched['problem'] ?? ''), 1000),
                     'urgency' => $this->clip((string) ($enriched['urgency'] ?? ''), 64),
                     'score' => $score,
@@ -384,7 +387,7 @@ class SocialListeningOrchestrator
     }
 
     /**
-     * @return Collection<int, \App\Models\SignalTypeDefinition>
+     * @return Collection<int, SignalTypeDefinition>
      */
     private function activeDefinitions(int $organizationId, IcpBrief $brief): Collection
     {
@@ -402,7 +405,7 @@ class SocialListeningOrchestrator
     }
 
     /**
-     * @param  Collection<int, \App\Models\SignalTypeDefinition>  $definitions
+     * @param  Collection<int, SignalTypeDefinition>  $definitions
      * @return Collection<int, array{hit: RawSocialHit, signalTypeKey: ?string}>
      */
     private function collectHits(
@@ -510,16 +513,19 @@ class SocialListeningOrchestrator
             if ($source->key() === 'meta_graph_pages') {
                 if (! $source->isConfigured()) {
                     $health->mark($source->key(), SocialSourceHealth::MISSING_KEY, SocialSourceHealth::MISSING_KEY);
+
                     continue;
                 }
                 if ($pageIds === [] || ! in_array($source->key(), $enabled, true)) {
                     $health->mark($source->key(), $pageIds === [] ? SocialSourceHealth::NEEDS_PAGE_IDS : SocialSourceHealth::DISABLED, $pageIds === [] ? SocialSourceHealth::NEEDS_PAGE_IDS : null);
+
                     continue;
                 }
             }
 
             if (! $listed) {
                 $health->mark($source->key(), SocialSourceHealth::DISABLED);
+
                 continue;
             }
 
@@ -574,7 +580,7 @@ class SocialListeningOrchestrator
                 }
             } catch (\Throwable $e) {
                 app(SocialSourceHealth::class)->recordAttempt($source->key(), 0, 0);
-                \Illuminate\Support\Facades\Log::warning('Social source search failed', [
+                Log::warning('Social source search failed', [
                     'source' => $source->key(),
                     'error' => $e->getMessage(),
                 ]);
@@ -641,14 +647,14 @@ class SocialListeningOrchestrator
                     [
                         'role' => 'system',
                         'content' => 'Generate 3-5 short Google search queries to find FRESH social/web posts that are genuine opportunities for a specific user, grounded ONLY in their stated interests (custom_prompt/description) — do not invent industry, territory, or role keywords beyond what those fields say, since a separate filtering step (not this query) is responsible for matching the user\'s firmographic criteria. '
-                            . 'Prefer timely language: "past week", "this week", "latest", "just announced", "recent", current year. '
-                            . 'Buying-intent phrasing ("looking for", "recommend", "alternative to", "switching from", "how much", "vendor") is ONE valid angle WHEN it matches the user\'s interests — but it is not the only one. '
-                            . 'Also generate queries for funding/investment news, market moves, partnerships, competitive moves, and regulatory changes WHEN the custom_prompt/description implies the user cares about those (e.g. investing, market research, deal sourcing). '
-                            . 'Do not blanket-exclude thought-leadership or news-style content — only avoid it when it is clearly irrelevant to the stated interests. '
-                            . 'Weight custom_prompt heavily: it is the clearest statement of what this user actually wants. If custom_prompt and description are both empty, generate broad, timely opportunity-discovery queries without guessing at unstated criteria. '
-                            . 'Prioritize opportunities that would still be actionable now — not historical roundups from months/years ago. '
-                            . 'IMPORTANT: Do NOT generate recruiting/job-board queries (hiring, "we\'re hiring", job openings) unless custom_prompt explicitly asks for hiring/talent signals. '
-                            . 'Return JSON: {"queries":["..."]}',
+                            .'Prefer timely language: "past week", "this week", "latest", "just announced", "recent", current year. '
+                            .'Buying-intent phrasing ("looking for", "recommend", "alternative to", "switching from", "how much", "vendor") is ONE valid angle WHEN it matches the user\'s interests — but it is not the only one. '
+                            .'Also generate queries for funding/investment news, market moves, partnerships, competitive moves, and regulatory changes WHEN the custom_prompt/description implies the user cares about those (e.g. investing, market research, deal sourcing). '
+                            .'Do not blanket-exclude thought-leadership or news-style content — only avoid it when it is clearly irrelevant to the stated interests. '
+                            .'Weight custom_prompt heavily: it is the clearest statement of what this user actually wants. If custom_prompt and description are both empty, generate broad, timely opportunity-discovery queries without guessing at unstated criteria. '
+                            .'Prioritize opportunities that would still be actionable now — not historical roundups from months/years ago. '
+                            .'IMPORTANT: Do NOT generate recruiting/job-board queries (hiring, "we\'re hiring", job openings) unless custom_prompt explicitly asks for hiring/talent signals. '
+                            .'Return JSON: {"queries":["..."]}',
                     ],
                     [
                         'role' => 'user',
@@ -728,5 +734,17 @@ class SocialListeningOrchestrator
         }
 
         return mb_strlen($value) <= $max ? $value : mb_substr($value, 0, $max);
+    }
+
+    private function normalizeBuyingStage(string $value): string
+    {
+        $allowed = ['Awareness', 'Consideration', 'Vendor Evaluation', 'Decision'];
+        foreach ($allowed as $stage) {
+            if (strcasecmp(trim($value), $stage) === 0) {
+                return $stage;
+            }
+        }
+
+        return 'Consideration';
     }
 }
