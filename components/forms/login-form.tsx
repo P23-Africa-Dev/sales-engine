@@ -182,6 +182,10 @@ export default function LoginForm() {
         </div>
       </div>
 
+      <p className="mb-6 text-xs leading-5 text-[#616263]">
+        Factory23 members with Sales Engine access can sign in with the same email and password.
+      </p>
+
       <div className="mb-6">
         <label className="auth-field-label" htmlFor="auth-email">Email Address <span aria-hidden="true">*</span></label>
         <Input

@@ -54,12 +54,12 @@ class OutreachDashboardTest extends TestCase
         $prospects = collect($data['businesses'])->keyBy('id');
         $outreach = collect($data['outreach'])->keyBy('name');
 
-        $this->assertCount(3, $prospects);
+        $this->assertCount(2, $prospects);
         $this->assertSame('business', $prospects[(string) $company->id]['leadType']);
         $this->assertSame('individual', $prospects['lead:'.$person->id]['leadType']);
         $this->assertSame('Ada Okafor', $prospects['lead:'.$person->id]['name']);
         $this->assertSame(1, $prospects['lead:'.$person->id]['emailsSent']);
-        $this->assertSame('individual', $prospects['lead:'.$otherPerson->id]['leadType']);
+        $this->assertArrayNotHasKey('lead:'.$otherPerson->id, $prospects->all());
         $this->assertSame('lead:'.$person->id, $outreach['Ada introduction']['businessId']);
         $this->assertSame('individual', $outreach['Ada introduction']['leadType']);
         $this->assertSame('business', $outreach['Harbor introduction']['leadType']);
@@ -88,7 +88,20 @@ class OutreachDashboardTest extends TestCase
         $company = Company::query()->create(['organization_id' => $org->id, 'name' => 'Ada Okafor', 'normalized_name' => 'ada okafor']);
         $person = Lead::query()->create(['organization_id' => $org->id, 'company_id' => $company->id, 'name' => 'Ada Okafor', 'meta' => ['entity_type' => 'person']]);
 
-        $this->withHeaders($this->orgHeaders($org))->getJson('/api/v1/outreach/dashboard')->assertOk()->assertJsonPath('data.counts.businesses', 1)->assertJsonPath('data.businesses.0.id', 'lead:'.$person->id)->assertJsonPath('data.businesses.0.leadType', 'individual');
+        $this->withHeaders($this->orgHeaders($org))->getJson('/api/v1/outreach/dashboard')->assertOk()->assertJsonPath('data.counts.businesses', 0)->assertJsonCount(0, 'data.businesses');
+    }
+
+    public function test_discovered_company_without_crm_or_outreach_is_hidden(): void
+    {
+        [, $org] = $this->actingAsOrgMember();
+        Company::query()->create(['organization_id' => $org->id, 'name' => 'Mobile App Development Company in Germany', 'normalized_name' => 'mobile app development company in germany', 'website' => 'https://example.com']);
+        $saved = Company::query()->create(['organization_id' => $org->id, 'name' => 'Saved Account', 'normalized_name' => 'saved account']);
+        $lead = Lead::query()->create(['organization_id' => $org->id, 'company_id' => $saved->id, 'name' => 'Saved Account', 'meta' => ['entity_type' => 'company']]);
+        $this->withHeaders($this->orgHeaders($org))->postJson('/api/v1/crm/leads/from-discovery', ['lead_ids' => [$lead->id]])->assertOk();
+
+        $names = collect($this->getJson('/api/v1/outreach/dashboard')->assertOk()->json('data.businesses'))->pluck('name');
+        $this->assertTrue($names->contains('Saved Account'));
+        $this->assertFalse($names->contains('Mobile App Development Company in Germany'));
     }
 
     public function test_empty_dashboard_never_supplies_sample_businesses(): void

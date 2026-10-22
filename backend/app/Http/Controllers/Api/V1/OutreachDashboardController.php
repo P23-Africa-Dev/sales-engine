@@ -87,8 +87,11 @@ class OutreachDashboardController extends Controller
         $emailTotal = (clone $activities)->whereIn('channel', ['email', 'email draft'])->count();
         $leads = Lead::query()->where('organization_id', $org->id)->with(['company', 'crmEntry.pipeline', 'crmEntry.assignee', 'crmEntry.creator'])->get();
         $individuals = $leads->filter(fn (Lead $lead) => $lead->leadType() === 'individual');
-        $businesses = Company::query()->where('organization_id', $org->id)->withCount(['leads as prospects_count' => fn (Builder $q) => $q->whereHas('crmEntry')])->orderBy('name')->get();
         $entries = $this->crm->entries()->get()->groupBy(fn (CrmEntry $e) => $e->lead->company_id);
+        $crmCompanyIds = $entries->keys()->filter()->map(fn ($id) => (int) $id);
+        $outreachCompanyIds = (clone $activities)->whereNotNull('company_id')->distinct()->pluck('company_id');
+        $visibleCompanyIds = $crmCompanyIds->merge($outreachCompanyIds)->unique()->filter()->values();
+        $businesses = Company::query()->where('organization_id', $org->id)->whereIn('id', $visibleCompanyIds)->withCount(['leads as prospects_count' => fn (Builder $q) => $q->whereHas('crmEntry')])->orderBy('name')->get();
         $counts = (clone $activities)->whereIn('channel', ['email', 'email draft'])->whereNotNull('sent_at')->select('company_id')->selectRaw('count(*) as total')->groupBy('company_id')->pluck('total', 'company_id');
         $followUpsByLead = CrmActivity::query()->where('organization_id', $org->id)->where('type', 'follow_up_completed')->select('lead_id')->selectRaw('count(*) as total')->groupBy('lead_id')->pluck('total', 'lead_id');
         $companies = $businesses->filter(fn (Company $company) => ! $leads->contains(fn (Lead $lead) => $lead->company_id === $company->id) || $leads->contains(fn (Lead $lead) => $lead->company_id === $company->id && $lead->leadType() === 'business'))->map(function (Company $company) use ($entries, $counts, $followUpsByLead) {
@@ -100,7 +103,8 @@ class OutreachDashboardController extends Controller
             return ['leadType' => 'business', 'id' => (string) $company->id, 'name' => $company->name, 'company' => $company->name, 'industry' => $company->sector ?? '—', 'country' => $company->country_code ?? '—', 'website' => $company->website ?? '—', 'owner' => $entry?->assignee?->name ?? $entry?->creator?->name ?? '—', 'created' => $company->created_at->toDateString(), 'avatarColor' => '#42a8a1', 'emailsSent' => (int) ($counts[$company->id] ?? 0), 'prospects' => $company->prospects_count, 'followUpsCompleted' => $followUps, 'pipeline' => $entry?->pipeline?->name, 'pipelineIds' => $entries->get($company->id, collect())->pluck('pipeline_id')->unique()->map(fn ($id) => (string) $id)->values(), 'email' => $company->email ?? ($entry?->lead?->meta['email'] ?? null)];
         });
         $individualEmailCounts = (clone $activities)->whereIn('channel', ['email', 'email draft'])->whereNotNull('sent_at')->select('lead_id')->selectRaw('count(*) as total')->groupBy('lead_id')->pluck('total', 'lead_id');
-        $people = $individuals->filter(fn (Lead $lead) => empty($lead->meta['native_crm_lead_id']))->map(function (Lead $lead) use ($individualEmailCounts, $followUpsByLead) {
+        $outreachLeadIds = (clone $activities)->whereNotNull('lead_id')->pluck('lead_id');
+        $people = $individuals->filter(fn (Lead $lead) => ($lead->crmEntry !== null || $outreachLeadIds->contains($lead->id)) && empty($lead->meta['native_crm_lead_id']))->map(function (Lead $lead) use ($individualEmailCounts, $followUpsByLead) {
             $entry = $lead->crmEntry;
             $meta = $lead->meta ?? [];
 

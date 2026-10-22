@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\ExternalIdentity;
 use App\Models\Organization;
 use App\Models\User;
+use App\Services\Integrations\Factory23\Factory23CrmTokenService;
 use Firebase\JWT\JWT;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Http;
@@ -113,7 +114,7 @@ class AuthTest extends TestCase
         $this->assertNotNull($org);
         $this->assertSame(
             'f23-user-token',
-            app(\App\Services\Integrations\Factory23\Factory23CrmTokenService::class)->resolveToken($org)
+            app(Factory23CrmTokenService::class)->resolveToken($org)
         );
     }
 
@@ -246,6 +247,129 @@ class AuthTest extends TestCase
             ]),
             'email' => 'se-account@example.com',
             'password' => 'WrongPassword!',
+        ])->assertUnauthorized();
+    }
+
+    public function test_factory23_password_signs_in_an_existing_sales_engine_user(): void
+    {
+        $this->configureFactory23();
+        $user = User::factory()->create([
+            'email' => 'ada@factory.test',
+            'password' => Hash::make(str()->random(40)),
+        ]);
+
+        Http::fake([
+            'https://api.example.com/api/v1/auth/login' => Http::response([
+                'success' => true,
+                'data' => [
+                    'token' => 'f23-token',
+                    'user' => ['id' => 44, 'email' => 'ada@factory.test', 'name' => 'Ada'],
+                ],
+            ]),
+        ]);
+
+        $response = $this->postJson('/api/v1/auth/login', [
+            'email' => 'ada@factory.test',
+            'password' => 'FactoryPass1!',
+        ]);
+
+        $response->assertOk()->assertJsonPath('user.email', 'ada@factory.test');
+        $this->assertTrue(Hash::check('FactoryPass1!', $user->fresh()->password));
+        $this->assertDatabaseHas('external_identities', [
+            'provider' => 'factory23',
+            'external_user_id' => '44',
+            'user_id' => $user->id,
+        ]);
+    }
+
+    public function test_factory23_password_provisions_an_approved_account(): void
+    {
+        $this->configureFactory23();
+
+        Http::fake([
+            'https://api.example.com/api/v1/auth/login' => Http::response([
+                'success' => true,
+                'data' => [
+                    'token' => 'f23-token',
+                    'user' => ['id' => 91, 'email' => 'new@factory.test', 'name' => 'New Owner'],
+                ],
+            ]),
+            'https://api.example.com/api/v1/admin/sales-engine/access-requests/status' => Http::response([
+                'data' => [
+                    'status' => 'approved',
+                    'request' => ['company_id' => 9, 'company_name' => 'Approved Co', 'name' => 'New Owner'],
+                ],
+            ]),
+        ]);
+
+        $this->postJson('/api/v1/auth/login', [
+            'email' => 'new@factory.test',
+            'password' => 'FactoryPass1!',
+        ])->assertOk()->assertJsonPath('user.email', 'new@factory.test')->assertJsonPath('organization.name', 'Approved Co');
+    }
+
+    public function test_factory23_password_without_access_is_rejected(): void
+    {
+        $this->configureFactory23();
+
+        Http::fake([
+            'https://api.example.com/api/v1/auth/login' => Http::response([
+                'success' => true,
+                'data' => [
+                    'token' => 'f23-token',
+                    'user' => ['id' => 12, 'email' => 'waiting@factory.test', 'name' => 'Waiting'],
+                ],
+            ]),
+            'https://api.example.com/api/v1/*/sales-engine/access-requests/status' => Http::response([
+                'data' => ['status' => 'pending', 'request' => null],
+            ]),
+        ]);
+
+        $this->postJson('/api/v1/auth/login', [
+            'email' => 'waiting@factory.test',
+            'password' => 'FactoryPass1!',
+        ])->assertForbidden()->assertJsonPath('reason', 'access_required');
+
+        $this->assertDatabaseMissing('users', ['email' => 'waiting@factory.test']);
+    }
+
+    public function test_factory23_agent_password_signs_in_an_existing_sales_engine_user(): void
+    {
+        $this->configureFactory23();
+        $user = User::factory()->create([
+            'email' => 'agent@factory.test',
+            'password' => Hash::make(str()->random(40)),
+        ]);
+
+        Http::fake([
+            'https://api.example.com/api/v1/auth/login' => Http::response(['message' => 'Invalid credentials or account not activated.'], 401),
+            'https://api.example.com/api/v1/agent/login' => Http::response([
+                'success' => true,
+                'data' => [
+                    'token' => 'agent-token',
+                    'user' => ['id' => 77, 'email' => 'agent@factory.test', 'name' => 'Field Agent'],
+                ],
+            ]),
+        ]);
+
+        $this->postJson('/api/v1/auth/login', [
+            'email' => 'agent@factory.test',
+            'password' => 'AgentPass1!',
+        ])->assertOk()->assertJsonPath('user.email', 'agent@factory.test');
+
+        $this->assertTrue(Hash::check('AgentPass1!', $user->fresh()->password));
+    }
+
+    public function test_unknown_factory23_password_stays_invalid(): void
+    {
+        $this->configureFactory23();
+        Http::fake([
+            'https://api.example.com/api/v1/auth/login' => Http::response(['message' => 'Invalid credentials.'], 401),
+        ]);
+
+        $this->postJson('/api/v1/auth/login', [
+            'email' => 'missing@factory.test',
+            'password' => 'FactoryPass1!',
         ])->assertUnauthorized();
     }
 

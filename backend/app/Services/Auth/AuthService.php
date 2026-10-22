@@ -8,8 +8,11 @@ use App\Models\Organization;
 use App\Models\OrganizationUser;
 use App\Models\User;
 use App\Services\Integrations\Factory23\Factory23CrmTokenService;
+use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 class AuthService
@@ -44,14 +47,167 @@ class AuthService
     public function login(string $email, string $password): ?array
     {
         $user = User::query()->where('email', $email)->first();
-        if (! $user || ! Hash::check($password, $user->password)) {
-            return null;
+        if ($user && Hash::check($password, $user->password)) {
+            return $this->issueSession($user);
         }
 
+        return $this->loginWithFactory23Password($email, $password);
+    }
+
+    /**
+     * @return array{user: User, organization: Organization|null, token: string}
+     */
+    private function issueSession(User $user): array
+    {
         $token = $user->createToken('api')->plainTextToken;
         $organization = $user->defaultOrganization();
 
         return compact('user', 'organization', 'token');
+    }
+
+    /**
+     * Factory23 members who already have Sales Engine access sign in with that password.
+     * Provisioned accounts are created with a random password, so the Factory23 password
+     * is checked and then stored on the Sales Engine user.
+     *
+     * @return array{user: User, organization: Organization|null, token: string}|null
+     *
+     * @throws AccessRequiredException
+     */
+    private function loginWithFactory23Password(string $email, string $password): ?array
+    {
+        $base = rtrim((string) config('services.factory23.api_url'), '/');
+        if ($base === '') {
+            return null;
+        }
+
+        $login = $this->factory23PasswordLogin($base, $email, $password);
+        if ($login === null) {
+            return null;
+        }
+
+        $token = (string) ($login->json('data.token') ?? '');
+        $profile = $login->json('data.user');
+        if ($token === '' || ! is_array($profile)) {
+            return null;
+        }
+
+        $externalId = (string) ($profile['id'] ?? '');
+        $profileEmail = (string) ($profile['email'] ?? $email);
+        $identity = $externalId !== ''
+            ? ExternalIdentity::query()->where('provider', 'factory23')->where('external_user_id', $externalId)->first()
+            : null;
+        $user = $identity?->user
+            ?? User::query()->where('email', $email)->orWhere('email', $profileEmail)->first();
+
+        if (! $user) {
+            $access = $this->factory23Access($base, $token);
+            if (($access['status'] ?? '') !== 'approved') {
+                throw new AccessRequiredException('This Factory23 account does not have Sales Engine access yet.');
+            }
+
+            $request = is_array($access['request'] ?? null) ? $access['request'] : [];
+            $provisioned = $this->provisionFactory23User([
+                'sub' => $externalId !== '' ? $externalId : $email,
+                'email' => (string) ($profile['email'] ?? $email),
+                'name' => (string) ($profile['name'] ?? $request['name'] ?? 'Factory23 User'),
+                'company_id' => isset($request['company_id']) ? (string) $request['company_id'] : null,
+                'company_name' => (string) ($request['company_name'] ?? 'Factory23 Company'),
+            ]);
+            $user = $provisioned['user'];
+        }
+
+        $user->password = $password;
+        if ($user->email_verified_at === null) {
+            $user->email_verified_at = now();
+        }
+        $user->save();
+
+        if ($externalId !== '') {
+            $this->linkFactory23Identity($user, $externalId, $profile);
+        }
+
+        return $this->issueSession($user->fresh() ?? $user);
+    }
+
+    /**
+     * @param  array<string, mixed>  $profile
+     */
+    private function linkFactory23Identity(User $user, string $externalId, array $profile): void
+    {
+        $identity = ExternalIdentity::query()
+            ->where('provider', 'factory23')
+            ->where('external_user_id', $externalId)
+            ->first();
+
+        if ($identity && (int) $identity->user_id !== (int) $user->id) {
+            return;
+        }
+
+        ExternalIdentity::query()->updateOrCreate(
+            ['provider' => 'factory23', 'external_user_id' => $externalId],
+            [
+                'user_id' => $user->id,
+                'meta' => [
+                    'email' => (string) ($profile['email'] ?? $user->email),
+                    'name' => (string) ($profile['name'] ?? $user->name),
+                    'linked_via' => 'factory23_password',
+                ],
+            ],
+        );
+    }
+
+    private function factory23PasswordLogin(string $base, string $email, string $password): ?Response
+    {
+        foreach (['/api/v1/auth/login', '/api/v1/agent/login'] as $path) {
+            try {
+                $login = Http::acceptJson()->timeout(15)->post($base.$path, [
+                    'email' => $email,
+                    'password' => $password,
+                ]);
+            } catch (\Throwable $e) {
+                Log::warning('Factory23 login could not be reached from Sales Engine.', ['error' => $e->getMessage()]);
+
+                return null;
+            }
+
+            if ($login->successful()) {
+                return $login;
+            }
+
+            if ($login->status() === 429) {
+                return null;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @return array{status: string, request: array<string, mixed>|null}
+     */
+    private function factory23Access(string $base, string $token): array
+    {
+        foreach (['/api/v1/admin/sales-engine/access-requests/status', '/api/v1/agent/sales-engine/access-requests/status'] as $path) {
+            try {
+                $response = Http::withToken($token)->acceptJson()->timeout(15)->get($base.$path);
+            } catch (\Throwable $e) {
+                Log::warning('Factory23 access status could not be reached.', ['error' => $e->getMessage()]);
+
+                continue;
+            }
+
+            if (! $response->successful()) {
+                continue;
+            }
+
+            return [
+                'status' => (string) $response->json('data.status', ''),
+                'request' => $response->json('data.request'),
+            ];
+        }
+
+        return ['status' => '', 'request' => null];
     }
 
     /**

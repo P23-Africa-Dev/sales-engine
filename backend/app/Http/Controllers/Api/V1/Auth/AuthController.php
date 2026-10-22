@@ -57,7 +57,14 @@ class AuthController extends Controller
             'password' => ['required', 'string'],
         ]);
 
-        $result = $this->auth->login($data['email'], $data['password']);
+        try {
+            $result = $this->auth->login($data['email'], $data['password']);
+        } catch (AccessRequiredException $e) {
+            return response()->json([
+                'message' => $e->getMessage(),
+                'reason' => 'access_required',
+            ], 403);
+        }
         if (! $result) {
             return response()->json(['message' => 'Invalid credentials.'], 401);
         }
