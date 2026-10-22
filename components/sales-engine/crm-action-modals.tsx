@@ -541,6 +541,11 @@ export function CreateOutreachConfirmModal({
    4. SET REMINDER CONFIRM MODAL
    ========================================================================== */
 
+function defaultReminderInputValue(): string {
+  const defaultWhen = new Date(Date.now() + 24 * 60 * 60 * 1000);
+  return new Date(defaultWhen.getTime() - defaultWhen.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+}
+
 export function SetReminderConfirmModal({
   isOpen,
   onClose,
@@ -561,10 +566,7 @@ export function SetReminderConfirmModal({
   onConfirm: (remindAt: string) => void;
 }) {
   const initial = (prospectName || "P").trim().charAt(0).toUpperCase();
-  const defaultWhen = new Date(Date.now() + 24 * 60 * 60 * 1000);
-  const [remindAt, setRemindAt] = useState(
-    new Date(defaultWhen.getTime() - defaultWhen.getTimezoneOffset() * 60000).toISOString().slice(0, 16)
-  );
+  const [remindAt, setRemindAt] = useState(defaultReminderInputValue);
 
   return (
     <ConfirmActionShell

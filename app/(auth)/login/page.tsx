@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { AuthModeTabs } from "@/components/auth/auth-mode-tabs";
 import LoginForm from "@/components/forms/login-form";
 import { AUTH_TOKEN_COOKIE } from "@/lib/auth/session";
@@ -22,7 +23,9 @@ export default async function LoginPage() {
       </div>
 
       <AuthModeTabs />
-      <LoginForm />
+      <Suspense fallback={null}>
+        <LoginForm />
+      </Suspense>
     </div>
   );
 }

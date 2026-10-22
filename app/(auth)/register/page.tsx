@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { AuthModeTabs } from "@/components/auth/auth-mode-tabs";
 import SignupForm from "@/components/forms/signup-form";
 
@@ -14,7 +15,9 @@ export default function RegisterPage() {
       </div>
 
       <AuthModeTabs />
-      <SignupForm />
+      <Suspense fallback={null}>
+        <SignupForm />
+      </Suspense>
     </div>
   );
 }
