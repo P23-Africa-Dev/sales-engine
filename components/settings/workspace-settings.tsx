@@ -18,6 +18,7 @@ import {
   type SalesEngineAuthOrganization,
 } from "@/lib/api/sales-engine-native-auth";
 import { getAuthTokenFromDocument } from "@/lib/auth/session";
+import { resolveAvatarSrc } from "@/lib/avatar";
 import { getSalesEngineToken, setSalesEngineSession } from "@/lib/sales-engine/session";
 import { useAuthStore } from "@/store/auth";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -101,6 +102,13 @@ export default function WorkspaceSettings() {
       <section className="rounded-2xl border bg-white p-5">
         <h2 className="mb-3 font-semibold">Profile</h2>
         <div className="flex flex-col gap-3">
+          <img
+            src={resolveAvatarSrc(account.data?.user.avatar_url)}
+            alt="Profile photo"
+            width={64}
+            height={64}
+            className="size-16 rounded-full object-cover"
+          />
           <Input defaultValue={account.data?.user.name ?? ""} placeholder="Name" onChange={(event) => setName(event.target.value)} />
           <label className="text-xs text-gray-500">
             Avatar
@@ -144,7 +152,10 @@ export default function WorkspaceSettings() {
         <ul className="divide-y text-sm">
           {(members.data ?? []).map((member) => (
             <li key={member.id} className="flex items-center justify-between gap-3 py-2">
-              <span>{member.name} · {member.email} · {member.role}</span>
+              <span className="flex min-w-0 items-center gap-2">
+                <img src={resolveAvatarSrc(member.avatar_url)} alt="" width={28} height={28} className="size-7 shrink-0 rounded-full object-cover" />
+                <span className="truncate">{member.name} · {member.email} · {member.role}</span>
+              </span>
               <span className="flex gap-2">
                 {member.role !== "owner" ? (
                   <button type="button" className="text-xs underline" onClick={() => updateOrganizationMember(tokenOrThrow(), member.id, member.role === "admin" ? "member" : "admin").then(refresh).catch((error) => toast.error(error.message))}>

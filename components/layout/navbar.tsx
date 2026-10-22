@@ -146,7 +146,7 @@ export function Navbar() {
                     width={44}
                     height={44}
                     className="w-full h-full object-cover rounded-full"
-                    unoptimized={avatarSrc.startsWith("http")}
+                    unoptimized={avatarSrc.startsWith("http") || avatarSrc.endsWith(".svg")}
                   />
                 );
               })()}
@@ -182,7 +182,7 @@ export function Navbar() {
                           width={36}
                           height={36}
                           className="w-full h-full object-cover rounded-full"
-                          unoptimized={avatarSrc.startsWith("http")}
+                          unoptimized={avatarSrc.startsWith("http") || avatarSrc.endsWith(".svg")}
                         />
                       );
                     })()}
@@ -314,7 +314,7 @@ export function Navbar() {
                             width={48}
                             height={48}
                             className="w-full h-full object-cover"
-                            unoptimized={avatarSrc.startsWith("http")}
+                            unoptimized={avatarSrc.startsWith("http") || avatarSrc.endsWith(".svg")}
                           />
                         );
                       })()}

@@ -2562,7 +2562,7 @@ export function AIChat({ open, onClose }: AIChatProps) {
                       width={56}
                       height={56}
                       className="w-full h-full object-cover"
-                      unoptimized={avatarSrc.startsWith("http")}
+                      unoptimized={avatarSrc.startsWith("http") || avatarSrc.endsWith(".svg")}
                     />
                   </div>
                   <div className="min-w-0">

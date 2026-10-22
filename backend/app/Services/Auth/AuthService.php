@@ -17,7 +17,10 @@ use Illuminate\Support\Str;
 
 class AuthService
 {
-    public function __construct(private readonly Factory23CrmTokenService $crmTokenService) {}
+    public function __construct(
+        private readonly Factory23CrmTokenService $crmTokenService,
+        private readonly AvatarService $avatars,
+    ) {}
 
     /**
      * @return array{user: User, organization: Organization, token: string}
@@ -121,6 +124,7 @@ class AuthService
         if ($user->email_verified_at === null) {
             $user->email_verified_at = now();
         }
+        $this->syncFactory23Avatar($user, $base, $token, $profile);
         $user->save();
 
         if ($externalId !== '') {
@@ -128,6 +132,45 @@ class AuthService
         }
 
         return $this->issueSession($user->fresh() ?? $user);
+    }
+
+    /**
+     * Copy a real Factory23 photo onto the Sales Engine user.
+     * When Factory23 has no photo, keep gender so a matching default can be shown.
+     *
+     * @param  array<string, mixed>  $profile
+     */
+    private function syncFactory23Avatar(User $user, string $base, string $token, array $profile): void
+    {
+        $gender = $this->avatars->normalizeGender($profile['gender'] ?? null);
+        $avatar = $this->avatars->realAvatarUrl($profile['avatar'] ?? null);
+        $source = (string) ($profile['avatar_source'] ?? '');
+
+        if ($gender === null || $avatar === null) {
+            try {
+                $response = Http::withToken($token)->acceptJson()->timeout(8)->get($base.'/api/v1/user/profile');
+            } catch (\Throwable $e) {
+                Log::warning('Factory23 profile could not be reached while copying an avatar.', ['error' => $e->getMessage()]);
+                $response = null;
+            }
+
+            $identity = $response?->successful() ? $response->json('data.identity') : null;
+            if (is_array($identity)) {
+                $gender ??= $this->avatars->normalizeGender($identity['gender'] ?? null);
+                $source = (string) ($identity['avatar_source'] ?? $source);
+                if ($avatar === null && $source !== 'none') {
+                    $avatar = $this->avatars->realAvatarUrl($identity['avatar_url'] ?? null);
+                }
+            }
+        }
+
+        if ($gender !== null) {
+            $user->gender = $gender;
+        }
+
+        if ($avatar !== null && $this->avatars->canReplaceAvatar($user)) {
+            $user->avatar_path = $avatar;
+        }
     }
 
     /**

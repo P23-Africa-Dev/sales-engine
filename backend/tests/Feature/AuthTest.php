@@ -266,6 +266,7 @@ class AuthTest extends TestCase
                     'user' => ['id' => 44, 'email' => 'ada@factory.test', 'name' => 'Ada'],
                 ],
             ]),
+            'https://api.example.com/api/v1/user/profile' => Http::response(['message' => 'Not found.'], 404),
         ]);
 
         $response = $this->postJson('/api/v1/auth/login', [
@@ -300,6 +301,7 @@ class AuthTest extends TestCase
                     'request' => ['company_id' => 9, 'company_name' => 'Approved Co', 'name' => 'New Owner'],
                 ],
             ]),
+            'https://api.example.com/api/v1/user/profile' => Http::response(['message' => 'Not found.'], 404),
         ]);
 
         $this->postJson('/api/v1/auth/login', [
@@ -350,6 +352,7 @@ class AuthTest extends TestCase
                     'user' => ['id' => 77, 'email' => 'agent@factory.test', 'name' => 'Field Agent'],
                 ],
             ]),
+            'https://api.example.com/api/v1/user/profile' => Http::response(['message' => 'Not found.'], 404),
         ]);
 
         $this->postJson('/api/v1/auth/login', [
@@ -358,6 +361,125 @@ class AuthTest extends TestCase
         ])->assertOk()->assertJsonPath('user.email', 'agent@factory.test');
 
         $this->assertTrue(Hash::check('AgentPass1!', $user->fresh()->password));
+    }
+
+    public function test_account_without_a_photo_gets_a_gender_avatar_or_the_ghost_default(): void
+    {
+        $female = User::factory()->create([
+            'email' => 'owner-female@example.com',
+            'password' => 'Password1!',
+            'gender' => 'female',
+        ]);
+        $unknown = User::factory()->create([
+            'email' => 'owner-unknown@example.com',
+            'password' => 'Password1!',
+        ]);
+        $photo = User::factory()->create([
+            'email' => 'owner-photo@example.com',
+            'password' => 'Password1!',
+            'avatar_path' => 'https://cdn.example.com/owners/ada.png',
+            'gender' => 'female',
+        ]);
+
+        $femaleUrl = $this->postJson('/api/v1/auth/login', [
+            'email' => $female->email,
+            'password' => 'Password1!',
+        ])->assertOk()->json('user.avatar_url');
+        $this->assertIsString($femaleUrl);
+        $this->assertStringContainsString('/avatars/female/', $femaleUrl);
+        $this->postJson('/api/v1/auth/login', [
+            'email' => $female->email,
+            'password' => 'Password1!',
+        ])->assertOk()->assertJsonPath('user.avatar_url', $femaleUrl);
+
+        $this->postJson('/api/v1/auth/login', [
+            'email' => $unknown->email,
+            'password' => 'Password1!',
+        ])->assertOk()->assertJsonPath('user.avatar_url', '/avatars/default-ghost.svg');
+
+        $this->postJson('/api/v1/auth/login', [
+            'email' => $photo->email,
+            'password' => 'Password1!',
+        ])->assertOk()->assertJsonPath('user.avatar_url', 'https://cdn.example.com/owners/ada.png');
+    }
+
+    public function test_factory23_profile_photo_is_copied_onto_the_sales_engine_user(): void
+    {
+        $this->configureFactory23();
+        $user = User::factory()->create([
+            'email' => 'photo@factory.test',
+            'password' => Hash::make(str()->random(40)),
+        ]);
+
+        Http::fake([
+            'https://api.example.com/api/v1/auth/login' => Http::response([
+                'success' => true,
+                'data' => [
+                    'token' => 'f23-token',
+                    'user' => [
+                        'id' => 44,
+                        'email' => 'photo@factory.test',
+                        'name' => 'Ada',
+                        'avatar' => 'https://factory23-storage.lon1.digitaloceanspaces.com/avatar/default/ghost.svg',
+                    ],
+                ],
+            ]),
+            'https://api.example.com/api/v1/user/profile' => Http::response([
+                'data' => [
+                    'identity' => [
+                        'gender' => 'female',
+                        'avatar_source' => 'custom_upload',
+                        'avatar_url' => 'https://factory23-storage.lon1.digitaloceanspaces.com/avatar/custom/ada.png',
+                    ],
+                ],
+            ]),
+        ]);
+
+        $this->postJson('/api/v1/auth/login', [
+            'email' => 'photo@factory.test',
+            'password' => 'FactoryPass1!',
+        ])->assertOk()->assertJsonPath('user.avatar_url', 'https://factory23-storage.lon1.digitaloceanspaces.com/avatar/custom/ada.png');
+
+        $fresh = $user->fresh();
+        $this->assertSame('female', $fresh->gender);
+        $this->assertSame('https://factory23-storage.lon1.digitaloceanspaces.com/avatar/custom/ada.png', $fresh->avatar_path);
+    }
+
+    public function test_factory23_owner_without_a_photo_gets_a_gender_default(): void
+    {
+        $this->configureFactory23();
+        User::factory()->create([
+            'email' => 'owner@factory.test',
+            'password' => Hash::make(str()->random(40)),
+        ]);
+
+        Http::fake([
+            'https://api.example.com/api/v1/auth/login' => Http::response([
+                'success' => true,
+                'data' => [
+                    'token' => 'f23-token',
+                    'user' => ['id' => 45, 'email' => 'owner@factory.test', 'name' => 'Owner'],
+                ],
+            ]),
+            'https://api.example.com/api/v1/user/profile' => Http::response([
+                'data' => [
+                    'identity' => [
+                        'gender' => 'male',
+                        'avatar_source' => 'none',
+                        'avatar_url' => 'https://factory23-storage.lon1.digitaloceanspaces.com/avatar/default/ghost.svg',
+                    ],
+                ],
+            ]),
+        ]);
+
+        $url = $this->postJson('/api/v1/auth/login', [
+            'email' => 'owner@factory.test',
+            'password' => 'FactoryPass1!',
+        ])->assertOk()->json('user.avatar_url');
+
+        $this->assertIsString($url);
+        $this->assertStringContainsString('/avatars/male/', $url);
+        $this->assertDatabaseHas('users', ['email' => 'owner@factory.test', 'gender' => 'male', 'avatar_path' => null]);
     }
 
     public function test_unknown_factory23_password_stays_invalid(): void

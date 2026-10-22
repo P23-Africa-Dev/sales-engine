@@ -33,6 +33,7 @@ class OrganizationMemberController extends Controller
                 'id' => $membership->user_id,
                 'name' => $membership->user?->name,
                 'email' => $membership->user?->email,
+                'avatar_url' => $membership->user?->avatarUrl(),
                 'role' => $membership->role,
                 'joined_at' => $membership->created_at?->toIso8601String(),
             ]);

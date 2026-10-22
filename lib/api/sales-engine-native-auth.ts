@@ -34,6 +34,7 @@ export type SalesEngineMember = {
   id: number;
   name: string | null;
   email: string | null;
+  avatar_url?: string | null;
   role: string;
   joined_at?: string | null;
 };
