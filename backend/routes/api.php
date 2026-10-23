@@ -57,6 +57,7 @@ Route::get('/countries', [CountryController::class, 'index']);
 Route::prefix('auth')->group(function () {
     Route::post('/register', [AuthController::class, 'register']);
     Route::post('/login', [AuthController::class, 'login']);
+    Route::post('/factory23/join', [AuthController::class, 'factory23Join']);
     Route::post('/forgot-password', [PasswordResetController::class, 'sendLink'])->middleware('throttle:5,1');
     Route::get('/reset-password/{token}', [PasswordResetController::class, 'validateToken']);
     Route::post('/reset-password', [PasswordResetController::class, 'reset'])->middleware('throttle:10,1');

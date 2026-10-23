@@ -5,7 +5,7 @@ import Input from "@/components/ui/input";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
-import { loginWithSalesEngine, SalesEngineAuthError } from "@/lib/api/sales-engine-native-auth";
+import { joinFactory23Workspace, loginWithSalesEngine, SalesEngineAuthError } from "@/lib/api/sales-engine-native-auth";
 import { getAccountStatusMessage } from "@/lib/auth/account-status";
 import { clearAuthSession, getAuthTokenFromDocument } from "@/lib/auth/session";
 import { useAuthStore } from "@/store/auth";
@@ -32,6 +32,8 @@ export default function LoginForm() {
   const hasHydrated = useAuthStore((s) => s._hasHydrated);
   const [showPassword, setShowPassword] = useState(false);
   const [globalError, setGlobalError] = useState("");
+  const [joinOrganization, setJoinOrganization] = useState("");
+  const [joinEmail, setJoinEmail] = useState("");
   const [loading, setLoading] = useState(false);
 
   const {
@@ -53,6 +55,7 @@ export default function LoginForm() {
   const email = watch("email");
   const password = watch("password");
   const isFilled = email.trim() !== "" && password.trim() !== "";
+  const canJoin = joinOrganization !== "" && email.trim().toLowerCase() === joinEmail;
   const showResetSuccess = searchParams.get("reset") === "success";
   const accountStatusMessage = getAccountStatusMessage(searchParams);
 
@@ -69,28 +72,47 @@ export default function LoginForm() {
     }
   }, [hasHydrated, user, clearUser]);
 
+  async function finishSignIn(session: Awaited<ReturnType<typeof loginWithSalesEngine>>) {
+    setUser({
+      id: session.user.id,
+      name: session.user.name,
+      email: session.user.email,
+      avatar: session.user.avatar_url ?? null,
+      active_company: null,
+    });
+
+    toast.success("Signed in.");
+    router.push("/sales-engine");
+  }
+
   async function onSubmit(values: LoginFormValues) {
     setGlobalError("");
     setLoading(true);
 
     try {
+      if (canJoin) {
+        const session = await joinFactory23Workspace({
+          email: values.email,
+          password: values.password,
+        });
+        await finishSignIn(session);
+        return;
+      }
+
       const session = await loginWithSalesEngine({
         email: values.email,
         password: values.password,
       });
 
-      setUser({
-        id: session.user.id,
-        name: session.user.name,
-        email: session.user.email,
-        avatar: session.user.avatar_url ?? null,
-        active_company: null,
-      });
-
-      toast.success("Signed in.");
-      router.push("/sales-engine");
+      await finishSignIn(session);
     } catch (err) {
-      if (err instanceof SalesEngineAuthError) {
+      if (err instanceof SalesEngineAuthError && err.reason === "organization_join") {
+        setJoinOrganization(err.organizationName || "Your Factory23 organization");
+        setJoinEmail(values.email.trim().toLowerCase());
+        setGlobalError("");
+      } else if (err instanceof SalesEngineAuthError) {
+        setJoinOrganization("");
+        setJoinEmail("");
         setGlobalError(err.message);
         toast.error(err.message);
       } else {
@@ -318,8 +340,14 @@ export default function LoginForm() {
         </Link>
       </div>
 
+      {canJoin && (
+        <p className="mb-4 rounded-xl border border-[#143028]/15 bg-[#f7f8f4] px-4 py-3 text-sm leading-5 text-[#143028]">
+          {joinOrganization} already uses Sales Engine. Continue with your Factory23 account to join this workspace.
+        </p>
+      )}
+
       <Button type="submit" disabled={!isFilled || loading}>
-        {loading ? "Logging in…" : "Log In"}
+        {loading ? (canJoin ? "Continuing…" : "Logging in…") : canJoin ? "Continue with Factory23" : "Log In"}
       </Button>
 
       <p className="text-center text-xs mt-4 text-[#A9AAAB]">

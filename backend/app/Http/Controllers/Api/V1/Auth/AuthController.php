@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\V1\Auth;
 
 use App\Exceptions\AccessRequiredException;
+use App\Exceptions\OrganizationJoinException;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\OrganizationResource;
 use App\Http\Resources\UserResource;
@@ -59,6 +60,12 @@ class AuthController extends Controller
 
         try {
             $result = $this->auth->login($data['email'], $data['password']);
+        } catch (OrganizationJoinException $e) {
+            return response()->json([
+                'message' => $e->getMessage(),
+                'reason' => 'organization_join',
+                'organization' => ['name' => $e->organizationName],
+            ], 409);
         } catch (AccessRequiredException $e) {
             return response()->json([
                 'message' => $e->getMessage(),
@@ -76,6 +83,34 @@ class AuthController extends Controller
             'organization' => $result['organization']
                 ? new OrganizationResource($result['organization'])
                 : null,
+        ]);
+    }
+
+    public function factory23Join(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'email' => ['required', 'email'],
+            'password' => ['required', 'string'],
+        ]);
+
+        try {
+            $result = $this->auth->joinFactory23Organization($data['email'], $data['password']);
+        } catch (AccessRequiredException $e) {
+            return response()->json([
+                'message' => $e->getMessage(),
+                'reason' => 'access_required',
+            ], 403);
+        }
+
+        if (! $result) {
+            return response()->json(['message' => 'Invalid credentials.'], 401);
+        }
+
+        return response()->json([
+            'token' => $result['token'],
+            'token_type' => 'Bearer',
+            'user' => new UserResource($result['user']),
+            'organization' => new OrganizationResource($result['organization']),
         ]);
     }
 

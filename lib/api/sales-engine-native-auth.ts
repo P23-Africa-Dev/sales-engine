@@ -58,15 +58,30 @@ export type SalesEngineAuthSession = {
 export class SalesEngineAuthError extends Error {
   status: number;
 
-  constructor(message: string, status: number) {
+  reason?: string;
+
+  organizationName?: string;
+
+  constructor(message: string, status: number, reason?: string, organizationName?: string) {
     super(message);
     this.status = status;
+    this.reason = reason;
+    this.organizationName = organizationName;
   }
 }
 
-async function readError(response: Response): Promise<string> {
-  const payload = (await response.json().catch(() => null)) as { message?: string } | null;
-  return payload?.message || `Sales Engine request failed (${response.status})`;
+async function throwAuthError(response: Response): Promise<never> {
+  const payload = (await response.json().catch(() => null)) as {
+    message?: string;
+    reason?: string;
+    organization?: { name?: string };
+  } | null;
+  throw new SalesEngineAuthError(
+    payload?.message || `Sales Engine request failed (${response.status})`,
+    response.status,
+    payload?.reason,
+    payload?.organization?.name,
+  );
 }
 
 function persistSession(session: SalesEngineAuthSession) {
@@ -89,7 +104,24 @@ export async function loginWithSalesEngine(payload: {
     body: JSON.stringify(payload),
   });
   if (!response.ok) {
-    throw new SalesEngineAuthError(await readError(response), response.status);
+    await throwAuthError(response);
+  }
+  const session = (await response.json()) as SalesEngineAuthSession;
+  persistSession(session);
+  return session;
+}
+
+export async function joinFactory23Workspace(payload: {
+  email: string;
+  password: string;
+}): Promise<SalesEngineAuthSession> {
+  const response = await fetch(`${SALES_ENGINE_API_BASE_URL}/auth/factory23/join`, {
+    method: "POST",
+    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    await throwAuthError(response);
   }
   const session = (await response.json()) as SalesEngineAuthSession;
   persistSession(session);
@@ -109,7 +141,7 @@ export async function registerWithSalesEngine(payload: {
     body: JSON.stringify(payload),
   });
   if (!response.ok) {
-    throw new SalesEngineAuthError(await readError(response), response.status);
+    await throwAuthError(response);
   }
   const session = (await response.json()) as SalesEngineAuthSession;
   persistSession(session);
@@ -168,7 +200,7 @@ export async function fetchSalesEngineAccount(token: string): Promise<SalesEngin
     headers: authHeaders(token),
   });
   if (!response.ok) {
-    throw new SalesEngineAuthError(await readError(response), response.status);
+    await throwAuthError(response);
   }
   const payload = (await response.json()) as {
     user: SalesEngineAuthUser;
@@ -226,7 +258,7 @@ export async function changeSalesEnginePassword(token: string, payload: {
     headers: authHeaders(token, true),
     body: JSON.stringify(payload),
   });
-  if (!response.ok) throw new SalesEngineAuthError(await readError(response), response.status);
+  if (!response.ok) await throwAuthError(response);
   return (await response.json()) as { message: string };
 }
 
@@ -244,7 +276,7 @@ export async function updateSalesEngineProfile(token: string, payload: { name?: 
     },
     body: form,
   });
-  if (!response.ok) throw new SalesEngineAuthError(await readError(response), response.status);
+  if (!response.ok) await throwAuthError(response);
   const data = (await response.json()) as { user: SalesEngineAuthUser };
   return data.user;
 }
@@ -267,7 +299,7 @@ export async function updateCurrentOrganization(token: string, payload: {
     headers: authHeaders(token, true),
     body: JSON.stringify(payload),
   });
-  if (!response.ok) throw new SalesEngineAuthError(await readError(response), response.status);
+  if (!response.ok) await throwAuthError(response);
   const data = (await response.json()) as { data: SalesEngineAuthOrganization };
   return data.data;
 }
@@ -278,7 +310,7 @@ async function orgRequest<T>(token: string, method: string, path: string, body?:
     headers: authHeaders(token, body !== undefined),
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
-  if (!response.ok) throw new SalesEngineAuthError(await readError(response), response.status);
+  if (!response.ok) await throwAuthError(response);
   return (await response.json()) as T;
 }
 

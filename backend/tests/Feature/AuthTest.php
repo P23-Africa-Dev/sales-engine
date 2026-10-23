@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\ExternalIdentity;
 use App\Models\Organization;
+use App\Models\OrganizationUser;
 use App\Models\User;
 use App\Services\Integrations\Factory23\Factory23CrmTokenService;
 use Firebase\JWT\JWT;
@@ -480,6 +481,140 @@ class AuthTest extends TestCase
         $this->assertIsString($url);
         $this->assertStringContainsString('/avatars/male/', $url);
         $this->assertDatabaseHas('users', ['email' => 'owner@factory.test', 'gender' => 'male', 'avatar_path' => null]);
+    }
+
+    public function test_factory23_teammate_can_join_an_existing_workspace(): void
+    {
+        $this->configureFactory23();
+        $org = Organization::query()->create([
+            'name' => 'Shelby Global',
+            'slug' => 'shelby-global',
+            'f23_company_id' => '9',
+        ]);
+        $owner = User::factory()->create();
+        OrganizationUser::query()->create([
+            'organization_id' => $org->id,
+            'user_id' => $owner->id,
+            'role' => 'owner',
+        ]);
+
+        Http::fake([
+            'https://api.example.com/api/v1/auth/login' => Http::response([
+                'success' => true,
+                'data' => [
+                    'token' => 'f23-token',
+                    'user' => [
+                        'id' => 55,
+                        'email' => 'teammate@factory.test',
+                        'name' => 'Teammate',
+                        'active_company' => ['id' => 9, 'name' => 'Shelby Global'],
+                    ],
+                ],
+            ]),
+            'https://api.example.com/api/v1/*/sales-engine/access-requests/status' => Http::response([
+                'data' => ['status' => 'none', 'request' => null],
+            ]),
+            'https://api.example.com/api/v1/user/profile' => Http::response(['message' => 'Not found.'], 404),
+        ]);
+
+        $this->postJson('/api/v1/auth/login', [
+            'email' => 'teammate@factory.test',
+            'password' => 'FactoryPass1!',
+        ])->assertStatus(409)
+            ->assertJsonPath('reason', 'organization_join')
+            ->assertJsonPath('organization.name', 'Shelby Global');
+
+        $this->assertDatabaseMissing('users', ['email' => 'teammate@factory.test']);
+
+        $this->postJson('/api/v1/auth/factory23/join', [
+            'email' => 'teammate@factory.test',
+            'password' => 'FactoryPass1!',
+        ])->assertOk()
+            ->assertJsonPath('user.email', 'teammate@factory.test')
+            ->assertJsonPath('organization.id', $org->id)
+            ->assertJsonPath('organization.name', 'Shelby Global');
+
+        $member = User::query()->where('email', 'teammate@factory.test')->first();
+        $this->assertNotNull($member);
+        $this->assertDatabaseHas('organization_users', [
+            'organization_id' => $org->id,
+            'user_id' => $member->id,
+            'role' => 'member',
+        ]);
+        $this->assertSame(1, Organization::query()->where('f23_company_id', '9')->count());
+    }
+
+    public function test_factory23_password_without_a_workspace_is_rejected(): void
+    {
+        $this->configureFactory23();
+
+        Http::fake([
+            'https://api.example.com/api/v1/auth/login' => Http::response([
+                'success' => true,
+                'data' => [
+                    'token' => 'f23-token',
+                    'user' => [
+                        'id' => 56,
+                        'email' => 'outsider@factory.test',
+                        'name' => 'Outsider',
+                        'active_company' => ['id' => 404, 'name' => 'No Workspace Co'],
+                    ],
+                ],
+            ]),
+            'https://api.example.com/api/v1/*/sales-engine/access-requests/status' => Http::response([
+                'data' => ['status' => 'none', 'request' => null],
+            ]),
+        ]);
+
+        $this->postJson('/api/v1/auth/login', [
+            'email' => 'outsider@factory.test',
+            'password' => 'FactoryPass1!',
+        ])->assertForbidden()->assertJsonPath('reason', 'access_required');
+
+        $this->assertDatabaseMissing('users', ['email' => 'outsider@factory.test']);
+        $this->assertSame(0, Organization::query()->count());
+    }
+
+    public function test_existing_sales_engine_user_signs_in_when_the_company_workspace_exists(): void
+    {
+        $this->configureFactory23();
+        $user = User::factory()->create([
+            'email' => 'ada@factory.test',
+            'password' => Hash::make(str()->random(40)),
+        ]);
+        $org = Organization::query()->create([
+            'name' => 'Shelby Global',
+            'slug' => 'shelby-global',
+            'f23_company_id' => '9',
+        ]);
+        OrganizationUser::query()->create([
+            'organization_id' => $org->id,
+            'user_id' => $user->id,
+            'role' => 'owner',
+        ]);
+
+        Http::fake([
+            'https://api.example.com/api/v1/auth/login' => Http::response([
+                'success' => true,
+                'data' => [
+                    'token' => 'f23-token',
+                    'user' => [
+                        'id' => 44,
+                        'email' => 'ada@factory.test',
+                        'name' => 'Ada',
+                        'active_company' => ['id' => 9, 'name' => 'Shelby Global'],
+                    ],
+                ],
+            ]),
+            'https://api.example.com/api/v1/user/profile' => Http::response(['message' => 'Not found.'], 404),
+        ]);
+
+        $this->postJson('/api/v1/auth/login', [
+            'email' => 'ada@factory.test',
+            'password' => 'FactoryPass1!',
+        ])->assertOk()->assertJsonPath('user.email', 'ada@factory.test');
+
+        $this->assertSame(1, Organization::query()->count());
     }
 
     public function test_unknown_factory23_password_stays_invalid(): void

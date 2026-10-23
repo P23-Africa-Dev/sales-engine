@@ -3,6 +3,7 @@
 namespace App\Services\Auth;
 
 use App\Exceptions\AccessRequiredException;
+use App\Exceptions\OrganizationJoinException;
 use App\Models\ExternalIdentity;
 use App\Models\Organization;
 use App\Models\OrganizationUser;
@@ -76,36 +77,28 @@ class AuthService
      * @return array{user: User, organization: Organization|null, token: string}|null
      *
      * @throws AccessRequiredException
+     * @throws OrganizationJoinException
      */
     private function loginWithFactory23Password(string $email, string $password): ?array
     {
-        $base = rtrim((string) config('services.factory23.api_url'), '/');
-        if ($base === '') {
+        $authenticated = $this->factory23Credentials($email, $password);
+        if ($authenticated === null) {
             return null;
         }
 
-        $login = $this->factory23PasswordLogin($base, $email, $password);
-        if ($login === null) {
-            return null;
-        }
-
-        $token = (string) ($login->json('data.token') ?? '');
-        $profile = $login->json('data.user');
-        if ($token === '' || ! is_array($profile)) {
-            return null;
-        }
-
+        ['base' => $base, 'token' => $token, 'profile' => $profile] = $authenticated;
         $externalId = (string) ($profile['id'] ?? '');
         $profileEmail = (string) ($profile['email'] ?? $email);
-        $identity = $externalId !== ''
-            ? ExternalIdentity::query()->where('provider', 'factory23')->where('external_user_id', $externalId)->first()
-            : null;
-        $user = $identity?->user
-            ?? User::query()->where('email', $email)->orWhere('email', $profileEmail)->first();
+        $user = $this->salesEngineUserForFactory23($externalId, $email, $profileEmail);
 
         if (! $user) {
             $access = $this->factory23Access($base, $token);
             if (($access['status'] ?? '') !== 'approved') {
+                $workspace = $this->workspaceForFactory23Profile($profile);
+                if ($workspace) {
+                    throw new OrganizationJoinException($workspace->name);
+                }
+
                 throw new AccessRequiredException('This Factory23 account does not have Sales Engine access yet.');
             }
 
@@ -132,6 +125,123 @@ class AuthService
         }
 
         return $this->issueSession($user->fresh() ?? $user);
+    }
+
+    /**
+     * Register a Factory23 teammate into the company workspace that already exists.
+     * Does not create a workspace and does not grant the owner role.
+     *
+     * @return array{user: User, organization: Organization, token: string}|null
+     *
+     * @throws AccessRequiredException
+     */
+    public function joinFactory23Organization(string $email, string $password): ?array
+    {
+        $authenticated = $this->factory23Credentials($email, $password);
+        if ($authenticated === null) {
+            return null;
+        }
+
+        ['base' => $base, 'token' => $token, 'profile' => $profile] = $authenticated;
+        $workspace = $this->workspaceForFactory23Profile($profile);
+        if (! $workspace) {
+            throw new AccessRequiredException('This Factory23 account does not have Sales Engine access yet.');
+        }
+
+        $externalId = (string) ($profile['id'] ?? '');
+        $profileEmail = (string) ($profile['email'] ?? $email);
+
+        return DB::transaction(function () use ($workspace, $email, $password, $profile, $externalId, $profileEmail, $base, $token) {
+            $user = $this->salesEngineUserForFactory23($externalId, $email, $profileEmail);
+            if (! $user) {
+                $user = User::query()->create([
+                    'name' => (string) ($profile['name'] ?? 'Factory23 User'),
+                    'email' => $profileEmail,
+                    'password' => $password,
+                    'email_verified_at' => now(),
+                ]);
+            } else {
+                $user->password = $password;
+                if ($user->email_verified_at === null) {
+                    $user->email_verified_at = now();
+                }
+            }
+
+            if (! OrganizationUser::query()->where('organization_id', $workspace->id)->where('user_id', $user->id)->exists()) {
+                OrganizationUser::query()->create([
+                    'organization_id' => $workspace->id,
+                    'user_id' => $user->id,
+                    'role' => 'member',
+                ]);
+            }
+
+            $this->syncFactory23Avatar($user, $base, $token, $profile);
+            $user->save();
+
+            if ($externalId !== '') {
+                $this->linkFactory23Identity($user, $externalId, $profile);
+            }
+
+            $fresh = $user->fresh() ?? $user;
+
+            return [
+                'user' => $fresh,
+                'organization' => $workspace,
+                'token' => $fresh->createToken('api')->plainTextToken,
+            ];
+        });
+    }
+
+    /**
+     * @return array{base: string, token: string, profile: array<string, mixed>}|null
+     */
+    private function factory23Credentials(string $email, string $password): ?array
+    {
+        $base = rtrim((string) config('services.factory23.api_url'), '/');
+        if ($base === '') {
+            return null;
+        }
+
+        $login = $this->factory23PasswordLogin($base, $email, $password);
+        if ($login === null) {
+            return null;
+        }
+
+        $token = (string) ($login->json('data.token') ?? '');
+        $profile = $login->json('data.user');
+        if ($token === '' || ! is_array($profile)) {
+            return null;
+        }
+
+        return compact('base', 'token', 'profile');
+    }
+
+    private function salesEngineUserForFactory23(string $externalId, string $email, string $profileEmail): ?User
+    {
+        $identity = $externalId !== ''
+            ? ExternalIdentity::query()->where('provider', 'factory23')->where('external_user_id', $externalId)->first()
+            : null;
+
+        return $identity?->user
+            ?? User::query()->where('email', $email)->orWhere('email', $profileEmail)->first();
+    }
+
+    /**
+     * @param  array<string, mixed>  $profile
+     */
+    private function workspaceForFactory23Profile(array $profile): ?Organization
+    {
+        $company = $profile['active_company'] ?? null;
+        if (! is_array($company)) {
+            return null;
+        }
+
+        $companyId = trim((string) ($company['id'] ?? ''));
+        if ($companyId === '') {
+            return null;
+        }
+
+        return Organization::query()->where('f23_company_id', $companyId)->first();
     }
 
     /**
