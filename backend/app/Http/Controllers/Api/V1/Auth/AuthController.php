@@ -64,6 +64,10 @@ class AuthController extends Controller
             return response()->json([
                 'message' => $e->getMessage(),
                 'reason' => 'organization_join',
+                'account' => [
+                    'name' => $e->accountName,
+                    'email' => $e->accountEmail,
+                ],
                 'organization' => ['name' => $e->organizationName],
             ], 409);
         } catch (AccessRequiredException $e) {
@@ -169,7 +173,7 @@ class AuthController extends Controller
         $user->save();
 
         $currentId = $user->currentAccessToken()?->id;
-        $user->tokens()->when($currentId, fn ($query) => $query->where('id', '!=', $currentId))->delete();
+        $user->tokens()->when($currentId, fn($query) => $query->where('id', '!=', $currentId))->delete();
 
         return response()->json(['message' => 'Password changed.']);
     }

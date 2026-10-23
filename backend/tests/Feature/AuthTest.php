@@ -522,7 +522,9 @@ class AuthTest extends TestCase
             'password' => 'FactoryPass1!',
         ])->assertStatus(409)
             ->assertJsonPath('reason', 'organization_join')
-            ->assertJsonPath('organization.name', 'Shelby Global');
+            ->assertJsonPath('organization.name', 'Shelby Global')
+            ->assertJsonPath('account.name', 'Teammate')
+            ->assertJsonPath('account.email', 'teammate@factory.test');
 
         $this->assertDatabaseMissing('users', ['email' => 'teammate@factory.test']);
 

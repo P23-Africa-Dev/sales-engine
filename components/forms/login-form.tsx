@@ -1,5 +1,6 @@
 "use client";
 
+import Factory23ContinueDialog from "@/components/forms/factory23-continue-dialog";
 import Button from "@/components/ui/button";
 import Input from "@/components/ui/input";
 import Link from "next/link";
@@ -32,8 +33,9 @@ export default function LoginForm() {
   const hasHydrated = useAuthStore((s) => s._hasHydrated);
   const [showPassword, setShowPassword] = useState(false);
   const [globalError, setGlobalError] = useState("");
-  const [joinOrganization, setJoinOrganization] = useState("");
-  const [joinEmail, setJoinEmail] = useState("");
+  const [joinPreview, setJoinPreview] = useState<{ name: string; email: string; organization: string } | null>(null);
+  const [joinOpen, setJoinOpen] = useState(false);
+  const [joinError, setJoinError] = useState("");
   const [loading, setLoading] = useState(false);
 
   const {
@@ -55,7 +57,7 @@ export default function LoginForm() {
   const email = watch("email");
   const password = watch("password");
   const isFilled = email.trim() !== "" && password.trim() !== "";
-  const canJoin = joinOrganization !== "" && email.trim().toLowerCase() === joinEmail;
+  const canJoin = Boolean(joinPreview) && email.trim().toLowerCase() === joinPreview?.email.toLowerCase();
   const showResetSuccess = searchParams.get("reset") === "success";
   const accountStatusMessage = getAccountStatusMessage(searchParams);
 
@@ -85,20 +87,42 @@ export default function LoginForm() {
     router.push("/sales-engine");
   }
 
+  function closeJoinDialog() {
+    if (loading) return;
+    setJoinOpen(false);
+    setJoinError("");
+  }
+
+  async function confirmFactory23Join() {
+    setJoinError("");
+    setLoading(true);
+    try {
+      const session = await joinFactory23Workspace({
+        email,
+        password,
+      });
+      await finishSignIn(session);
+    } catch (err) {
+      const message = err instanceof SalesEngineAuthError
+        ? err.message
+        : "Could not continue with Factory23. Please try again.";
+      setJoinError(message);
+      toast.error(message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
   async function onSubmit(values: LoginFormValues) {
+    if (canJoin) {
+      setJoinOpen(true);
+      return;
+    }
+
     setGlobalError("");
     setLoading(true);
 
     try {
-      if (canJoin) {
-        const session = await joinFactory23Workspace({
-          email: values.email,
-          password: values.password,
-        });
-        await finishSignIn(session);
-        return;
-      }
-
       const session = await loginWithSalesEngine({
         email: values.email,
         password: values.password,
@@ -107,12 +131,16 @@ export default function LoginForm() {
       await finishSignIn(session);
     } catch (err) {
       if (err instanceof SalesEngineAuthError && err.reason === "organization_join") {
-        setJoinOrganization(err.organizationName || "Your Factory23 organization");
-        setJoinEmail(values.email.trim().toLowerCase());
+        setJoinPreview({
+          name: err.accountName?.trim() || values.email,
+          email: err.accountEmail?.trim() || values.email.trim(),
+          organization: err.organizationName || "Your Factory23 organization",
+        });
+        setJoinError("");
         setGlobalError("");
       } else if (err instanceof SalesEngineAuthError) {
-        setJoinOrganization("");
-        setJoinEmail("");
+        setJoinPreview(null);
+        setJoinOpen(false);
         setGlobalError(err.message);
         toast.error(err.message);
       } else {
@@ -342,13 +370,26 @@ export default function LoginForm() {
 
       {canJoin && (
         <p className="mb-4 rounded-xl border border-[#143028]/15 bg-[#f7f8f4] px-4 py-3 text-sm leading-5 text-[#143028]">
-          {joinOrganization} already uses Sales Engine. Continue with your Factory23 account to join this workspace.
+          {joinPreview?.organization} already uses Sales Engine. Continue with Factory23 to review this account before joining.
         </p>
       )}
 
       <Button type="submit" disabled={!isFilled || loading}>
-        {loading ? (canJoin ? "Continuing…" : "Logging in…") : canJoin ? "Continue with Factory23" : "Log In"}
+        {loading ? "Logging in…" : canJoin ? "Continue with Factory23" : "Log In"}
       </Button>
+
+      <Factory23ContinueDialog
+        open={joinOpen && canJoin}
+        name={joinPreview?.name ?? ""}
+        email={joinPreview?.email ?? email}
+        organization={joinPreview?.organization ?? ""}
+        loading={loading}
+        error={joinError}
+        onCancel={closeJoinDialog}
+        onConfirm={() => {
+          void confirmFactory23Join();
+        }}
+      />
 
       <p className="text-center text-xs mt-4 text-[#A9AAAB]">
         Don&apos;t have an account?{" "}

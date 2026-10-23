@@ -11,8 +11,11 @@ use RuntimeException;
  */
 class OrganizationJoinException extends RuntimeException
 {
-    public function __construct(public readonly string $organizationName)
-    {
+    public function __construct(
+        public readonly string $organizationName,
+        public readonly string $accountName,
+        public readonly string $accountEmail,
+    ) {
         parent::__construct('Your Factory23 organization already uses Sales Engine.');
     }
 }

@@ -35,7 +35,7 @@ class AuthService
                 'password' => $password,
             ]);
 
-            $orgName = $organizationName ?: ($name."'s Workspace");
+            $orgName = $organizationName ?: ($name . "'s Workspace");
             $organization = $this->createOrganization($orgName);
             $this->attachOwner($organization, $user);
 
@@ -96,7 +96,11 @@ class AuthService
             if (($access['status'] ?? '') !== 'approved') {
                 $workspace = $this->workspaceForFactory23Profile($profile);
                 if ($workspace) {
-                    throw new OrganizationJoinException($workspace->name);
+                    throw new OrganizationJoinException(
+                        $workspace->name,
+                        (string) ($profile['name'] ?? ''),
+                        $profileEmail,
+                    );
                 }
 
                 throw new AccessRequiredException('This Factory23 account does not have Sales Engine access yet.');
@@ -258,7 +262,7 @@ class AuthService
 
         if ($gender === null || $avatar === null) {
             try {
-                $response = Http::withToken($token)->acceptJson()->timeout(8)->get($base.'/api/v1/user/profile');
+                $response = Http::withToken($token)->acceptJson()->timeout(8)->get($base . '/api/v1/user/profile');
             } catch (\Throwable $e) {
                 Log::warning('Factory23 profile could not be reached while copying an avatar.', ['error' => $e->getMessage()]);
                 $response = null;
@@ -314,7 +318,7 @@ class AuthService
     {
         foreach (['/api/v1/auth/login', '/api/v1/agent/login'] as $path) {
             try {
-                $login = Http::acceptJson()->timeout(15)->post($base.$path, [
+                $login = Http::acceptJson()->timeout(15)->post($base . $path, [
                     'email' => $email,
                     'password' => $password,
                 ]);
@@ -343,7 +347,7 @@ class AuthService
     {
         foreach (['/api/v1/admin/sales-engine/access-requests/status', '/api/v1/agent/sales-engine/access-requests/status'] as $path) {
             try {
-                $response = Http::withToken($token)->acceptJson()->timeout(15)->get($base.$path);
+                $response = Http::withToken($token)->acceptJson()->timeout(15)->get($base . $path);
             } catch (\Throwable $e) {
                 Log::warning('Factory23 access status could not be reached.', ['error' => $e->getMessage()]);
 
@@ -591,7 +595,7 @@ class AuthService
         $slug = $base;
         $i = 1;
         while (Organization::query()->where('slug', $slug)->exists()) {
-            $slug = $base.'-'.$i++;
+            $slug = $base . '-' . $i++;
         }
 
         return Organization::query()->create([

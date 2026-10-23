@@ -62,11 +62,26 @@ export class SalesEngineAuthError extends Error {
 
   organizationName?: string;
 
-  constructor(message: string, status: number, reason?: string, organizationName?: string) {
+  accountName?: string;
+
+  accountEmail?: string;
+
+  constructor(
+    message: string,
+    status: number,
+    details?: {
+      reason?: string;
+      organizationName?: string;
+      accountName?: string;
+      accountEmail?: string;
+    },
+  ) {
     super(message);
     this.status = status;
-    this.reason = reason;
-    this.organizationName = organizationName;
+    this.reason = details?.reason;
+    this.organizationName = details?.organizationName;
+    this.accountName = details?.accountName;
+    this.accountEmail = details?.accountEmail;
   }
 }
 
@@ -74,13 +89,18 @@ async function throwAuthError(response: Response): Promise<never> {
   const payload = (await response.json().catch(() => null)) as {
     message?: string;
     reason?: string;
+    account?: { name?: string; email?: string };
     organization?: { name?: string };
   } | null;
   throw new SalesEngineAuthError(
     payload?.message || `Sales Engine request failed (${response.status})`,
     response.status,
-    payload?.reason,
-    payload?.organization?.name,
+    {
+      reason: payload?.reason,
+      organizationName: payload?.organization?.name,
+      accountName: payload?.account?.name,
+      accountEmail: payload?.account?.email,
+    },
   );
 }
 
