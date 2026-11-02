@@ -2,7 +2,8 @@ import type { Metadata, Viewport } from "next";
 import { Poppins, Montserrat } from "next/font/google";
 import "./globals.css";
 import "./outreach-dashboard.css";
-import { Navbar } from "@/components/layout/navbar";
+import { AdminAuthProvider } from "@/components/auth/admin-auth-provider";
+import { AdminShell } from "@/components/layout/admin-shell";
 
 const poppins = Poppins({
   subsets: ["latin", "latin-ext"],
@@ -17,8 +18,8 @@ const montserrat = Montserrat({
 });
 
 export const metadata: Metadata = {
-  title: "Sales Engine - Outreach Dashboard",
-  description: "Sales Engine Lite Outreach Dashboard replica.",
+  title: "Sales Engine - Admin",
+  description: "Sales Engine platform admin workspace.",
   icons: {
     icon: "/dashboard-design/84470.svg",
   },
@@ -39,10 +40,9 @@ export default function RootLayout({
       className={`${poppins.variable} ${montserrat.variable} ${poppins.className} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col bg-[#041014]">
-        <div className="dashboard-shell min-h-screen flex flex-col">
-          <Navbar />
-          <main className="flex-1">{children}</main>
-        </div>
+        <AdminAuthProvider>
+          <AdminShell>{children}</AdminShell>
+        </AdminAuthProvider>
       </body>
     </html>
   );

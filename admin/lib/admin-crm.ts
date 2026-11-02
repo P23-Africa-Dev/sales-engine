@@ -1,23 +1,15 @@
-import { ONBOARDED_BUSINESSES_DATA } from "./smart-leads";
+import type { CrmEntryRow } from "@/lib/api/admin-crm";
+import type { AdminOrganization } from "@/lib/api/admin-organizations";
 
-export const CRM_SNAPSHOT = "2026-10-13";
-export const CRM_STAGES = [
-  "New",
-  "Qualified",
-  "Proposal",
-  "Negotiation",
-  "Won",
-  "Lost",
-] as const;
-export type CrmStage = (typeof CRM_STAGES)[number];
-export const CRM_SOURCES = [
-  "Smart Leads",
-  "Social Listening",
-  "Manual / import",
-] as const;
-export type CrmSource = (typeof CRM_SOURCES)[number];
 export type CrmIssue = "Unassigned" | "Missing email" | "Possible duplicate";
-export interface CrmBusiness {
+
+export type CrmStageOption = {
+  id: number;
+  name: string;
+  slug: string;
+};
+
+export type CrmBusiness = {
   id: string;
   name: string;
   industry: string;
@@ -25,28 +17,34 @@ export interface CrmBusiness {
   team: string[];
   pipeline: string;
   staleDays: number;
-}
-export interface CrmRecord {
+};
+
+export type CrmRecord = {
   id: string;
+  numericId: number;
   businessId: string;
   company: string;
   contact: string;
   role: string;
   email: string;
   owner: string;
-  stage: CrmStage;
-  source: CrmSource;
+  assignedToUserId: number | null;
+  stage: string;
+  stageId: number | null;
+  stageSlug: string | null;
+  source: string;
   value: number;
+  currency: string;
   created: string;
   updated: string;
   due: string | null;
   nextAction: string;
   archived: boolean;
   duplicateOf: string | null;
-  duplicateReviewed: boolean;
   notes: { text: string; date: string; actor: string }[];
-}
-export interface CrmAudit {
+};
+
+export type CrmAudit = {
   id: string;
   businessId: string;
   recordId?: string;
@@ -54,116 +52,164 @@ export interface CrmAudit {
   detail: string;
   actor: string;
   date: string;
+};
+
+function isoDate(value?: string | null) {
+  if (!value) return "";
+  return value.slice(0, 10);
 }
-export function daysBefore(days: number) {
-  const date = new Date(`${CRM_SNAPSHOT}T00:00:00Z`);
+
+export function mapOrganizationToBusiness(org: AdminOrganization): CrmBusiness {
+  const owner = org.owner?.name || "Invited owner";
+  return {
+    id: String(org.id),
+    name: org.name,
+    industry: org.industry || "—",
+    owner,
+    team: owner ? [owner] : [],
+    pipeline: "Client sales pipeline",
+    staleDays: org.crm_stale_days ?? 7,
+  };
+}
+
+export function mapEntryToRecord(entry: CrmEntryRow): CrmRecord {
+  return {
+    id: String(entry.id),
+    numericId: entry.id,
+    businessId: String(entry.organization_id),
+    company: entry.company || "Untitled company",
+    contact: entry.contact || "—",
+    role: "",
+    email: entry.email || "",
+    owner: entry.owner || "",
+    assignedToUserId: entry.assigned_to_user_id ?? null,
+    stage: entry.stage || entry.stage_slug || "—",
+    stageId: entry.stage_id ?? null,
+    stageSlug: entry.stage_slug ?? null,
+    source: entry.source || "—",
+    value: Number(entry.value ?? 0),
+    currency: entry.currency || "EUR",
+    created: isoDate(entry.created_at),
+    updated: isoDate(entry.updated_at),
+    due: entry.due ? isoDate(entry.due) : null,
+    nextAction: entry.next_action || "No follow-up required",
+    archived: Boolean(entry.archived),
+    duplicateOf: entry.duplicate_of != null ? String(entry.duplicate_of) : null,
+    notes: [],
+  };
+}
+
+export function stageOptionsFromRecords(records: CrmRecord[]): CrmStageOption[] {
+  const map = new Map<string, CrmStageOption>();
+  for (const record of records) {
+    if (!record.stageId || !record.stage) continue;
+    const key = String(record.stageId);
+    if (!map.has(key)) {
+      map.set(key, {
+        id: record.stageId,
+        name: record.stage,
+        slug: record.stageSlug || record.stage.toLowerCase().replace(/\s+/g, "-"),
+      });
+    }
+  }
+  return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export function mergeStageOptions(
+  ...lists: CrmStageOption[][]
+): CrmStageOption[] {
+  const map = new Map<string, CrmStageOption>();
+  for (const list of lists) {
+    for (const stage of list) {
+      if (!stage.id || !stage.name) continue;
+      map.set(String(stage.id), stage);
+    }
+  }
+  return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export function todayIso() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+export function daysBefore(days: number, from = new Date()) {
+  const date = new Date(from);
+  date.setUTCHours(0, 0, 0, 0);
   date.setUTCDate(date.getUTCDate() - days);
   return date.toISOString().slice(0, 10);
 }
-export const CRM_BUSINESSES: CrmBusiness[] = ONBOARDED_BUSINESSES_DATA.map(
-  (b) => ({
-    id: b.id,
-    name: b.company,
-    industry: b.industry,
-    owner: b.owner,
-    team: [b.owner, "Ama Mensah", "Daniel Okafor"],
-    pipeline: "Client sales pipeline",
-    staleDays: 7,
-  }),
-);
-export const CRM_RECORDS: CrmRecord[] = ONBOARDED_BUSINESSES_DATA.flatMap(
-  (b, i) =>
-    Array.from({ length: 6 }, (_, j) => {
-      const duplicate = i === 1 && j === 5;
-      const p = b.prospects[duplicate ? 0 : j % b.prospects.length];
-      const stage =
-        CRM_STAGES[
-          [
-            [0, 1, 2, 3, 4, 1],
-            [1, 2, 0, 3, 5, 0],
-            [0, 1, 2, 4, 3, 0],
-            [1, 3, 2, 0, 4, 5],
-          ][i % 4][j]
-        ];
-      const closed = stage === "Won" || stage === "Lost";
-      return {
-        id: `CRM-${2001 + i * 6 + j}`,
-        businessId: b.id,
-        company: p.company,
-        contact: p.primaryContact.name,
-        role: p.primaryContact.title,
-        email:
-          j === 2 && i % 2 === 0
-            ? ""
-            : `${p.primaryContact.name.toLowerCase().replaceAll(" ", ".")}@example.com`,
-        owner: j === 0 && i !== 0 ? "" : b.owner,
-        stage,
-        source: CRM_SOURCES[(i + j) % 3],
-        value: [18000, 32000, 12500, 46000, 27000, 9500][j] + i * 2500,
-        created: daysBefore([13, 10, 7, 5, 3, 1][j] + (i % 2)),
-        updated: daysBefore(closed ? i + 1 : j === 1 ? 10 : 2 + i),
-        due: closed ? null : daysBefore(j % 3 === 0 ? 2 : j % 3 === 1 ? 0 : -3),
-        nextAction: closed
-          ? "No follow-up required"
-          : [
-              "Validate buying authority",
-              "Review proposal with client",
-              "Confirm procurement timeline",
-            ][j % 3],
-        archived: false,
-        duplicateOf: duplicate ? `CRM-${2001 + i * 6}` : null,
-        duplicateReviewed: false,
-        notes: [
-          {
-            text: "Imported into the client CRM workspace. Record ownership and deal value require client validation.",
-            date: daysBefore([13, 10, 7, 5, 3, 1][j] + (i % 2)),
-            actor: "Client workspace",
-          },
-        ],
-      };
-    }),
-);
-export const CRM_INITIAL_AUDIT: CrmAudit[] = [
-  {
-    id: "audit-seed",
-    businessId: CRM_BUSINESSES[0].id,
-    recordId: "CRM-2001",
-    action: "Record inspected",
-    detail: "Initial sample review; no fields changed.",
-    actor: "Kwame Smith",
-    date: "13 Oct 2026 · 09:20 WAT",
-  },
-];
-export function isOpen(record: CrmRecord) {
-  return !record.archived && record.stage !== "Won" && record.stage !== "Lost";
+
+export function isClosedStage(record: Pick<CrmRecord, "stage" | "stageSlug">) {
+  const slug = (record.stageSlug || record.stage || "").toLowerCase();
+  return slug === "won" || slug === "lost";
 }
+
+export function isWonStage(record: Pick<CrmRecord, "stage" | "stageSlug">) {
+  return (record.stageSlug || record.stage || "").toLowerCase() === "won";
+}
+
+export function isOpen(record: CrmRecord) {
+  return !record.archived && !isClosedStage(record);
+}
+
 export function issuesFor(record: CrmRecord): CrmIssue[] {
   if (record.archived) return [];
   const issues: CrmIssue[] = [];
   if (!record.owner) issues.push("Unassigned");
   if (!record.email) issues.push("Missing email");
-  if (record.duplicateOf && !record.duplicateReviewed)
-    issues.push("Possible duplicate");
+  if (record.duplicateOf) issues.push("Possible duplicate");
   return issues;
 }
-export function isOverdue(record: CrmRecord) {
-  return isOpen(record) && Boolean(record.due && record.due < CRM_SNAPSHOT);
+
+export function isOverdue(record: CrmRecord, today = todayIso()) {
+  return isOpen(record) && Boolean(record.due && record.due < today);
 }
-export function isStale(record: CrmRecord, business: CrmBusiness) {
-  return isOpen(record) && record.updated < daysBefore(business.staleDays);
+
+export function isStale(record: CrmRecord, business: CrmBusiness, today = todayIso()) {
+  return isOpen(record) && record.updated < daysBefore(business.staleDays, new Date(`${today}T00:00:00Z`));
 }
-export function money(value: number, compact = false) {
-  return new Intl.NumberFormat("en-IE", {
-    style: "currency",
-    currency: "EUR",
-    maximumFractionDigits: 0,
-    ...(compact ? { notation: "compact" as const } : {}),
-  }).format(value);
+
+export function money(value: number, compact = false, currency = "EUR") {
+  const code = currency && currency.length === 3 ? currency : "EUR";
+  try {
+    return new Intl.NumberFormat("en-IE", {
+      style: "currency",
+      currency: code,
+      maximumFractionDigits: 0,
+      ...(compact ? { notation: "compact" as const } : {}),
+    }).format(value || 0);
+  } catch {
+    return new Intl.NumberFormat("en-IE", {
+      style: "currency",
+      currency: "EUR",
+      maximumFractionDigits: 0,
+      ...(compact ? { notation: "compact" as const } : {}),
+    }).format(value || 0);
+  }
 }
+
 export function dateLabel(iso: string) {
+  if (!iso) return "—";
+  const date = iso.includes("T") ? new Date(iso) : new Date(`${iso}T00:00:00Z`);
+  if (Number.isNaN(date.getTime())) return iso;
   return new Intl.DateTimeFormat("en-GB", {
     day: "2-digit",
     month: "short",
     timeZone: "UTC",
-  }).format(new Date(`${iso}T00:00:00Z`));
+  }).format(date);
+}
+
+export function formatAuditWhen(iso?: string | null) {
+  if (!iso) return "—";
+  try {
+    return (
+      new Intl.DateTimeFormat("en-GB", {
+        dateStyle: "medium",
+        timeStyle: "short",
+        timeZone: "Africa/Lagos",
+      }).format(new Date(iso)) + " WAT"
+    );
+  } catch {
+    return iso;
+  }
 }

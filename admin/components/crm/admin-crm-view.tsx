@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
   Archive,
@@ -21,27 +21,49 @@ import {
   X,
 } from "lucide-react";
 import {
-  CRM_BUSINESSES,
-  CRM_INITIAL_AUDIT,
-  CRM_RECORDS,
-  CRM_SNAPSHOT,
-  CRM_SOURCES,
-  CRM_STAGES,
   dateLabel,
+  formatAuditWhen,
   isOpen,
   isOverdue,
   isStale,
+  isWonStage,
   issuesFor,
+  mapEntryToRecord,
+  mapOrganizationToBusiness,
+  mergeStageOptions,
   money,
+  stageOptionsFromRecords,
   type CrmAudit,
   type CrmBusiness,
   type CrmIssue,
   type CrmRecord,
+  type CrmStageOption,
 } from "@/lib/admin-crm";
+import {
+  archiveCrmEntries,
+  completeCrmFollowUp,
+  createCrmEntryNote,
+  dismissCrmDuplicate,
+  fetchCrmActivity,
+  fetchCrmEntries,
+  fetchCrmOverview,
+  restoreCrmEntries,
+  updateCrmEntry,
+  updateCrmReviewPolicy,
+  type CrmOverview,
+} from "@/lib/api/admin-crm";
+import { listAdminOrganizations } from "@/lib/api/admin-organizations";
+import { AdminApiError } from "@/lib/api/admin-client";
 import { CrmCharts } from "./crm-charts";
 import { CrmRecordDrawer } from "./crm-record-drawer";
+
 type View =
-  "Overview" | "Client pipelines" | "Records" | "Data quality" | "Activity log";
+  | "Overview"
+  | "Client pipelines"
+  | "Records"
+  | "Data quality"
+  | "Activity log";
+
 const tabs = [
   { name: "Overview", icon: TrendingUp },
   { name: "Client pipelines", icon: Layers3 },
@@ -49,6 +71,7 @@ const tabs = [
   { name: "Data quality", icon: ShieldCheck },
   { name: "Activity log", icon: Activity },
 ] as const;
+
 function Pill({
   children,
   tone = "neutral",
@@ -58,15 +81,28 @@ function Pill({
 }) {
   return <span className={`sl-badge sl-${tone}`}>{children}</span>;
 }
+
+function errMessage(err: unknown, fallback: string) {
+  return err instanceof AdminApiError ? err.message : fallback;
+}
+
 export function AdminCrmView() {
-  const [records, setRecords] = useState(CRM_RECORDS);
-  const [businesses, setBusinesses] = useState(CRM_BUSINESSES);
-  const [audit, setAudit] = useState(CRM_INITIAL_AUDIT);
+  const [businesses, setBusinesses] = useState<CrmBusiness[]>([]);
+  const [records, setRecords] = useState<CrmRecord[]>([]);
+  const [registry, setRegistry] = useState<CrmRecord[]>([]);
+  const [registryMeta, setRegistryMeta] = useState({
+    current_page: 1,
+    last_page: 1,
+    per_page: 6,
+    total: 0,
+  });
+  const [overview, setOverview] = useState<CrmOverview | null>(null);
+  const [audit, setAudit] = useState<CrmAudit[]>([]);
+  const [stages, setStages] = useState<CrmStageOption[]>([]);
+  const [sources, setSources] = useState<string[]>([]);
   const [view, setView] = useState<View>("Overview");
   const [scope, setScope] = useState("all");
-  const [selectedBusiness, setSelectedBusiness] = useState(
-    CRM_BUSINESSES[0].id,
-  );
+  const [selectedBusiness, setSelectedBusiness] = useState("");
   const [query, setQuery] = useState("");
   const [stage, setStage] = useState("all");
   const [source, setSource] = useState("all");
@@ -78,52 +114,156 @@ export function AdminCrmView() {
   const [detailId, setDetailId] = useState<string | null>(null);
   const [policyId, setPolicyId] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [registryLoading, setRegistryLoading] = useState(false);
   const [issueFilter, setIssueFilter] = useState<CrmIssue | "all">("all");
   const [activityFilter, setActivityFilter] = useState("all");
-  const scopedBusinesses = businesses.filter(
-    (b) => scope === "all" || b.id === scope,
+  const [busy, setBusy] = useState(false);
+
+  const orgId = scope === "all" ? undefined : Number(scope);
+
+  const loadCore = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const [orgs, overviewRes, entriesRes, activityRes] = await Promise.all([
+        listAdminOrganizations({ per_page: 100, page: 1 }),
+        fetchCrmOverview(orgId),
+        fetchCrmEntries({
+          organization_id: orgId,
+          archived: "exclude",
+          sort: "newest",
+          per_page: 100,
+          page: 1,
+        }),
+        fetchCrmActivity({
+          organization_id: orgId,
+          limit: 50,
+        }),
+      ]);
+
+      const mappedOrgs = orgs.data.map(mapOrganizationToBusiness);
+      setBusinesses(mappedOrgs);
+      setSelectedBusiness((prev) => {
+        if (scope !== "all") return scope;
+        if (prev && mappedOrgs.some((b) => b.id === prev)) return prev;
+        return mappedOrgs[0]?.id ?? "";
+      });
+
+      const mappedEntries = entriesRes.data.map(mapEntryToRecord);
+      setRecords(mappedEntries);
+      setStages(stageOptionsFromRecords(mappedEntries));
+      setSources(
+        Array.from(
+          new Set(mappedEntries.map((r) => r.source).filter((s) => s && s !== "—")),
+        ).sort(),
+      );
+      setOverview(overviewRes.data);
+
+      const audits: CrmAudit[] = (activityRes.data.audits ?? []).map((a) => ({
+        id: String(a.id),
+        businessId: a.organization_id != null ? String(a.organization_id) : "all",
+        action: a.action || "CRM action",
+        detail: a.reason || "",
+        actor: a.admin || "Platform admin",
+        date: formatAuditWhen(a.created_at),
+      }));
+      setAudit(audits);
+    } catch (err) {
+      setError(errMessage(err, "Unable to load CRM workspace."));
+    } finally {
+      setLoading(false);
+    }
+  }, [orgId, scope]);
+
+  const loadRegistry = useCallback(async () => {
+    setRegistryLoading(true);
+    try {
+      const sortParam =
+        sort === "value" ? "value_desc" : sort === "oldest" ? "oldest" : "newest";
+      const result = await fetchCrmEntries({
+        organization_id: orgId,
+        search: query || undefined,
+        stage_slug: stage === "all" ? undefined : stage,
+        archived: visibility === "archived" ? "only" : "exclude",
+        sort: sortParam,
+        page,
+        per_page: 6,
+      });
+      let mapped = result.data.map(mapEntryToRecord);
+      if (source !== "all") {
+        mapped = mapped.filter((r) => r.source === source);
+      }
+      setRegistry(mapped);
+      setRegistryMeta(result.meta);
+      setStages((prev) =>
+        mergeStageOptions(prev, stageOptionsFromRecords(mapped), stageOptionsFromRecords(records)),
+      );
+      setSources((prev) =>
+        Array.from(
+          new Set([
+            ...prev,
+            ...mapped.map((r) => r.source).filter((s) => s && s !== "—"),
+          ]),
+        ).sort(),
+      );
+    } catch (err) {
+      setError(errMessage(err, "Unable to load CRM records."));
+    } finally {
+      setRegistryLoading(false);
+    }
+  }, [orgId, query, stage, source, visibility, sort, page, records]);
+
+  useEffect(() => {
+    void loadCore();
+  }, [loadCore]);
+
+  useEffect(() => {
+    if (view === "Records") void loadRegistry();
+  }, [view, loadRegistry]);
+
+  const scopedBusinesses = useMemo(
+    () => businesses.filter((b) => scope === "all" || b.id === scope),
+    [businesses, scope],
   );
-  const scoped = records.filter(
-    (r) => scope === "all" || r.businessId === scope,
+  const scoped = useMemo(
+    () => records.filter((r) => scope === "all" || r.businessId === scope),
+    [records, scope],
   );
-  const active = scoped.filter((r) => !r.archived);
-  const open = active.filter(isOpen);
-  const won = active.filter((r) => r.stage === "Won");
-  const lost = active.filter((r) => r.stage === "Lost");
-  const flagged = active.filter((r) => issuesFor(r).length > 0);
-  const overdue = active.filter(isOverdue);
-  const name = (id: string) => businesses.find((b) => b.id === id)?.name ?? id;
+  const active = useMemo(() => scoped.filter((r) => !r.archived), [scoped]);
+  const open = useMemo(() => active.filter(isOpen), [active]);
+  const flagged = useMemo(
+    () => active.filter((r) => issuesFor(r).length > 0),
+    [active],
+  );
+  const overdue = useMemo(() => active.filter((r) => isOverdue(r)), [active]);
+  const name = useCallback(
+    (id: string) => businesses.find((b) => b.id === id)?.name ?? id,
+    [businesses],
+  );
   const business =
     businesses.find((b) => b.id === selectedBusiness) ?? businesses[0];
-  const businessRecords = records.filter(
-    (r) => r.businessId === business.id && !r.archived,
+  const businessRecords = useMemo(
+    () =>
+      business
+        ? records.filter((r) => r.businessId === business.id && !r.archived)
+        : [],
+    [records, business],
   );
-  const detail = records.find((r) => r.id === detailId);
+  const businessStages = useMemo(() => {
+    const fromRecords = stageOptionsFromRecords(businessRecords);
+    return fromRecords.length ? fromRecords : stages;
+  }, [businessRecords, stages]);
+  const detail = [...records, ...registry].find((r) => r.id === detailId);
   const policy = businesses.find((b) => b.id === policyId);
-  function log(
-    businessId: string,
-    action: string,
-    text: string,
-    recordId?: string,
-  ) {
-    setAudit((entries) => [
-      {
-        id: crypto.randomUUID(),
-        businessId,
-        recordId,
-        action,
-        detail: text,
-        actor: "Kwame Smith",
-        date:
-          new Intl.DateTimeFormat("en-GB", {
-            dateStyle: "medium",
-            timeStyle: "short",
-            timeZone: "Africa/Lagos",
-          }).format(new Date()) + " WAT",
-      },
-      ...entries,
-    ]);
-  }
+
+  const openValue = useMemo(
+    () => open.reduce((sum, r) => sum + r.value, 0),
+    [open],
+  );
+  const openCurrency = open[0]?.currency || "EUR";
+
   function setTab(next: View) {
     setView(next);
     setQuery("");
@@ -134,6 +274,7 @@ export function AdminCrmView() {
     setPage(1);
     setIssueFilter("all");
   }
+
   function changeScope(id: string) {
     setScope(id);
     if (id !== "all") setSelectedBusiness(id);
@@ -141,102 +282,149 @@ export function AdminCrmView() {
     setPage(1);
     setDetailId(null);
   }
+
   function inspectBusiness(id: string) {
     changeScope(id);
     setSelectedBusiness(id);
     setTab("Client pipelines");
   }
+
   function inspectStage(next: string) {
     setTab("Records");
     setVisibility("active");
-    setStage(next);
+    const match = stages.find(
+      (s) => s.name === next || s.slug === next || s.slug === next.toLowerCase(),
+    );
+    setStage(match?.slug || next);
   }
+
   function filterChanged() {
     setPage(1);
     setSelected([]);
   }
-  const filtered = scoped
-    .filter(
-      (r) =>
-        r.archived === (visibility === "archived") &&
-        (stage === "all" || r.stage === stage) &&
-        (source === "all" || r.source === source) &&
-        `${r.company} ${r.contact} ${r.owner} ${r.id} ${name(r.businessId)}`
-          .toLowerCase()
-          .includes(query.toLowerCase()),
-    )
-    .sort((a, b) =>
-      sort === "value" ? b.value - a.value : b.created.localeCompare(a.created),
-    );
-  const pages = Math.max(1, Math.ceil(filtered.length / 6));
-  const safePage = Math.min(page, pages);
-  const pageRecords = filtered.slice((safePage - 1) * 6, safePage * 6);
-  function archiveRecords(ids: string[], reason: string) {
-    if (!reason.trim()) return;
-    setRecords((items) =>
-      items.map((r) =>
-        ids.includes(r.id) ? { ...r, archived: visibility !== "archived" } : r,
-      ),
-    );
-    records
-      .filter((r) => ids.includes(r.id))
-      .forEach((r) =>
-        log(
-          r.businessId,
-          visibility === "archived" ? "Record restored" : "Record archived",
-          reason,
-          r.id,
-        ),
-      );
-    setSelected([]);
-    setBulkReason("");
-    setNotice(
-      `${ids.length} records ${visibility === "archived" ? "restored" : "archived"} in this demo.`,
-    );
+
+  async function refreshAfterMutation() {
+    await loadCore();
+    if (view === "Records") await loadRegistry();
   }
-  function saveRecord(draft: CrmRecord, reason: string) {
-    setRecords((items) =>
-      items.map((r) =>
-        r.id === draft.id
-          ? {
-              ...r,
-              owner: draft.owner,
-              stage: draft.stage,
-              email: draft.email,
-              updated: CRM_SNAPSHOT,
-              due:
-                draft.stage === "Won" || draft.stage === "Lost"
-                  ? null
-                  : draft.due,
-            }
-          : r,
-      ),
-    );
-    log(
-      draft.businessId,
-      "Record corrected",
-      `Owner: ${draft.owner || "Unassigned"} · Stage: ${draft.stage} · Email: ${draft.email || "Missing"}. ${reason}`,
-      draft.id,
-    );
-    setNotice(`${draft.id} updated. Demo changes saved to the activity log.`);
-    setDetailId(null);
+
+  async function archiveRecords(ids: string[], reason: string) {
+    if (!reason.trim() || busy) return;
+    setBusy(true);
+    try {
+      const numericIds = ids.map(Number).filter((n) => Number.isFinite(n));
+      if (visibility === "archived") {
+        await restoreCrmEntries(numericIds, reason.trim());
+        setNotice(`${ids.length} records restored.`);
+      } else {
+        await archiveCrmEntries(numericIds, reason.trim());
+        setNotice(`${ids.length} records archived.`);
+      }
+      setSelected([]);
+      setBulkReason("");
+      await refreshAfterMutation();
+    } catch (err) {
+      setError(errMessage(err, "Unable to update selected records."));
+    } finally {
+      setBusy(false);
+    }
   }
-  function updateRecord(
-    id: string,
-    change: Partial<CrmRecord>,
-    action: string,
-    reason: string,
-  ) {
-    const record = records.find((r) => r.id === id);
-    if (!record) return;
-    setRecords((items) =>
-      items.map((r) =>
-        r.id === id ? { ...r, ...change, updated: CRM_SNAPSHOT } : r,
-      ),
-    );
-    log(record.businessId, action, reason, id);
-    setNotice(`${action} for ${id}. Demo change only.`);
+
+  async function saveRecord(draft: CrmRecord, reason: string) {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const payload: Record<string, unknown> & { reason: string } = {
+        reason,
+        email: draft.email.trim() || null,
+      };
+      if (draft.stageId) payload.stage_id = draft.stageId;
+      if (!draft.owner) payload.assigned_to_user_id = null;
+      await updateCrmEntry(draft.numericId, payload);
+      setNotice(`${draft.id} updated.`);
+      setDetailId(null);
+      await refreshAfterMutation();
+    } catch (err) {
+      setError(errMessage(err, "Unable to save record corrections."));
+    } finally {
+      setBusy(false);
+    }
   }
+
+  async function archiveOne(record: CrmRecord, reason: string) {
+    if (busy) return;
+    setBusy(true);
+    try {
+      if (record.archived) {
+        await restoreCrmEntries([record.numericId], reason);
+        setNotice(`Record ${record.id} restored.`);
+      } else {
+        await archiveCrmEntries([record.numericId], reason);
+        setNotice(`Record ${record.id} archived.`);
+      }
+      setDetailId(null);
+      await refreshAfterMutation();
+    } catch (err) {
+      setError(errMessage(err, "Unable to archive or restore record."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function addNote(record: CrmRecord, note: string) {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await createCrmEntryNote(record.numericId, note, note);
+      const stamped = {
+        text: note,
+        date: new Date().toISOString().slice(0, 10),
+        actor: "Platform admin",
+      };
+      const patch = (items: CrmRecord[]) =>
+        items.map((r) =>
+          r.id === record.id ? { ...r, notes: [...r.notes, stamped] } : r,
+        );
+      setRecords(patch);
+      setRegistry(patch);
+      setNotice(`Note added to ${record.id}.`);
+    } catch (err) {
+      setError(errMessage(err, "Unable to add note."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function dismissDuplicate(record: CrmRecord, reason: string) {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await dismissCrmDuplicate(record.numericId, reason);
+      setNotice(`Duplicate flag dismissed for ${record.id}.`);
+      setDetailId(null);
+      await refreshAfterMutation();
+    } catch (err) {
+      setError(errMessage(err, "Unable to dismiss duplicate flag."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function completeFollowUp(record: CrmRecord, reason: string) {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await completeCrmFollowUp(record.numericId, reason);
+      setNotice(`Follow-up completed for ${record.id}.`);
+      setDetailId(null);
+      await refreshAfterMutation();
+    } catch (err) {
+      setError(errMessage(err, "Unable to complete follow-up."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function exportRecords() {
     const rows = [
       [
@@ -248,10 +436,11 @@ export function AdminCrmView() {
         "Owner",
         "Stage",
         "Source",
-        "Estimated value EUR",
+        "Estimated value",
+        "Currency",
         "Archived",
       ],
-      ...filtered.map((r) => [
+      ...registry.map((r) => [
         r.id,
         name(r.businessId),
         r.company,
@@ -261,12 +450,13 @@ export function AdminCrmView() {
         r.stage,
         r.source,
         String(r.value),
+        r.currency,
         String(r.archived),
       ]),
     ];
     const csv = rows
       .map((row) =>
-        row.map((cell) => `"${cell.replaceAll('"', '""')}"`).join(","),
+        row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(","),
       )
       .join("\r\n");
     const url = URL.createObjectURL(
@@ -274,11 +464,57 @@ export function AdminCrmView() {
     );
     const a = document.createElement("a");
     a.href = url;
-    a.download = "admin-crm-demo-records.csv";
+    a.download = "admin-crm-records.csv";
     a.click();
     URL.revokeObjectURL(url);
-    setNotice(`Exported ${filtered.length} records from the current filters.`);
+    setNotice(`Exported ${registry.length} records from the current page.`);
   }
+
+  if (loading) {
+    return (
+      <div className="sl-root crm-root">
+        <header className="sl-page-head">
+          <div>
+            <h1>
+              CRM<span>.</span>
+            </h1>
+            <p>Loading client pipelines and records…</p>
+          </div>
+        </header>
+        <div className="sl-empty">Loading CRM workspace…</div>
+      </div>
+    );
+  }
+
+  if (error && !businesses.length && !records.length) {
+    return (
+      <div className="sl-root crm-root">
+        <header className="sl-page-head">
+          <div>
+            <h1>
+              CRM<span>.</span>
+            </h1>
+            <p>Unable to load the CRM workspace.</p>
+          </div>
+        </header>
+        <div className="sl-empty">
+          <CircleAlert size={30} />
+          <h3>{error}</h3>
+          <button type="button" onClick={() => void loadCore()}>
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const qualityCount =
+    overview?.quality_flags
+      ? overview.quality_flags.unassigned +
+        overview.quality_flags.missing_email +
+        overview.quality_flags.possible_duplicates
+      : flagged.length;
+
   return (
     <div className="sl-root crm-root">
       <header className="sl-page-head">
@@ -292,8 +528,8 @@ export function AdminCrmView() {
           </p>
         </div>
         <div className="sl-head-note">
-          <span className="sl-demo">Demo data</span> Admin workspace
-          <small>Snapshot · 13 Oct 2026</small>
+          <span className="sl-demo">Live data</span> Admin workspace
+          <small>Platform CRM oversight</small>
         </div>
       </header>
       <div className="sl-context">
@@ -313,7 +549,7 @@ export function AdminCrmView() {
             ))}
           </select>
         </div>
-        <span>Local demo changes · refresh resets the workspace</span>
+        <span>Changes require a reason and write to the admin audit trail</span>
       </div>
       <nav className="sl-tabs" aria-label="Admin CRM views">
         {tabs.map(({ name: tab, icon: Icon }) => (
@@ -325,7 +561,7 @@ export function AdminCrmView() {
           >
             <Icon size={16} />
             {tab}
-            {tab === "Data quality" && <span>{flagged.length}</span>}
+            {tab === "Data quality" && <span>{qualityCount}</span>}
           </button>
         ))}
       </nav>
@@ -341,6 +577,15 @@ export function AdminCrmView() {
           </button>
         </div>
       )}
+      {error && (
+        <div className="sl-notice" role="alert">
+          <CircleAlert size={16} />
+          {error}
+          <button aria-label="Dismiss error" onClick={() => setError("")}>
+            <X size={16} />
+          </button>
+        </div>
+      )}
       {view === "Overview" && (
         <>
           <div className="sl-metrics">
@@ -348,28 +593,25 @@ export function AdminCrmView() {
               {
                 label: "CLIENT WORKSPACES",
                 value: String(scopedBusinesses.length),
-                note: `${active.length} active CRM records`,
+                note: `${overview?.totals.entries ?? active.length} CRM records in scope`,
                 icon: Building2,
               },
               {
                 label: "OPEN PIPELINE",
-                value: money(
-                  open.reduce((sum, r) => sum + r.value, 0),
-                  true,
-                ),
-                note: `${open.length} deals · illustrative EUR value`,
+                value: money(openValue, true, openCurrency),
+                note: `${overview?.totals.open ?? open.length} open deals`,
                 icon: TrendingUp,
               },
               {
                 label: "CLOSED WIN RATE",
-                value: `${won.length + lost.length ? Math.round((won.length / (won.length + lost.length)) * 100) : 0}%`,
-                note: `${won.length} won / ${won.length + lost.length} closed deals`,
+                value: `${overview?.totals.win_rate ?? 0}%`,
+                note: `${overview?.totals.won ?? 0} won / ${(overview?.totals.won ?? 0) + (overview?.totals.lost ?? 0)} closed deals`,
                 icon: Check,
               },
               {
                 label: "RECORDS TO REVIEW",
-                value: String(flagged.length),
-                note: `${overdue.length} overdue client follow-ups`,
+                value: String(qualityCount),
+                note: `${overview?.quality_flags.stale ?? overdue.length} stale · ${overdue.length} overdue follow-ups`,
                 icon: CircleAlert,
               },
             ].map(({ label, value, note, icon: Icon }) => (
@@ -387,6 +629,7 @@ export function AdminCrmView() {
             key={scope}
             records={active}
             businesses={scopedBusinesses}
+            stages={businessStages.length ? businessStages : stages}
             onBusiness={inspectBusiness}
             onStage={inspectStage}
           />
@@ -423,6 +666,7 @@ export function AdminCrmView() {
                     const count = items.filter(
                       (r) => issuesFor(r).length > 0,
                     ).length;
+                    const currency = items[0]?.currency || "EUR";
                     return (
                       <tr key={b.id}>
                         <td>
@@ -445,6 +689,8 @@ export function AdminCrmView() {
                             items
                               .filter(isOpen)
                               .reduce((sum, r) => sum + r.value, 0),
+                            false,
+                            currency,
                           )}
                         </td>
                         <td>{items.filter(isOpen).length}</td>
@@ -453,7 +699,7 @@ export function AdminCrmView() {
                             {count ? `${count} flagged` : "Healthy"}
                           </Pill>
                         </td>
-                        <td>{items.filter(isOverdue).length}</td>
+                        <td>{items.filter((r) => isOverdue(r)).length}</td>
                         <td>
                           <button onClick={() => inspectBusiness(b.id)}>
                             Inspect <ChevronRight size={14} />
@@ -465,6 +711,9 @@ export function AdminCrmView() {
                 </tbody>
               </table>
             </div>
+            {!scopedBusinesses.length && (
+              <div className="sl-empty">No client businesses in this scope.</div>
+            )}
             <p className="sl-footnote">
               Open value excludes won, lost, and archived records. Win rate is
               won / (won + lost). Data quality counts flagged records once, even
@@ -473,7 +722,7 @@ export function AdminCrmView() {
           </section>
         </>
       )}
-      {view === "Client pipelines" && (
+      {view === "Client pipelines" && business && (
         <div className="sl-business-workspace">
           <aside className="sl-panel sl-business-list">
             <div className="sl-panel-head">
@@ -544,6 +793,8 @@ export function AdminCrmView() {
                     businessRecords
                       .filter(isOpen)
                       .reduce((sum, r) => sum + r.value, 0),
+                    false,
+                    businessRecords[0]?.currency || "EUR",
                   )}
                 </strong>
               </div>
@@ -563,24 +814,32 @@ export function AdminCrmView() {
               </div>
             </div>
             <div className="crm-pipeline-strip">
-              {CRM_STAGES.map((stageName) => {
+              {(businessStages.length
+                ? businessStages
+                : [{ id: 0, name: "No stages yet", slug: "" }]
+              ).map((stageOpt) => {
                 const items = businessRecords.filter(
-                  (r) => r.stage === stageName,
+                  (r) =>
+                    r.stageSlug === stageOpt.slug ||
+                    r.stage === stageOpt.name ||
+                    r.stageId === stageOpt.id,
                 );
                 return (
                   <button
-                    key={stageName}
+                    key={stageOpt.slug || stageOpt.name}
+                    disabled={!stageOpt.slug}
                     onClick={() => {
                       changeScope(business.id);
-                      inspectStage(stageName);
+                      inspectStage(stageOpt.slug || stageOpt.name);
                     }}
                   >
-                    <span>{stageName}</span>
+                    <span>{stageOpt.name}</span>
                     <strong>{items.length}</strong>
                     <small>
                       {money(
                         items.reduce((sum, r) => sum + r.value, 0),
                         true,
+                        items[0]?.currency || "EUR",
                       )}
                     </small>
                   </button>
@@ -592,16 +851,20 @@ export function AdminCrmView() {
               <Pill>{business.team.length} members</Pill>
             </div>
             <div className="crm-team">
-              {business.team.map((owner) => (
-                <div key={owner}>
-                  <Users size={16} />
-                  <strong>{owner}</strong>
-                  <span>
-                    {businessRecords.filter((r) => r.owner === owner).length}{" "}
-                    records
-                  </span>
-                </div>
-              ))}
+              {business.team.length ? (
+                business.team.map((owner) => (
+                  <div key={owner}>
+                    <Users size={16} />
+                    <strong>{owner}</strong>
+                    <span>
+                      {businessRecords.filter((r) => r.owner === owner).length}{" "}
+                      records
+                    </span>
+                  </div>
+                ))
+              ) : (
+                <div className="sl-empty">No team members listed for this client.</div>
+              )}
             </div>
             <div className="sl-subhead">
               <h3>Records needing attention</h3>
@@ -638,11 +901,18 @@ export function AdminCrmView() {
               </div>
             )}
             <p className="sl-footnote">
-              Stages are snapshots, not a funnel conversion rate. Review policy
-              determines stale-deal flags; it does not contact clients or change
-              their automations.
+              Stages come from each client’s CRM pipeline configuration. Review
+              policy determines stale-deal flags; it does not contact clients or
+              change their automations.
             </p>
           </section>
+        </div>
+      )}
+      {view === "Client pipelines" && !business && (
+        <div className="sl-empty">
+          <Building2 size={30} />
+          <h3>No client businesses yet</h3>
+          <p>Create organizations in Account Management to inspect pipelines.</p>
         </div>
       )}
       {view === "Records" && (
@@ -680,8 +950,10 @@ export function AdminCrmView() {
               }}
             >
               <option value="all">All stages</option>
-              {CRM_STAGES.map((s) => (
-                <option key={s}>{s}</option>
+              {stages.map((s) => (
+                <option key={s.slug} value={s.slug}>
+                  {s.name}
+                </option>
               ))}
             </select>
             <select
@@ -693,8 +965,10 @@ export function AdminCrmView() {
               }}
             >
               <option value="all">All sources</option>
-              {CRM_SOURCES.map((s) => (
-                <option key={s}>{s}</option>
+              {sources.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
               ))}
             </select>
             <select
@@ -730,8 +1004,8 @@ export function AdminCrmView() {
                 onChange={(e) => setBulkReason(e.target.value)}
               />
               <button
-                disabled={!bulkReason.trim()}
-                onClick={() => archiveRecords(selected, bulkReason)}
+                disabled={!bulkReason.trim() || busy}
+                onClick={() => void archiveRecords(selected, bulkReason)}
               >
                 <Archive size={15} />
                 {visibility === "archived"
@@ -750,12 +1024,12 @@ export function AdminCrmView() {
                       type="checkbox"
                       aria-label="Select all filtered CRM records"
                       checked={
-                        filtered.length > 0 &&
-                        filtered.every((r) => selected.includes(r.id))
+                        registry.length > 0 &&
+                        registry.every((r) => selected.includes(r.id))
                       }
                       onChange={(e) =>
                         setSelected(
-                          e.target.checked ? filtered.map((r) => r.id) : [],
+                          e.target.checked ? registry.map((r) => r.id) : [],
                         )
                       }
                     />
@@ -769,7 +1043,7 @@ export function AdminCrmView() {
                 </tr>
               </thead>
               <tbody>
-                {pageRecords.map((r) => (
+                {registry.map((r) => (
                   <tr key={r.id}>
                     <td>
                       <input
@@ -797,7 +1071,7 @@ export function AdminCrmView() {
                       <small>{r.source}</small>
                     </td>
                     <td>
-                      <Pill tone={r.stage === "Won" ? "mint" : "neutral"}>
+                      <Pill tone={isWonStage(r) ? "mint" : "neutral"}>
                         {r.stage}
                       </Pill>
                       <small>
@@ -808,7 +1082,7 @@ export function AdminCrmView() {
                             : "No follow-up due"}
                       </small>
                     </td>
-                    <td>{money(r.value)}</td>
+                    <td>{money(r.value, false, r.currency)}</td>
                     <td>
                       {issuesFor(r).length ? (
                         <Pill tone="amber">{issuesFor(r).length} issues</Pill>
@@ -828,7 +1102,10 @@ export function AdminCrmView() {
               </tbody>
             </table>
           </div>
-          {!filtered.length && (
+          {registryLoading && (
+            <div className="sl-empty">Loading records…</div>
+          )}
+          {!registryLoading && !registry.length && (
             <div className="sl-empty">
               <Database size={30} />
               <h3>No records match these filters</h3>
@@ -848,24 +1125,27 @@ export function AdminCrmView() {
           )}
           <div className="sl-pagination">
             <span>
-              {filtered.length
-                ? `${(safePage - 1) * 6 + 1}–${Math.min(safePage * 6, filtered.length)}`
+              {registryMeta.total
+                ? `${(registryMeta.current_page - 1) * registryMeta.per_page + 1}–${Math.min(registryMeta.current_page * registryMeta.per_page, registryMeta.total)}`
                 : "0"}{" "}
-              of {filtered.length} records
+              of {registryMeta.total} records
             </span>
             <div>
               <button
-                disabled={safePage === 1}
-                onClick={() => setPage(safePage - 1)}
+                disabled={registryMeta.current_page <= 1 || registryLoading}
+                onClick={() => setPage(registryMeta.current_page - 1)}
               >
                 Previous
               </button>
               <span>
-                {safePage} / {pages}
+                {registryMeta.current_page} / {registryMeta.last_page || 1}
               </span>
               <button
-                disabled={safePage === pages}
-                onClick={() => setPage(safePage + 1)}
+                disabled={
+                  registryMeta.current_page >= registryMeta.last_page ||
+                  registryLoading
+                }
+                onClick={() => setPage(registryMeta.current_page + 1)}
               >
                 Next
               </button>
@@ -973,7 +1253,7 @@ export function AdminCrmView() {
           )}
           <p className="sl-footnote">
             Duplicate candidates are compared only within the same client.
-            Dismissing a flag keeps both records separate. This prototype does
+            Dismissing a flag keeps both records separate. This workspace does
             not merge or permanently delete records.
           </p>
         </section>
@@ -1061,7 +1341,10 @@ export function AdminCrmView() {
                       </strong>
                       <p>{a.detail}</p>
                       <small>
-                        {name(a.businessId)} · {a.actor}
+                        {a.businessId !== "all"
+                          ? `${name(a.businessId)} · `
+                          : ""}
+                        {a.actor}
                       </small>
                     </div>
                     <time>{a.date}</time>
@@ -1082,78 +1365,58 @@ export function AdminCrmView() {
         <CrmRecordDrawer
           key={detail.id}
           record={detail}
-          business={businesses.find((b) => b.id === detail.businessId)!}
+          business={
+            businesses.find((b) => b.id === detail.businessId) ?? {
+              id: detail.businessId,
+              name: name(detail.businessId),
+              industry: "—",
+              owner: "",
+              team: detail.owner ? [detail.owner] : [],
+              pipeline: detail.stage,
+              staleDays: 7,
+            }
+          }
+          stages={stages}
           duplicate={records.find(
             (r) =>
-              r.id === detail.duplicateOf && r.businessId === detail.businessId,
+              detail.duplicateOf &&
+              (r.id === detail.duplicateOf ||
+                r.numericId === Number(detail.duplicateOf)) &&
+              r.businessId === detail.businessId,
           )}
           onClose={() => setDetailId(null)}
-          onSave={saveRecord}
-          onArchive={(reason) => {
-            updateRecord(
-              detail.id,
-              { archived: !detail.archived },
-              detail.archived ? "Record restored" : "Record archived",
-              reason,
-            );
-            setDetailId(null);
-          }}
-          onNote={(note) =>
-            updateRecord(
-              detail.id,
-              {
-                notes: [
-                  ...detail.notes,
-                  { text: note, date: CRM_SNAPSHOT, actor: "Kwame Smith" },
-                ],
-              },
-              "Admin note added",
-              note,
-            )
-          }
-          onDuplicate={(reason) => {
-            updateRecord(
-              detail.id,
-              { duplicateReviewed: true },
-              "Duplicate flag dismissed",
-              reason,
-            );
-            setDetailId(null);
-          }}
-          onFollowup={(reason) => {
-            updateRecord(
-              detail.id,
-              { due: null },
-              "Follow-up completed",
-              reason,
-            );
-            setDetailId(null);
-          }}
+          onSave={(draft, reason) => void saveRecord(draft, reason)}
+          onArchive={(reason) => void archiveOne(detail, reason)}
+          onNote={(note) => void addNote(detail, note)}
+          onDuplicate={(reason) => void dismissDuplicate(detail, reason)}
+          onFollowup={(reason) => void completeFollowUp(detail, reason)}
         />
       )}
       {policy && (
         <PolicyDialog
           business={policy}
           onClose={() => setPolicyId(null)}
-          onSave={(days, reason) => {
-            setBusinesses((items) =>
-              items.map((b) =>
-                b.id === policy.id ? { ...b, staleDays: days } : b,
-              ),
-            );
-            log(
-              policy.id,
-              "Review policy updated",
-              `Stale deal threshold: ${days} days. ${reason}`,
-            );
-            setPolicyId(null);
-            setNotice(`Review policy updated for ${policy.name}. Demo only.`);
+          onSave={async (days, reason) => {
+            try {
+              await updateCrmReviewPolicy(Number(policy.id), days, reason);
+              setBusinesses((items) =>
+                items.map((b) =>
+                  b.id === policy.id ? { ...b, staleDays: days } : b,
+                ),
+              );
+              setPolicyId(null);
+              setNotice(`Review policy updated for ${policy.name}.`);
+              await loadCore();
+            } catch (err) {
+              setError(errMessage(err, "Unable to update review policy."));
+            }
           }}
         />
       )}
     </div>
   );
 }
+
 function PolicyDialog({
   business,
   onClose,
@@ -1161,11 +1424,12 @@ function PolicyDialog({
 }: {
   business: CrmBusiness;
   onClose: () => void;
-  onSave: (days: number, reason: string) => void;
+  onSave: (days: number, reason: string) => void | Promise<void>;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const [days, setDays] = useState(business.staleDays);
   const [reason, setReason] = useState("");
+  const [saving, setSaving] = useState(false);
   useEffect(() => {
     ref.current?.showModal();
     const el = ref.current;
@@ -1191,7 +1455,10 @@ function PolicyDialog({
         className="sl-dialog-body"
         onSubmit={(e) => {
           e.preventDefault();
-          onSave(days, reason.trim());
+          setSaving(true);
+          void Promise.resolve(onSave(days, reason.trim())).finally(() =>
+            setSaving(false),
+          );
         }}
       >
         <p>
@@ -1223,7 +1490,7 @@ function PolicyDialog({
           <button
             className="sl-primary"
             type="submit"
-            disabled={!reason.trim()}
+            disabled={!reason.trim() || saving}
           >
             Save review policy
           </button>

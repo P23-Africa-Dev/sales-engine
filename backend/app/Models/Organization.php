@@ -11,6 +11,8 @@ class Organization extends Model
     protected $fillable = [
         'name',
         'slug',
+        'status',
+        'industry',
         'country',
         'team_size',
         'purpose',
@@ -19,6 +21,7 @@ class Organization extends Model
         'search_limit_monthly',
         'outreach_email_limit_monthly',
         'enrichment_limit_monthly',
+        'crm_stale_days',
         'f23_company_id',
         'factory23_crm_sync_enabled',
         'f23_api_token',
@@ -35,6 +38,7 @@ class Organization extends Model
             'search_limit_monthly' => 'integer',
             'outreach_email_limit_monthly' => 'integer',
             'enrichment_limit_monthly' => 'integer',
+            'crm_stale_days' => 'integer',
         ];
     }
 

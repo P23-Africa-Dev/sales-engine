@@ -6,6 +6,7 @@ use App\Mail\OrganizationInvitationMail;
 use App\Models\Organization;
 use App\Models\OrganizationInvitation;
 use App\Models\OrganizationUser;
+use App\Models\PlatformAdmin;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -20,6 +21,28 @@ class InvitationService
      */
     public function create(Organization $organization, User $inviter, string $email, string $role): array
     {
+        return $this->createInvitation($organization, $email, $role, $inviter->id);
+    }
+
+    /**
+     * Platform-admin provisioning: invite an owner without a client-user inviter.
+     *
+     * @return array{invitation: OrganizationInvitation, token: string}
+     */
+    public function createFromPlatformAdmin(Organization $organization, PlatformAdmin $admin, string $email, string $role = 'owner'): array
+    {
+        return $this->createInvitation($organization, $email, $role, null);
+    }
+
+    /**
+     * @return array{invitation: OrganizationInvitation, token: string}
+     */
+    private function createInvitation(
+        Organization $organization,
+        string $email,
+        string $role,
+        ?int $invitedByUserId,
+    ): array {
         $email = mb_strtolower(trim($email));
         $token = Str::random(48);
 
@@ -28,7 +51,7 @@ class InvitationService
             'email' => $email,
             'role' => $role,
             'token_hash' => hash('sha256', $token),
-            'invited_by_user_id' => $inviter->id,
+            'invited_by_user_id' => $invitedByUserId,
             'expires_at' => now()->addDays(7),
         ]);
 

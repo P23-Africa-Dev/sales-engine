@@ -133,7 +133,9 @@ export function ListeningAnalytics({
   const [hoverBusiness, setHoverBusiness] = useState<string | null>(null);
   const [hoverStage, setHoverStage] = useState<number | null>(null);
   const gradientId = `signal-area-${useId().replaceAll(":", "")}`;
-  const snapshot = "2026-10-09";
+  const snapshot =
+    signals.reduce((max, s) => (s.date && s.date > max ? s.date : max), "") ||
+    new Date().toISOString().slice(0, 10);
   const end = new Date(`${snapshot}T00:00:00Z`);
   const daily = Array.from({ length: days }, (_, i) => {
     const date = new Date(end);
@@ -206,7 +208,7 @@ export function ListeningAnalytics({
             <span>signals captured</span>
           </div>
           <span className="sla-date-range">
-            {shortDate(daily[0].date)} — {shortDate(snapshot)} 2026
+            {shortDate(daily[0].date)} — {shortDate(snapshot)}
           </span>
           <div className="sla-legends">
             <Legend label="Captured" color="#784880" />

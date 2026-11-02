@@ -38,6 +38,7 @@ class SocialListeningSetting extends Model
         'org_verified_domain',
         'verification_status',
         'last_run_at',
+        'admin_paused_at',
     ];
 
     protected function casts(): array
@@ -48,6 +49,7 @@ class SocialListeningSetting extends Model
             'intent_filters' => 'array',
             'icp_filter_enabled' => 'boolean',
             'last_run_at' => 'datetime',
+            'admin_paused_at' => 'datetime',
         ];
     }
 

@@ -2,16 +2,19 @@
 import { useEffect, useRef, useState } from "react";
 import { Check, CopyCheck, Archive, RotateCcw, X } from "lucide-react";
 import {
-  CRM_STAGES,
   dateLabel,
+  isClosedStage,
   issuesFor,
   money,
   type CrmBusiness,
   type CrmRecord,
+  type CrmStageOption,
 } from "@/lib/admin-crm";
+
 export function CrmRecordDrawer({
   record,
   business,
+  stages,
   duplicate,
   onClose,
   onSave,
@@ -22,6 +25,7 @@ export function CrmRecordDrawer({
 }: {
   record: CrmRecord;
   business: CrmBusiness;
+  stages: CrmStageOption[];
   duplicate?: CrmRecord;
   onClose: () => void;
   onSave: (draft: CrmRecord, reason: string) => void;
@@ -39,6 +43,25 @@ export function CrmRecordDrawer({
     const el = dialog.current;
     return () => el?.close();
   }, []);
+
+  const stageChoices = stages.length
+    ? stages
+    : record.stageId
+      ? [
+          {
+            id: record.stageId,
+            name: record.stage,
+            slug: record.stageSlug || record.stage,
+          },
+        ]
+      : [];
+
+  const teamOptions = Array.from(
+    new Set(
+      [...business.team, record.owner, draft.owner].filter(Boolean) as string[],
+    ),
+  );
+
   const issues = issuesFor(record);
   return (
     <dialog
@@ -70,7 +93,8 @@ export function CrmRecordDrawer({
           <div>
             <h3>{record.company}</h3>
             <p>
-              {record.contact} · {record.role}
+              {record.contact}
+              {record.role ? ` · ${record.role}` : ""}
             </p>
           </div>
           <span className="sl-badge">
@@ -84,7 +108,7 @@ export function CrmRecordDrawer({
           </div>
           <div>
             <small>ESTIMATED DEAL VALUE</small>
-            <strong>{money(record.value)}</strong>
+            <strong>{money(record.value, false, record.currency)}</strong>
           </div>
           <div>
             <small>CAPTURE SOURCE</small>
@@ -120,24 +144,35 @@ export function CrmRecordDrawer({
                 onChange={(e) => setDraft({ ...draft, owner: e.target.value })}
               >
                 <option value="">Unassigned</option>
-                {business.team.map((owner) => (
-                  <option key={owner}>{owner}</option>
+                {teamOptions.map((owner) => (
+                  <option key={owner} value={owner}>
+                    {owner}
+                  </option>
                 ))}
               </select>
             </label>
             <label className="sl-field">
               Pipeline stage
               <select
-                value={draft.stage}
-                onChange={(e) =>
+                value={draft.stageId ? String(draft.stageId) : ""}
+                onChange={(e) => {
+                  const selected = stageChoices.find(
+                    (s) => String(s.id) === e.target.value,
+                  );
+                  if (!selected) return;
                   setDraft({
                     ...draft,
-                    stage: e.target.value as CrmRecord["stage"],
-                  })
-                }
+                    stageId: selected.id,
+                    stage: selected.name,
+                    stageSlug: selected.slug,
+                  });
+                }}
               >
-                {CRM_STAGES.map((stage) => (
-                  <option key={stage}>{stage}</option>
+                {!draft.stageId && <option value="">Select stage</option>}
+                {stageChoices.map((stage) => (
+                  <option key={stage.id} value={String(stage.id)}>
+                    {stage.name}
+                  </option>
                 ))}
               </select>
             </label>
@@ -182,23 +217,20 @@ export function CrmRecordDrawer({
             </button>
           </div>
         </form>
-        {record.due &&
-          !record.archived &&
-          record.stage !== "Won" &&
-          record.stage !== "Lost" && (
-            <section className="crm-drawer-section">
-              <h4>Client follow-up</h4>
-              <p>{record.nextAction}</p>
-              <p>Due {dateLabel(record.due)}</p>
-              <button
-                disabled={!reason.trim()}
-                onClick={() => onFollowup(reason.trim())}
-              >
-                Mark follow-up complete
-              </button>
-            </section>
-          )}
-        {duplicate && !record.duplicateReviewed && (
+        {record.due && !record.archived && !isClosedStage(record) && (
+          <section className="crm-drawer-section">
+            <h4>Client follow-up</h4>
+            <p>{record.nextAction}</p>
+            <p>Due {dateLabel(record.due)}</p>
+            <button
+              disabled={!reason.trim()}
+              onClick={() => onFollowup(reason.trim())}
+            >
+              Mark follow-up complete
+            </button>
+          </section>
+        )}
+        {record.duplicateOf && (
           <section className="crm-drawer-section">
             <h4>Potential duplicate in this workspace</h4>
             <div className="crm-duplicate-pair">
@@ -208,9 +240,12 @@ export function CrmRecordDrawer({
                 <small>{record.email || "Missing email"}</small>
               </div>
               <div>
-                <strong>{duplicate.id}</strong>
-                <p>{duplicate.contact}</p>
-                <small>{duplicate.email || "Missing email"}</small>
+                <strong>{duplicate?.id || record.duplicateOf}</strong>
+                <p>{duplicate?.contact || "Linked duplicate"}</p>
+                <small>
+                  {duplicate?.email ||
+                    (duplicate ? "Missing email" : `Ref ${record.duplicateOf}`)}
+                </small>
               </div>
             </div>
             <p>
@@ -235,6 +270,9 @@ export function CrmRecordDrawer({
               </small>
             </article>
           ))}
+          {!record.notes.length && (
+            <p className="sl-footnote">No notes loaded for this record yet.</p>
+          )}
           <label className="sl-field">
             Add admin review note
             <textarea
@@ -254,8 +292,9 @@ export function CrmRecordDrawer({
           </button>
         </section>
         <p className="sl-footnote">
-          Demo changes only. No client email is sent. Archiving retains the
-          record and can be reversed from Records → Archived.
+          Management actions require a reason and are written to the admin audit
+          trail. Archiving retains the record and can be reversed from Records →
+          Archived.
         </p>
       </div>
     </dialog>

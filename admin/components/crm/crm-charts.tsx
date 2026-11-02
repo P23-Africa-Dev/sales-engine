@@ -9,16 +9,17 @@ import {
 } from "react";
 import { ArrowUpRight } from "lucide-react";
 import {
-  CRM_SNAPSHOT,
-  CRM_SOURCES,
-  CRM_STAGES,
   dateLabel,
   daysBefore,
   isOpen,
+  isWonStage,
   money,
+  todayIso,
   type CrmBusiness,
   type CrmRecord,
+  type CrmStageOption,
 } from "@/lib/admin-crm";
+
 export function ChartPanel({
   className = "",
   children,
@@ -50,6 +51,7 @@ export function ChartPanel({
     </section>
   );
 }
+
 export function ChartTooltip({
   children,
   style,
@@ -63,6 +65,7 @@ export function ChartTooltip({
     </span>
   );
 }
+
 function Legend({ label, color }: { label: string; color: string }) {
   return (
     <span className="crm-legend">
@@ -71,6 +74,7 @@ function Legend({ label, color }: { label: string; color: string }) {
     </span>
   );
 }
+
 function ChartData({
   headers,
   rows,
@@ -104,6 +108,7 @@ function ChartData({
     </details>
   );
 }
+
 function curve(points: { x: number; y: number }[]) {
   return points.reduce((path, p, i) => {
     if (!i) return `M ${p.x} ${p.y}`;
@@ -112,14 +117,17 @@ function curve(points: { x: number; y: number }[]) {
     return `${path} C ${m} ${prev.y}, ${m} ${p.y}, ${p.x} ${p.y}`;
   }, "");
 }
+
 export function CrmCharts({
   records,
   businesses,
+  stages,
   onBusiness,
   onStage,
 }: {
   records: CrmRecord[];
   businesses: CrmBusiness[];
+  stages: CrmStageOption[];
   onBusiness: (id: string) => void;
   onStage: (stage: string) => void;
 }) {
@@ -129,22 +137,28 @@ export function CrmCharts({
   const [clientPoint, setClientPoint] = useState<string | null>(null);
   const [stagePoint, setStagePoint] = useState<string | null>(null);
   const id = useId().replaceAll(":", "");
+  const snapshot = todayIso();
   const data = Array.from({ length: period }, (_, i) => {
-    const date = daysBefore(period - 1 - i);
+    const date = daysBefore(period - 1 - i, new Date(`${snapshot}T00:00:00Z`));
     const matches = records.filter((r) => r.created === date);
     return { date, total: matches.length, open: matches.filter(isOpen).length };
   });
   const max = Math.max(4, ...data.map((d) => d.total));
-  const x = (i: number) => 44 + (608 * i) / (period - 1);
+  const x = (i: number) => 44 + (608 * i) / Math.max(1, period - 1);
   const y = (count: number) => 205 - (count / max) * 160;
   const total = curve(data.map((d, i) => ({ x: x(i), y: y(d.total) })));
   const active = point === null ? null : data[point];
-  const palette = ["#2ae9c9", "#d88bec", "#f4c789"];
-  const sources = CRM_SOURCES.map((source, i) => ({
-    source,
-    count: records.filter((r) => r.source === source).length,
-    color: palette[i],
-  }));
+  const palette = ["#2ae9c9", "#d88bec", "#f4c789", "#7aa2f7", "#f29b76"];
+  const sourceNames = Array.from(
+    new Set(records.map((r) => r.source).filter((s) => s && s !== "—")),
+  );
+  const sources = (sourceNames.length ? sourceNames : ["Unknown"]).map(
+    (source, i) => ({
+      source,
+      count: records.filter((r) => r.source === source).length,
+      color: palette[i % palette.length],
+    }),
+  );
   const sourceStarts = sources.map((_, index) =>
     sources
       .slice(0, index)
@@ -152,17 +166,39 @@ export function CrmCharts({
   );
   const clients = businesses.map((b) => {
     const matches = records.filter((r) => r.businessId === b.id);
+    const currency = matches[0]?.currency || "EUR";
     return {
       ...b,
+      currency,
       open: matches.filter(isOpen).reduce((sum, r) => sum + r.value, 0),
       won: matches
-        .filter((r) => r.stage === "Won")
+        .filter((r) => isWonStage(r))
         .reduce((sum, r) => sum + r.value, 0),
     };
   });
   const valueMax = Math.max(1, ...clients.flatMap((c) => [c.open, c.won]));
   const openRecords = records.filter(isOpen);
+  const openStages = (
+    stages.length
+      ? stages.filter((s) => {
+          const slug = s.slug.toLowerCase();
+          return slug !== "won" && slug !== "lost";
+        })
+      : Array.from(
+          new Map(
+            openRecords.map((r) => [
+              r.stageSlug || r.stage,
+              {
+                id: r.stageId || 0,
+                name: r.stage,
+                slug: r.stageSlug || r.stage,
+              },
+            ]),
+          ).values(),
+        )
+  ).slice(0, 6);
   const key = records.map((r) => `${r.id}:${r.stage}:${r.value}`).join("|");
+  const chartCurrency = records[0]?.currency || "EUR";
   return (
     <div className="crm-analytics-grid">
       <ChartPanel className="crm-capture-chart">
@@ -190,7 +226,7 @@ export function CrmCharts({
           <strong>{data.reduce((sum, d) => sum + d.total, 0)}</strong>
           <span>records created</span>
           <small>
-            {dateLabel(data[0].date)} — {dateLabel(CRM_SNAPSHOT)} 2026
+            {dateLabel(data[0]?.date || snapshot)} — {dateLabel(snapshot)}
           </small>
         </div>
         <div className="crm-legends">
@@ -309,7 +345,7 @@ export function CrmCharts({
           </div>
         </div>
         <div className="crm-donut">
-          {sourcePoint !== null && (
+          {sourcePoint !== null && sources[sourcePoint] && (
             <ChartTooltip>
               <strong>{sources[sourcePoint].source}</strong>
               <span>
@@ -372,12 +408,12 @@ export function CrmCharts({
             <strong>
               {sourcePoint === null
                 ? records.length
-                : sources[sourcePoint].count}
+                : sources[sourcePoint]?.count || 0}
             </strong>
             <span>
               {sourcePoint === null
                 ? "active records"
-                : sources[sourcePoint].source}
+                : sources[sourcePoint]?.source}
             </span>
           </div>
         </div>
@@ -416,67 +452,92 @@ export function CrmCharts({
           <span className="sl-badge">{openRecords.length} open</span>
         </div>
         <div className="crm-stage-bars">
-          {CRM_STAGES.slice(0, 4).map((stage, i) => {
-            const matches = openRecords.filter((r) => r.stage === stage);
+          {openStages.map((stage, i) => {
+            const matches = openRecords.filter(
+              (r) =>
+                r.stageSlug === stage.slug ||
+                r.stage === stage.name ||
+                r.stageId === stage.id,
+            );
             const share =
               (matches.length / Math.max(1, openRecords.length)) * 100;
             return (
               <button
-                key={stage}
+                key={stage.slug || stage.name}
                 className="crm-stage-row"
-                onClick={() => onStage(stage)}
-                onMouseEnter={() => setStagePoint(stage)}
+                onClick={() => onStage(stage.slug || stage.name)}
+                onMouseEnter={() => setStagePoint(stage.name)}
                 onMouseLeave={() => setStagePoint(null)}
-                onFocus={() => setStagePoint(stage)}
+                onFocus={() => setStagePoint(stage.name)}
                 onBlur={() => setStagePoint(null)}
-                aria-label={`Inspect ${stage}: ${matches.length} open records`}
+                aria-label={`Inspect ${stage.name}: ${matches.length} open records`}
               >
-                {stagePoint === stage && (
+                {stagePoint === stage.name && (
                   <ChartTooltip>
-                    <strong>{stage}</strong>
+                    <strong>{stage.name}</strong>
                     <span>
                       {matches.length} records · {Math.round(share)}%
                     </span>
                     <span>
-                      {money(matches.reduce((sum, r) => sum + r.value, 0))}{" "}
+                      {money(
+                        matches.reduce((sum, r) => sum + r.value, 0),
+                        false,
+                        matches[0]?.currency || chartCurrency,
+                      )}{" "}
                       estimated value
                     </span>
                   </ChartTooltip>
                 )}
                 <span className="crm-stage-label">
-                  <strong>{stage}</strong>
+                  <strong>{stage.name}</strong>
                   <span>
                     {matches.length} records <ArrowUpRight size={13} />
                   </span>
                 </span>
                 <span className="crm-stage-track">
                   <span
-                    key={`${stage}-${matches.length}`}
+                    key={`${stage.slug}-${matches.length}`}
                     className="crm-animated"
                     style={{
                       width: `${share}%`,
-                      background: ["#c5abd3", "#a788b7", "#9561a6", "#673c72"][
-                        i
+                      background: ["#c5abd3", "#a788b7", "#9561a6", "#673c72", "#4f2f58", "#3a2342"][
+                        i % 6
                       ],
                     }}
                   />
                 </span>
                 <small>
-                  {money(matches.reduce((sum, r) => sum + r.value, 0))} ·{" "}
-                  {Math.round(share)}% of open records
+                  {money(
+                    matches.reduce((sum, r) => sum + r.value, 0),
+                    false,
+                    matches[0]?.currency || chartCurrency,
+                  )}{" "}
+                  · {Math.round(share)}% of open records
                 </small>
               </button>
             );
           })}
+          {!openStages.length && (
+            <p className="sl-empty">No open pipeline stages in this scope.</p>
+          )}
         </div>
         <ChartData
           headers={["Stage", "Open records", "Estimated value"]}
-          rows={CRM_STAGES.slice(0, 4).map((stage) => {
-            const matches = openRecords.filter((r) => r.stage === stage);
+          rows={openStages.map((stage) => {
+            const matches = openRecords.filter(
+              (r) =>
+                r.stageSlug === stage.slug ||
+                r.stage === stage.name ||
+                r.stageId === stage.id,
+            );
             return [
-              stage,
+              stage.name,
               matches.length,
-              money(matches.reduce((sum, r) => sum + r.value, 0)),
+              money(
+                matches.reduce((sum, r) => sum + r.value, 0),
+                false,
+                matches[0]?.currency || chartCurrency,
+              ),
             ];
           })}
         />
@@ -502,16 +563,16 @@ export function CrmCharts({
               onMouseLeave={() => setClientPoint(null)}
               onFocus={() => setClientPoint(c.id)}
               onBlur={() => setClientPoint(null)}
-              aria-label={`Inspect ${c.name}: ${money(c.open)} open, ${money(c.won)} won`}
+              aria-label={`Inspect ${c.name}: ${money(c.open, false, c.currency)} open, ${money(c.won, false, c.currency)} won`}
             >
               {clientPoint === c.id && (
                 <ChartTooltip>
                   <strong>{c.name}</strong>
-                  <span>Open: {money(c.open)}</span>
-                  <span>Won: {money(c.won)}</span>
+                  <span>Open: {money(c.open, false, c.currency)}</span>
+                  <span>Won: {money(c.won, false, c.currency)}</span>
                 </ChartTooltip>
               )}
-              <strong>{money(c.open, true)}</strong>
+              <strong>{money(c.open, true, c.currency)}</strong>
               <span className="crm-bar-pair">
                 <span
                   key={`${c.id}-open-${c.open}`}
@@ -537,11 +598,15 @@ export function CrmCharts({
             </button>
           ))}
         </div>
+        {!clients.length && (
+          <p className="sl-empty">No client businesses in this scope.</p>
+        )}
         <p className="crm-value-note">
-          All values are illustrative EUR amounts, not booked revenue.
+          Values use each entry’s currency from the CRM pipeline; mixed
+          currencies are shown without FX conversion.
         </p>
         <ChartData
-          headers={["Client", "Open pipeline (EUR)", "Closed won (EUR)"]}
+          headers={["Client", "Open pipeline", "Closed won"]}
           rows={clients.map((c) => [c.name, c.open, c.won])}
         />
       </ChartPanel>

@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Check, Mail, Phone, ShieldCheck, X } from "lucide-react";
 import type { SmartLead } from "@/lib/smart-leads";
+
 interface Props {
   isOpen: boolean;
   onClose: () => void;
@@ -9,8 +10,10 @@ interface Props {
   onEnroll: (lead: SmartLead) => void;
   businessName: string;
   notes: string[];
-  onAddNote: (note: string) => void;
+  loading?: boolean;
+  onAddNote: (note: string) => void | Promise<void>;
 }
+
 export function ProspectDrawer({
   isOpen,
   onClose,
@@ -18,28 +21,37 @@ export function ProspectDrawer({
   onEnroll,
   businessName,
   notes,
+  loading = false,
   onAddNote,
 }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
   const [tab, setTab] = useState("all");
   const [note, setNote] = useState("");
+  const [savingNote, setSavingNote] = useState(false);
+  const [noteError, setNoteError] = useState("");
+
   useEffect(() => {
     const el = ref.current;
     if (isOpen && prospect) el?.showModal();
     else el?.close();
     return () => el?.close();
   }, [isOpen, prospect?.id]);
+
   useEffect(() => {
     setTab("all");
     setNote("");
+    setNoteError("");
   }, [prospect?.id]);
+
   if (!prospect) return null;
+
   const activity = prospect.activities.filter(
     (a) =>
       tab === "all" ||
       (tab === "emails" && a.type === "email") ||
       (tab === "signals" && a.type === "signal"),
   );
+
   return (
     <dialog
       ref={ref}
@@ -62,6 +74,9 @@ export function ProspectDrawer({
         </button>
       </div>
       <div className="sl-dialog-body">
+        {loading && (
+          <p className="sl-footnote">Refreshing live lead detail…</p>
+        )}
         <h3>{prospect.company}</h3>
         <p>
           {prospect.industry} · {prospect.location}
@@ -149,20 +164,28 @@ export function ProspectDrawer({
         {(tab === "all" || tab === "notes") && (
           <section className="sp-notes">
             <h4>Admin notes</h4>
-            {notes.map((n, i) => (
-              <article key={i}>
-                <p>{n}</p>
-                <small>Admin review · local demo</small>
-              </article>
-            ))}
+            {notes.map((n, i) => {
+              const [body, meta] = n.split("\n");
+              return (
+                <article key={i}>
+                  <p>{body}</p>
+                  <small>{meta || "Admin review"}</small>
+                </article>
+              );
+            })}
             {!notes.length && <p>No admin notes yet.</p>}
             <form
               onSubmit={(e) => {
                 e.preventDefault();
-                if (note.trim()) {
-                  onAddNote(note.trim());
-                  setNote("");
-                }
+                if (!note.trim() || savingNote) return;
+                setSavingNote(true);
+                setNoteError("");
+                void Promise.resolve(onAddNote(note.trim()))
+                  .then(() => setNote(""))
+                  .catch(() =>
+                    setNoteError("Unable to save note. Try again."),
+                  )
+                  .finally(() => setSavingNote(false));
               }}
             >
               <label className="sl-field">
@@ -171,22 +194,24 @@ export function ProspectDrawer({
                   placeholder="Capture your review findings…"
                   value={note}
                   onChange={(e) => setNote(e.target.value)}
+                  disabled={savingNote}
                 />
               </label>
-              <button type="submit" disabled={!note.trim()}>
-                <Check size={15} /> Save note
+              {noteError && <p className="sl-footnote">{noteError}</p>}
+              <button type="submit" disabled={!note.trim() || savingNote}>
+                <Check size={15} /> {savingNote ? "Saving…" : "Save note"}
               </button>
             </form>
           </section>
         )}
         <div className="sl-dialog-actions">
           <button className="sl-primary" onClick={() => onEnroll(prospect)}>
-            Prepare demo enrollment <Mail size={16} />
+            Prepare for client outreach <Mail size={16} />
           </button>
         </div>
         <p className="sl-footnote">
-          Sample evidence and contact data. Notes and enrollment are local to
-          this page session and reset on refresh.
+          Notes persist to the lead record. Preparing outreach marks the lead
+          for the client and does not send messages.
         </p>
       </div>
     </dialog>

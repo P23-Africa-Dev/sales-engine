@@ -1,7 +1,5 @@
 export type Account = {
   id: string;
-  username: string;
-  password: string;
   companyName: string;
   industry: string;
   created: string;
@@ -10,9 +8,16 @@ export type Account = {
   avatarColor: string;
   country: string;
   owner: string;
+  ownerEmail: string;
   scope: string;
 };
-export type AccountInput = Omit<
-  Account,
-  "id" | "created" | "status" | "avatarColor"
->;
+
+export type AccountInput = {
+  companyName: string;
+  industry: string;
+  country: string;
+  owner: string;
+  ownerEmail: string;
+  scope: string;
+  prospectPool?: number;
+};

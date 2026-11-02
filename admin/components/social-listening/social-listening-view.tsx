@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Activity,
   ArrowDownToLine,
@@ -19,17 +19,40 @@ import {
   X,
 } from "lucide-react";
 import {
-  INITIAL_AUDIT,
-  INITIAL_BUSINESSES,
-  INITIAL_SCANS,
-  INITIAL_SIGNALS,
+  REVIEW_TO_API,
   SOURCES,
-  type AuditEntry,
+  enabledKeysFromSources,
+  formatRunDate,
+  formatRunStatus,
+  isActiveRunStatus,
+  normalizeSourceLabel,
+  sourcesFromEnabledKeys,
   type ListeningBusiness,
   type ReviewStatus,
   type Scan,
   type Signal,
 } from "@/lib/social-listening";
+import {
+  fetchSocialOverview,
+  fetchSocialRuns,
+  fetchSocialSettings,
+  fetchSocialSignals,
+  pauseSocialListening,
+  queueSocialRun,
+  resumeSocialListening,
+  retrySocialRun,
+  reviewSocialSignals,
+  updateSocialSettings,
+  type SocialOverview,
+  type SocialRun,
+  type SocialSettings,
+  type SocialSignalRow,
+} from "@/lib/api/admin-social";
+import {
+  listAdminOrganizations,
+  type AdminOrganization,
+} from "@/lib/api/admin-organizations";
+import { AdminApiError } from "@/lib/api/admin-client";
 
 import { ListeningAnalytics } from "./listening-analytics";
 
@@ -47,6 +70,9 @@ const views: { name: View; icon: typeof Activity }[] = [
   { name: "Activity log", icon: Clock3 },
 ];
 const reviewStates: ReviewStatus[] = ["Needs review", "Approved", "Suppressed"];
+const SIGNALS_PER_PAGE = 6;
+const ANALYTICS_SIGNAL_LIMIT = 100;
+
 function Badge({
   children,
   tone = "neutral",
@@ -94,12 +120,125 @@ function Dialog({
   );
 }
 
+function mapSignal(row: SocialSignalRow): Signal {
+  return {
+    id: String(row.id),
+    businessId: String(row.organization_id),
+    company: row.company ?? "—",
+    author: row.author ?? "—",
+    source: normalizeSourceLabel(row.source),
+    title: row.title ?? "Untitled signal",
+    quote: row.quote ?? "",
+    reason: "Matched against the client's listening rules and quality thresholds.",
+    score: Math.round(Number(row.score) || 0),
+    stage: row.stage ?? "—",
+    status: row.status || "Needs review",
+    issue: null,
+    crm: Boolean(row.crm),
+    date: row.date ?? "",
+  };
+}
+
+function mapRun(run: SocialRun): Scan {
+  const raw = run.status ?? "";
+  return {
+    id: String(run.id),
+    businessId: String(run.organization_id),
+    status: formatRunStatus(raw),
+    source: "All sources",
+    found: Number(run.signals_created ?? 0),
+    date: formatRunDate(run.started_at ?? run.created_at ?? run.finished_at ?? null),
+    error: run.error ?? undefined,
+    rawStatus: raw,
+  };
+}
+
+function mapOrgToBusiness(
+  org: AdminOrganization,
+  settings?: SocialSettings | null,
+): ListeningBusiness {
+  const intent = settings?.intent_filters;
+  const keywords = Array.isArray(intent)
+    ? intent.join(", ")
+    : typeof intent === "string"
+      ? intent
+      : typeof settings?.keywords === "string"
+        ? settings.keywords
+        : Array.isArray(settings?.keywords)
+          ? settings.keywords.join(", ")
+          : "";
+  const cadenceRaw = Number(settings?.cadence_days ?? 14);
+  const cadence: 14 | 30 = cadenceRaw === 30 ? 30 : 14;
+  const destination =
+    settings?.crm_destination === "human_review" ||
+    settings?.destination === "human_review"
+      ? "human_review"
+      : "qualified_pipeline";
+  return {
+    id: String(org.id),
+    name: org.name,
+    owner: org.owner?.name || "Invited owner",
+    industry: org.industry || "—",
+    paused: Boolean(settings?.admin_paused_at),
+    sources: sourcesFromEnabledKeys(
+      settings?.enabled_sources ?? settings?.sources,
+    ),
+    cadence,
+    minScore: Number(settings?.min_score ?? 55),
+    freshness: Number(
+      settings?.freshness_window_days ?? settings?.freshness_days ?? 30,
+    ),
+    destination,
+    keywords: keywords || "Default intent filters",
+    icp:
+      (typeof settings?.icp_summary === "string" && settings.icp_summary) ||
+      `${org.industry || "Business"} · ${org.scope || org.purpose || "Listening profile"}`,
+    settingsLoaded: Boolean(settings),
+  };
+}
+
+function applySettingsToBusiness(
+  business: ListeningBusiness,
+  settings: SocialSettings,
+): ListeningBusiness {
+  const intent = settings.intent_filters;
+  const keywords = Array.isArray(intent)
+    ? intent.join(", ")
+    : typeof intent === "string"
+      ? intent
+      : "";
+  const cadenceRaw = Number(settings.cadence_days ?? business.cadence);
+  return {
+    ...business,
+    paused: Boolean(settings.admin_paused_at),
+    sources: sourcesFromEnabledKeys(settings.enabled_sources ?? settings.sources),
+    cadence: cadenceRaw === 30 ? 30 : 14,
+    minScore: Number(settings.min_score ?? business.minScore),
+    freshness: Number(
+      settings.freshness_window_days ??
+        settings.freshness_days ??
+        business.freshness,
+    ),
+    destination:
+      settings.crm_destination === "human_review" ||
+      settings.destination === "human_review"
+        ? "human_review"
+        : "qualified_pipeline",
+    keywords: keywords || business.keywords,
+    icp:
+      (typeof settings.icp_summary === "string" && settings.icp_summary) ||
+      business.icp,
+    settingsLoaded: true,
+  };
+}
+
 export function SocialListeningView() {
   const [view, setView] = useState<View>("Overview");
-  const [businesses, setBusinesses] = useState(INITIAL_BUSINESSES);
-  const [signals, setSignals] = useState(INITIAL_SIGNALS);
-  const [scans, setScans] = useState(INITIAL_SCANS);
-  const [audit, setAudit] = useState(INITIAL_AUDIT);
+  const [businesses, setBusinesses] = useState<ListeningBusiness[]>([]);
+  const [signals, setSignals] = useState<Signal[]>([]);
+  const [analyticsSignals, setAnalyticsSignals] = useState<Signal[]>([]);
+  const [scans, setScans] = useState<Scan[]>([]);
+  const [overview, setOverview] = useState<SocialOverview | null>(null);
   const [scope, setScope] = useState("all");
   const [search, setSearch] = useState("");
   const [source, setSource] = useState("all");
@@ -109,53 +248,181 @@ export function SocialListeningView() {
   const [settingsId, setSettingsId] = useState<string | null>(null);
   const [scanId, setScanId] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
   const [reason, setReason] = useState("");
   const [page, setPage] = useState(1);
+  const [signalTotal, setSignalTotal] = useState(0);
+  const [signalLastPage, setSignalLastPage] = useState(1);
+  const [loading, setLoading] = useState(true);
+  const [signalsLoading, setSignalsLoading] = useState(false);
+  const [runsLoading, setRunsLoading] = useState(false);
+  const [busy, setBusy] = useState(false);
+
   const businessName = (id: string) =>
     businesses.find((b) => b.id === id)?.name ?? id;
+  const orgIdParam = scope === "all" ? undefined : Number(scope);
   const scopedBusinesses = businesses.filter(
     (b) => scope === "all" || b.id === scope,
-  );
-  const scopedSignals = signals.filter(
-    (s) => scope === "all" || s.businessId === scope,
   );
   const scopedScans = scans.filter(
     (s) => scope === "all" || s.businessId === scope,
   );
-  const pending = scopedSignals.filter((s) => s.status === "Needs review");
+  const pendingCount =
+    overview?.totals.needs_review ??
+    analyticsSignals.filter((s) => s.status === "Needs review").length;
   const failures = scopedScans.filter((s) => s.status === "Failed");
-  const filteredSignals = scopedSignals.filter(
-    (s) =>
-      (source === "all" || s.source === source) &&
-      (status === "all" || s.status === status) &&
-      `${s.title} ${s.company} ${s.author} ${businessName(s.businessId)} ${s.id}`
-        .toLowerCase()
-        .includes(search.toLowerCase()),
-  );
-  const totalPages = Math.max(1, Math.ceil(filteredSignals.length / 6));
-  const safePage = Math.min(page, totalPages);
-  const pageSignals = filteredSignals.slice((safePage - 1) * 6, safePage * 6);
-  const detail = signals.find((s) => s.id === detailId);
+  const detail = signals.find((s) => s.id === detailId)
+    ?? analyticsSignals.find((s) => s.id === detailId);
   const scanDetail = scans.find((s) => s.id === scanId);
   const settings = businesses.find((b) => b.id === settingsId);
   const selectedBusiness = businesses.find((b) => b.id === scope);
-  const addAudit = (businessId: string, action: string, detail: string) => {
-    setAudit((entries) => [
-      {
-        id: `audit-${Date.now()}-${Math.random()}`,
-        businessId,
-        action,
-        detail,
-        time: new Intl.DateTimeFormat("en-GB", {
-          dateStyle: "medium",
-          timeStyle: "short",
-          timeZone: "Africa/Lagos",
-        }).format(new Date()),
-        actor: "Kwame Smith",
-      },
-      ...entries,
-    ]);
-  };
+
+  const chartSignals = useMemo(() => {
+    if (view === "Signal review") return signals;
+    return analyticsSignals;
+  }, [view, signals, analyticsSignals]);
+
+  const loadSettingsForOrg = useCallback(async (orgId: number) => {
+    try {
+      const result = await fetchSocialSettings(orgId);
+      setBusinesses((items) =>
+        items.map((b) =>
+          b.id === String(orgId) ? applySettingsToBusiness(b, result.data) : b,
+        ),
+      );
+      return result.data;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const loadOverview = useCallback(async () => {
+    const result = await fetchSocialOverview(orgIdParam);
+    setOverview(result.data);
+  }, [orgIdParam]);
+
+  const loadOrganizations = useCallback(async () => {
+    const result = await listAdminOrganizations({ per_page: 100, page: 1 });
+    const orgs = result.data;
+    const withSettings = await Promise.all(
+      orgs.map(async (org) => {
+        try {
+          const settingsResult = await fetchSocialSettings(org.id);
+          return mapOrgToBusiness(org, settingsResult.data);
+        } catch {
+          return mapOrgToBusiness(org, null);
+        }
+      }),
+    );
+    setBusinesses(withSettings);
+  }, []);
+
+  const loadAnalyticsSignals = useCallback(async () => {
+    const result = await fetchSocialSignals({
+      organization_id: orgIdParam,
+      per_page: ANALYTICS_SIGNAL_LIMIT,
+      page: 1,
+    });
+    setAnalyticsSignals(result.data.map(mapSignal));
+  }, [orgIdParam]);
+
+  const loadSignals = useCallback(async () => {
+    setSignalsLoading(true);
+    try {
+      const result = await fetchSocialSignals({
+        organization_id: orgIdParam,
+        source: source === "all" ? undefined : source,
+        status: status === "all" ? undefined : status,
+        search: search.trim() || undefined,
+        page,
+        per_page: SIGNALS_PER_PAGE,
+      });
+      setSignals(result.data.map(mapSignal));
+      setSignalTotal(result.meta.total);
+      setSignalLastPage(Math.max(1, result.meta.last_page));
+    } finally {
+      setSignalsLoading(false);
+    }
+  }, [orgIdParam, source, status, search, page]);
+
+  const loadRuns = useCallback(async (opts?: { quiet?: boolean }) => {
+    if (!opts?.quiet) setRunsLoading(true);
+    try {
+      const result = await fetchSocialRuns({
+        organization_id: orgIdParam,
+        per_page: 50,
+        page: 1,
+      });
+      setScans(result.data.map(mapRun));
+    } finally {
+      if (!opts?.quiet) setRunsLoading(false);
+    }
+  }, [orgIdParam]);
+
+  const bootstrap = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      await Promise.all([
+        loadOrganizations(),
+        fetchSocialOverview().then((result) => setOverview(result.data)),
+        fetchSocialSignals({ per_page: ANALYTICS_SIGNAL_LIMIT, page: 1 }).then(
+          (result) => setAnalyticsSignals(result.data.map(mapSignal)),
+        ),
+        fetchSocialRuns({ per_page: 50, page: 1 }).then((result) =>
+          setScans(result.data.map(mapRun)),
+        ),
+      ]);
+    } catch (err) {
+      setError(
+        err instanceof AdminApiError
+          ? err.message
+          : "Unable to load social listening data.",
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, [loadOrganizations]);
+
+  useEffect(() => {
+    void bootstrap();
+  }, [bootstrap]);
+
+  useEffect(() => {
+    if (loading) return;
+    void loadOverview().catch(() => undefined);
+    void loadAnalyticsSignals().catch(() => undefined);
+    void loadRuns().catch(() => undefined);
+  }, [orgIdParam, loading, loadOverview, loadAnalyticsSignals, loadRuns]);
+
+  useEffect(() => {
+    if (view !== "Signal review") return;
+    void loadSignals().catch((err) => {
+      setError(
+        err instanceof AdminApiError
+          ? err.message
+          : "Unable to load signals.",
+      );
+    });
+  }, [view, loadSignals]);
+
+  useEffect(() => {
+    if (scope !== "all") {
+      void loadSettingsForOrg(Number(scope));
+    }
+  }, [scope, loadSettingsForOrg]);
+
+  useEffect(() => {
+    const active = scans.some((s) => isActiveRunStatus(s.rawStatus ?? s.status));
+    if (!active) return;
+    const timer = window.setInterval(() => {
+      void loadRuns({ quiet: true }).catch(() => undefined);
+      void loadOverview().catch(() => undefined);
+      void loadAnalyticsSignals().catch(() => undefined);
+    }, 4000);
+    return () => window.clearInterval(timer);
+  }, [scans, loadRuns, loadOverview, loadAnalyticsSignals]);
+
   const changeView = (next: View) => {
     setView(next);
     setSearch("");
@@ -173,71 +440,127 @@ export function SocialListeningView() {
     changeScope(id);
     changeView("Businesses");
   };
-  const review = (ids: string[], next: ReviewStatus, note: string) => {
+
+  const review = async (ids: string[], next: ReviewStatus, note: string) => {
     if (!note.trim()) {
       setNotice("Add a review reason before updating signals.");
       return;
     }
-    setSignals((items) =>
-      items.map((s) => (ids.includes(s.id) ? { ...s, status: next } : s)),
-    );
-    signals
-      .filter((s) => ids.includes(s.id))
-      .forEach((s) =>
-        addAudit(
-          s.businessId,
-          `Signal ${next.toLowerCase()}`,
-          `${s.id} · ${note.trim()}`,
+    setBusy(true);
+    setError("");
+    try {
+      await reviewSocialSignals(
+        ids.map(Number),
+        REVIEW_TO_API[next],
+        note.trim(),
+      );
+      setSelected([]);
+      setReason("");
+      setDetailId(null);
+      setNotice(
+        `${ids.length} signal${ids.length === 1 ? "" : "s"} updated to ${next.toLowerCase()}. Approval records a quality decision only — it does not create a CRM record.`,
+      );
+      await Promise.all([loadSignals(), loadAnalyticsSignals(), loadOverview()]);
+    } catch (err) {
+      setError(
+        err instanceof AdminApiError
+          ? err.message
+          : "Unable to update signal review status.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const toggleMonitoring = async (b: ListeningBusiness) => {
+    setBusy(true);
+    setError("");
+    try {
+      const result = b.paused
+        ? await resumeSocialListening(Number(b.id), "Resumed by platform admin.")
+        : await pauseSocialListening(Number(b.id), "Paused by platform admin.");
+      setBusinesses((items) =>
+        items.map((item) =>
+          item.id === b.id ? applySettingsToBusiness(item, result.data) : item,
         ),
       );
-    setSelected([]);
-    setReason("");
-    setNotice(
-      `${ids.length} signal${ids.length === 1 ? "" : "s"} updated to ${next.toLowerCase()}. Demo change only.`,
-    );
+      setNotice(
+        `${b.name}: monitoring ${b.paused ? "resumed" : "paused"}. Existing signals retained.`,
+      );
+      await loadOverview();
+    } catch (err) {
+      setError(
+        err instanceof AdminApiError
+          ? err.message
+          : "Unable to update monitoring status.",
+      );
+    } finally {
+      setBusy(false);
+    }
   };
-  const toggleMonitoring = (b: ListeningBusiness) => {
-    setBusinesses((items) =>
-      items.map((item) =>
-        item.id === b.id ? { ...item, paused: !item.paused } : item,
-      ),
-    );
-    addAudit(
-      b.id,
-      b.paused ? "Monitoring resumed" : "Monitoring paused",
-      "Admin changed monitoring status. Existing signals retained.",
-    );
-    setNotice(
-      `${b.name}: monitoring ${b.paused ? "resumed" : "paused"} in this demo.`,
-    );
-  };
-  const queueScan = (b: ListeningBusiness, scan?: Scan) => {
+
+  const queueScan = async (b: ListeningBusiness, scan?: Scan) => {
     if (
       b.paused ||
-      scans.some((s) => s.businessId === b.id && s.status === "Queued")
+      scans.some(
+        (s) =>
+          s.businessId === b.id && isActiveRunStatus(s.rawStatus ?? s.status),
+      )
     )
       return;
-    const id = `RUN-${Date.now().toString().slice(-6)}`;
-    setScans((items) => [
-      {
-        id,
-        businessId: b.id,
-        status: "Queued",
-        source: scan?.source ?? b.sources[0],
-        found: 0,
-        date: "Just now · demo",
-      },
-      ...items,
-    ]);
-    addAudit(
-      b.id,
-      scan ? "Scan retry queued" : "Manual scan queued",
-      `${id} · ${scan ? `Retry of ${scan.id}` : "Admin requested a scan"}`,
-    );
-    setNotice(
-      `Scan queued for ${b.name}. Demo runs stay queued; no provider is contacted.`,
-    );
+    setBusy(true);
+    setError("");
+    try {
+      if (scan) {
+        await retrySocialRun(Number(scan.id));
+        setNotice(`Retry queued for run ${scan.id} (${b.name}).`);
+      } else {
+        await queueSocialRun(Number(b.id));
+        setNotice(`Scan queued for ${b.name}.`);
+      }
+      setScanId(null);
+      await loadRuns();
+    } catch (err) {
+      setError(
+        err instanceof AdminApiError
+          ? err.message
+          : "Unable to queue social listening run.",
+      );
+    } finally {
+      setBusy(false);
+    }
   };
+
+  const saveConfiguration = async (updated: ListeningBusiness) => {
+    setBusy(true);
+    setError("");
+    try {
+      const result = await updateSocialSettings(Number(updated.id), {
+        enabled_sources: enabledKeysFromSources(updated.sources),
+        cadence_days: updated.cadence,
+        min_score: updated.minScore,
+        freshness_window_days: updated.freshness,
+        crm_destination: updated.destination,
+        reason: "Updated via admin social listening.",
+      });
+      setBusinesses((items) =>
+        items.map((b) =>
+          b.id === updated.id ? applySettingsToBusiness(b, result.data) : b,
+        ),
+      );
+      setSettingsId(null);
+      setNotice(`Configuration saved for ${updated.name}.`);
+    } catch (err) {
+      setError(
+        err instanceof AdminApiError
+          ? err.message
+          : "Unable to save social listening settings.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const exportSignals = () => {
     const rows = [
       [
@@ -249,19 +572,19 @@ export function SocialListeningView() {
         "Stage",
         "Review status",
       ],
-      ...filteredSignals.map((s) => [
+      ...signals.map((s) => [
         s.id,
         businessName(s.businessId),
         s.company,
-        s.source,
+        String(s.source),
         String(s.score),
         s.stage,
-        s.status,
+        String(s.status),
       ]),
     ];
     const csv = rows
       .map((row) =>
-        row.map((cell) => `"${cell.replaceAll('"', '""')}"`).join(","),
+        row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(","),
       )
       .join("\r\n");
     const url = URL.createObjectURL(
@@ -269,13 +592,65 @@ export function SocialListeningView() {
     );
     const a = document.createElement("a");
     a.href = url;
-    a.download = "social-listening-signals-demo.csv";
+    a.download = "social-listening-signals.csv";
     a.click();
     URL.revokeObjectURL(url);
-    setNotice(
-      `Exported ${filteredSignals.length} signals from the current filters.`,
-    );
+    setNotice(`Exported ${signals.length} signals from the current page.`);
   };
+
+  const openSettings = async (id: string) => {
+    setSettingsId(id);
+    await loadSettingsForOrg(Number(id));
+  };
+
+  if (loading) {
+    return (
+      <div className="sl-root">
+        <header className="sl-page-head">
+          <div>
+            <h1>
+              Social Listening<span>.</span>
+            </h1>
+            <p>Loading live monitoring data…</p>
+          </div>
+        </header>
+        <div className="sl-empty">
+          <Radar size={30} />
+          <h3>Loading social listening</h3>
+          <p>Fetching organizations, signals, and run history.</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error && !businesses.length && !overview) {
+    return (
+      <div className="sl-root">
+        <header className="sl-page-head">
+          <div>
+            <h1>
+              Social Listening<span>.</span>
+            </h1>
+            <p>Unable to load the admin social listening workspace.</p>
+          </div>
+        </header>
+        <div className="sl-empty">
+          <CircleAlert size={30} />
+          <h3>Couldn’t load social listening</h3>
+          <p>{error}</p>
+          <button onClick={() => void bootstrap()}>Retry</button>
+        </div>
+      </div>
+    );
+  }
+
+  const monitored = scopedBusinesses.filter((b) => !b.paused).length;
+  const pausedCount =
+    overview?.totals.paused_organizations ??
+    scopedBusinesses.filter((b) => b.paused).length;
+  const signalsCaptured = overview?.totals.signals ?? analyticsSignals.length;
+  const awaitingReview = overview?.totals.needs_review ?? pendingCount;
+
   return (
     <div className="sl-root">
       <header className="sl-page-head">
@@ -286,8 +661,8 @@ export function SocialListeningView() {
           <p>Every client. Every buying signal. One place to oversee it all.</p>
         </div>
         <div className="sl-head-note">
-          <span className="sl-demo">Demo data</span> Admin workspace
-          <small>Snapshot · 09 Oct 2026</small>
+          Admin workspace
+          <small>Live · social listening APIs</small>
         </div>
       </header>
       <div className="sl-context">
@@ -307,7 +682,7 @@ export function SocialListeningView() {
             ))}
           </select>
         </div>
-        <span>Changes are local to this session · refresh resets the demo</span>
+        <span>Changes persist through the admin API</span>
       </div>
       <nav className="sl-tabs" aria-label="Social listening views">
         {views.map(({ name, icon: Icon }) => (
@@ -319,7 +694,7 @@ export function SocialListeningView() {
           >
             <Icon size={16} />
             {name}
-            {name === "Signal review" && <span>{pending.length}</span>}
+            {name === "Signal review" && <span>{awaitingReview}</span>}
           </button>
         ))}
       </nav>
@@ -335,32 +710,41 @@ export function SocialListeningView() {
           </button>
         </div>
       )}
+      {error && (
+        <div className="sl-notice" role="alert">
+          <CircleAlert size={17} />
+          {error}
+          <button onClick={() => setError("")} aria-label="Dismiss error">
+            <X size={16} />
+          </button>
+        </div>
+      )}
       {view === "Overview" && (
         <>
           <div className="sl-metrics">
             {[
               {
                 label: "BUSINESSES MONITORED",
-                value: scopedBusinesses.filter((b) => !b.paused).length,
-                note: `${scopedBusinesses.filter((b) => b.paused).length} paused · ${scopedBusinesses.length} total`,
+                value: monitored,
+                note: `${pausedCount} paused · ${scopedBusinesses.length} total`,
                 icon: Building2,
               },
               {
                 label: "SIGNALS CAPTURED",
-                value: scopedSignals.length,
-                note: "Across all sources in this snapshot",
+                value: signalsCaptured,
+                note: "Across all sources in this scope",
                 icon: Radar,
               },
               {
                 label: "AWAITING REVIEW",
-                value: pending.length,
-                note: `${pending.filter((s) => s.issue).length} quality flags to inspect`,
+                value: awaitingReview,
+                note: `${overview?.totals.approved ?? 0} approved · ${overview?.totals.suppressed ?? 0} suppressed`,
                 icon: ShieldCheck,
               },
               {
                 label: "SCANS NEED ATTENTION",
                 value: failures.length,
-                note: `${scopedScans.filter((s) => s.status === "Queued").length} queued · provider operations`,
+                note: `${scopedScans.filter((s) => isActiveRunStatus(s.rawStatus ?? s.status)).length} in progress · provider operations`,
                 icon: CircleAlert,
               },
             ].map(({ label, value, note, icon: Icon }) => (
@@ -376,7 +760,7 @@ export function SocialListeningView() {
           </div>
           <ListeningAnalytics
             key={scope}
-            signals={scopedSignals}
+            signals={chartSignals}
             businesses={scopedBusinesses}
             onBusiness={openBusiness}
           />
@@ -427,13 +811,18 @@ export function SocialListeningView() {
                           {b.paused ? "Paused" : "Active"}
                         </Badge>
                       </td>
-                      <td>{b.sources.join(" · ")}</td>
                       <td>
-                        {signals.filter((s) => s.businessId === b.id).length}
+                        {b.sources.length ? b.sources.join(" · ") : "—"}
                       </td>
                       <td>
                         {
-                          signals.filter(
+                          analyticsSignals.filter((s) => s.businessId === b.id)
+                            .length
+                        }
+                      </td>
+                      <td>
+                        {
+                          analyticsSignals.filter(
                             (s) =>
                               s.businessId === b.id &&
                               s.status === "Needs review",
@@ -453,6 +842,13 @@ export function SocialListeningView() {
                 </tbody>
               </table>
             </div>
+            {!scopedBusinesses.length && (
+              <div className="sl-empty">
+                <Building2 size={30} />
+                <h3>No organizations found</h3>
+                <p>Create a client business in Account Management to begin monitoring.</p>
+              </div>
+            )}
           </section>
         </>
       )}
@@ -528,10 +924,16 @@ export function SocialListeningView() {
                   </Badge>
                 </div>
                 <div className="sl-business-actions">
-                  <button onClick={() => setSettingsId(selectedBusiness.id)}>
+                  <button
+                    disabled={busy}
+                    onClick={() => void openSettings(selectedBusiness.id)}
+                  >
                     <Settings2 size={16} /> Edit configuration
                   </button>
-                  <button onClick={() => toggleMonitoring(selectedBusiness)}>
+                  <button
+                    disabled={busy}
+                    onClick={() => void toggleMonitoring(selectedBusiness)}
+                  >
                     {selectedBusiness.paused ? (
                       <Play size={16} />
                     ) : (
@@ -544,14 +946,15 @@ export function SocialListeningView() {
                   <button
                     className="sl-primary"
                     disabled={
+                      busy ||
                       selectedBusiness.paused ||
                       scans.some(
                         (s) =>
                           s.businessId === selectedBusiness.id &&
-                          s.status === "Queued",
+                          isActiveRunStatus(s.rawStatus ?? s.status),
                       )
                     }
-                    onClick={() => queueScan(selectedBusiness)}
+                    onClick={() => void queueScan(selectedBusiness)}
                   >
                     <Radar size={16} /> Queue scan
                   </button>
@@ -578,7 +981,11 @@ export function SocialListeningView() {
                   </div>
                   <div>
                     <small>ENABLED SOURCES</small>
-                    <strong>{selectedBusiness.sources.join(" · ")}</strong>
+                    <strong>
+                      {selectedBusiness.sources.length
+                        ? selectedBusiness.sources.join(" · ")
+                        : "—"}
+                    </strong>
                   </div>
                   <div>
                     <small>CLIENT CRM DESTINATION</small>
@@ -598,29 +1005,47 @@ export function SocialListeningView() {
                     Review all <ArrowRight size={15} />
                   </button>
                 </div>
-                {scopedSignals.slice(0, 4).map((s) => (
-                  <button
-                    key={s.id}
-                    className="sl-mini-signal"
-                    onClick={() => {
-                      setReason("");
-                      setDetailId(s.id);
-                    }}
-                  >
-                    <div>
-                      <strong>{s.title}</strong>
-                      <small>
-                        {s.company} · {s.source}
-                      </small>
-                    </div>
-                    <Badge
-                      tone={s.status === "Needs review" ? "amber" : "neutral"}
-                    >
-                      {s.status}
-                    </Badge>
-                    <ChevronRight size={16} />
-                  </button>
-                ))}
+                {signalsLoading && (
+                  <p className="sl-footnote">Loading recent signals…</p>
+                )}
+                {!signalsLoading &&
+                  (scope === "all"
+                    ? analyticsSignals
+                    : analyticsSignals.filter((s) => s.businessId === scope)
+                  )
+                    .slice(0, 4)
+                    .map((s) => (
+                      <button
+                        key={s.id}
+                        className="sl-mini-signal"
+                        onClick={() => {
+                          setReason("");
+                          setDetailId(s.id);
+                        }}
+                      >
+                        <div>
+                          <strong>{s.title}</strong>
+                          <small>
+                            {s.company} · {s.source}
+                          </small>
+                        </div>
+                        <Badge
+                          tone={
+                            s.status === "Needs review" ? "amber" : "neutral"
+                          }
+                        >
+                          {s.status}
+                        </Badge>
+                        <ChevronRight size={16} />
+                      </button>
+                    ))}
+                {!signalsLoading &&
+                  !(scope === "all"
+                    ? analyticsSignals
+                    : analyticsSignals.filter((s) => s.businessId === scope)
+                  ).length && (
+                    <p className="sl-empty">No signals captured for this business yet.</p>
+                  )}
                 <p className="sl-footnote">
                   Admin approval records a quality decision. CRM activity
                   reflects the client’s existing workflow; no message or CRM
@@ -649,8 +1074,8 @@ export function SocialListeningView() {
                 Inspect source evidence and relevance across client businesses.
               </p>
             </div>
-            <button onClick={exportSignals}>
-              <ArrowDownToLine size={16} /> Export filtered signals
+            <button onClick={exportSignals} disabled={!signals.length}>
+              <ArrowDownToLine size={16} /> Export page signals
             </button>
           </div>
           <div className="sl-filters">
@@ -706,14 +1131,14 @@ export function SocialListeningView() {
                 onChange={(e) => setReason(e.target.value)}
               />
               <button
-                disabled={!reason.trim()}
-                onClick={() => review(selected, "Approved", reason)}
+                disabled={!reason.trim() || busy}
+                onClick={() => void review(selected, "Approved", reason)}
               >
                 Approve
               </button>
               <button
-                disabled={!reason.trim()}
-                onClick={() => review(selected, "Suppressed", reason)}
+                disabled={!reason.trim() || busy}
+                onClick={() => void review(selected, "Suppressed", reason)}
               >
                 Suppress
               </button>
@@ -729,14 +1154,12 @@ export function SocialListeningView() {
                       type="checkbox"
                       aria-label="Select all filtered signals"
                       checked={
-                        filteredSignals.length > 0 &&
-                        filteredSignals.every((s) => selected.includes(s.id))
+                        signals.length > 0 &&
+                        signals.every((s) => selected.includes(s.id))
                       }
                       onChange={(e) =>
                         setSelected(
-                          e.target.checked
-                            ? filteredSignals.map((s) => s.id)
-                            : [],
+                          e.target.checked ? signals.map((s) => s.id) : [],
                         )
                       }
                     />
@@ -750,7 +1173,7 @@ export function SocialListeningView() {
                 </tr>
               </thead>
               <tbody>
-                {pageSignals.map((s) => (
+                {signals.map((s) => (
                   <tr key={s.id}>
                     <td>
                       <input
@@ -821,7 +1244,13 @@ export function SocialListeningView() {
               </tbody>
             </table>
           </div>
-          {!filteredSignals.length && (
+          {signalsLoading && (
+            <div className="sl-empty">
+              <Radar size={30} />
+              <h3>Loading signals…</h3>
+            </div>
+          )}
+          {!signalsLoading && !signals.length && (
             <div className="sl-empty">
               <Radar size={30} />
               <h3>No signals match these filters</h3>
@@ -831,6 +1260,7 @@ export function SocialListeningView() {
                   setSource("all");
                   setStatus("all");
                   setSearch("");
+                  setPage(1);
                 }}
               >
                 Reset filters
@@ -839,24 +1269,24 @@ export function SocialListeningView() {
           )}
           <div className="sl-pagination">
             <span>
-              {filteredSignals.length
-                ? `${(safePage - 1) * 6 + 1}–${Math.min(safePage * 6, filteredSignals.length)}`
+              {signalTotal
+                ? `${(page - 1) * SIGNALS_PER_PAGE + 1}–${Math.min(page * SIGNALS_PER_PAGE, signalTotal)}`
                 : "0"}{" "}
-              of {filteredSignals.length} signals
+              of {signalTotal} signals
             </span>
             <div>
               <button
-                disabled={safePage === 1}
-                onClick={() => setPage(safePage - 1)}
+                disabled={page === 1 || signalsLoading}
+                onClick={() => setPage(page - 1)}
               >
                 Previous
               </button>
               <span>
-                {safePage} / {totalPages}
+                {page} / {signalLastPage}
               </span>
               <button
-                disabled={safePage === totalPages}
-                onClick={() => setPage(safePage + 1)}
+                disabled={page >= signalLastPage || signalsLoading}
+                onClick={() => setPage(page + 1)}
               >
                 Next
               </button>
@@ -880,27 +1310,31 @@ export function SocialListeningView() {
           </div>
           <div className="sl-health-grid">
             {SOURCES.map((s) => {
-              const runs = scopedScans.filter((r) => r.source === s);
-              const failed = runs.filter((r) => r.status === "Failed").length;
+              const enabledCount = scopedBusinesses.filter((b) =>
+                b.sources.includes(s),
+              ).length;
+              const sourceCount =
+                overview?.by_source.find(
+                  (row) =>
+                    normalizeSourceLabel(row.source) === s ||
+                    (row.source ?? "").toLowerCase() === s.toLowerCase(),
+                )?.count ?? 0;
               return (
                 <div key={s}>
                   <strong>{s}</strong>
                   <Badge
-                    tone={failed ? "amber" : runs.length ? "mint" : "neutral"}
+                    tone={
+                      enabledCount
+                        ? sourceCount
+                          ? "mint"
+                          : "neutral"
+                        : "neutral"
+                    }
                   >
-                    {failed
-                      ? "Attention needed"
-                      : runs.length
-                        ? "Healthy"
-                        : "No runs"}
+                    {enabledCount ? (sourceCount ? "Active" : "Enabled") : "No runs"}
                   </Badge>
                   <small>
-                    {runs.length} runs ·{" "}
-                    {
-                      scopedBusinesses.filter((b) => b.sources.includes(s))
-                        .length
-                    }{" "}
-                    businesses enabled
+                    {sourceCount} signals · {enabledCount} businesses enabled
                   </small>
                 </div>
               );
@@ -939,7 +1373,11 @@ export function SocialListeningView() {
                         {r.status}
                       </Badge>
                     </td>
-                    <td>{r.status === "Queued" ? "—" : r.found}</td>
+                    <td>
+                      {isActiveRunStatus(r.rawStatus ?? r.status)
+                        ? "—"
+                        : r.found}
+                    </td>
                     <td>{r.date}</td>
                     <td>
                       <button onClick={() => setScanId(r.id)}>
@@ -951,10 +1389,23 @@ export function SocialListeningView() {
               </tbody>
             </table>
           </div>
+          {runsLoading && !scopedScans.length && (
+            <div className="sl-empty">
+              <Activity size={30} />
+              <h3>Loading runs…</h3>
+            </div>
+          )}
+          {!runsLoading && !scopedScans.length && (
+            <div className="sl-empty">
+              <Activity size={30} />
+              <h3>No scan runs yet</h3>
+              <p>Queue a scan from a business workspace to start collecting signals.</p>
+            </div>
+          )}
           <p className="sl-footnote">
-            Run counts include raw candidates before quality filtering and
-            deduplication. Queued demo scans remain queued until the page is
-            refreshed.
+            Active runs refresh automatically every few seconds until they
+            complete or fail. Queued retries create a new run while preserving
+            the original failure record.
           </p>
         </section>
       )}
@@ -968,38 +1419,13 @@ export function SocialListeningView() {
                 decisions.
               </p>
             </div>
-            <Badge>
-              {
-                audit.filter((a) => scope === "all" || a.businessId === scope)
-                  .length
-              }{" "}
-              events
-            </Badge>
+            <Badge>0 events</Badge>
           </div>
           <div className="sl-audit">
-            {audit
-              .filter((a) => scope === "all" || a.businessId === scope)
-              .map((a) => (
-                <article key={a.id}>
-                  <span className="sl-icon-box">
-                    <Clock3 size={17} />
-                  </span>
-                  <div>
-                    <strong>{a.action}</strong>
-                    <p>{a.detail}</p>
-                    <small>
-                      {businessName(a.businessId)} · {a.actor}
-                    </small>
-                  </div>
-                  <time>{a.time}</time>
-                </article>
-              ))}
-            {!audit.some((a) => scope === "all" || a.businessId === scope) && (
-              <div className="sl-empty">
-                No admin activity for this business yet. Demo management actions
-                will appear here.
-              </div>
-            )}
+            <div className="sl-empty">
+              No durable activity feed is exposed on the admin social listening
+              API yet. Review actions still write server-side audit records.
+            </div>
           </div>
         </section>
       )}
@@ -1026,7 +1452,7 @@ export function SocialListeningView() {
                 {detail.source} · {detail.author} · {detail.date}
               </small>
             </div>
-            <blockquote>“{detail.quote}”</blockquote>
+            {detail.quote ? <blockquote>“{detail.quote}”</blockquote> : null}
             <h4>Why this signal was matched</h4>
             <p>{detail.reason}</p>
             <div className="sl-config-grid">
@@ -1041,19 +1467,6 @@ export function SocialListeningView() {
                 </strong>
               </div>
             </div>
-            {detail.issue && (
-              <div className="sl-warning">
-                <CircleAlert size={18} />
-                <div>
-                  <strong>{detail.issue}</strong>
-                  <p>
-                    {detail.issue === "Possible duplicate"
-                      ? "Compare the company and source evidence with existing signals before approving."
-                      : "The intent score is below the default quality threshold. Validate fit and buying authority."}
-                  </p>
-                </div>
-              </div>
-            )}
             <label className="sl-field">
               Review reason
               <textarea
@@ -1064,28 +1477,34 @@ export function SocialListeningView() {
             </label>
             <div className="sl-dialog-actions">
               <button
-                disabled={!reason.trim() || detail.status === "Suppressed"}
-                onClick={() => review([detail.id], "Suppressed", reason)}
+                disabled={
+                  !reason.trim() || busy || detail.status === "Suppressed"
+                }
+                onClick={() => void review([detail.id], "Suppressed", reason)}
               >
                 Suppress signal
               </button>
               <button
-                disabled={!reason.trim() || detail.status === "Needs review"}
-                onClick={() => review([detail.id], "Needs review", reason)}
+                disabled={
+                  !reason.trim() || busy || detail.status === "Needs review"
+                }
+                onClick={() => void review([detail.id], "Needs review", reason)}
               >
                 Return to review
               </button>
               <button
                 className="sl-primary"
-                disabled={!reason.trim() || detail.status === "Approved"}
-                onClick={() => review([detail.id], "Approved", reason)}
+                disabled={
+                  !reason.trim() || busy || detail.status === "Approved"
+                }
+                onClick={() => void review([detail.id], "Approved", reason)}
               >
                 <Check size={16} /> Approve
               </button>
             </div>
             <p className="sl-footnote">
-              Sample evidence has no live source link. Decisions change demo
-              review status only and do not trigger client outreach.
+              Approve records a quality decision only. It does not create a CRM
+              record or send outreach.
             </p>
           </div>
         </Dialog>
@@ -1096,22 +1515,10 @@ export function SocialListeningView() {
           onClose={() => setSettingsId(null)}
         >
           <Configuration
-            key={settings.id}
+            key={`${settings.id}-${settings.settingsLoaded ? "ready" : "pending"}`}
             business={settings}
-            onSave={(updated) => {
-              setBusinesses((items) =>
-                items.map((b) => (b.id === updated.id ? updated : b)),
-              );
-              addAudit(
-                updated.id,
-                "Configuration updated",
-                `Sources: ${updated.sources.join(", ")} · Cadence: ${updated.cadence} days · Minimum score: ${updated.minScore} · Freshness: ${updated.freshness} days · CRM: ${updated.destination} · Keywords: ${updated.keywords}`,
-              );
-              setSettingsId(null);
-              setNotice(
-                `Configuration saved for ${updated.name}. Demo change only.`,
-              );
-            }}
+            busy={busy}
+            onSave={(updated) => void saveConfiguration(updated)}
           />
         </Dialog>
       )}
@@ -1130,28 +1537,29 @@ export function SocialListeningView() {
               <Activity size={20} />
               <p>
                 {scanDetail.error ??
-                  (scanDetail.status === "Queued"
-                    ? "Awaiting a worker. This demo has no scan worker; the run will remain queued."
-                    : `Source collection completed. ${scanDetail.found} raw candidate signals collected before deduplication and filtering.`)}
+                  (isActiveRunStatus(scanDetail.rawStatus ?? scanDetail.status)
+                    ? "Run is in progress. This view refreshes automatically while the worker is active."
+                    : `Source collection finished. ${scanDetail.found} signals created on this run.`)}
               </p>
             </div>
             {scanDetail.status === "Failed" && (
               <button
                 className="sl-primary"
                 disabled={
+                  busy ||
                   businesses.find((b) => b.id === scanDetail.businessId)
                     ?.paused ||
                   scans.some(
                     (s) =>
                       s.businessId === scanDetail.businessId &&
-                      s.status === "Queued",
+                      isActiveRunStatus(s.rawStatus ?? s.status),
                   )
                 }
                 onClick={() => {
                   const b = businesses.find(
-                    (b) => b.id === scanDetail.businessId,
+                    (item) => item.id === scanDetail.businessId,
                   );
-                  if (b) queueScan(b, scanDetail);
+                  if (b) void queueScan(b, scanDetail);
                 }}
               >
                 Queue retry
@@ -1170,11 +1578,16 @@ export function SocialListeningView() {
 function Configuration({
   business,
   onSave,
+  busy,
 }: {
   business: ListeningBusiness;
   onSave: (b: ListeningBusiness) => void;
+  busy?: boolean;
 }) {
   const [draft, setDraft] = useState(business);
+  useEffect(() => {
+    setDraft(business);
+  }, [business]);
   return (
     <form
       className="sl-dialog-body"
@@ -1209,9 +1622,9 @@ function Configuration({
       <label className="sl-field">
         Keywords & topics
         <textarea
-          required
           value={draft.keywords}
           onChange={(e) => setDraft({ ...draft, keywords: e.target.value })}
+          readOnly
         />
       </label>
       <div className="sl-form-grid">
@@ -1235,7 +1648,7 @@ function Configuration({
               setDraft({ ...draft, freshness: Number(e.target.value) })
             }
           >
-            {[7, 14, 30, 90].map((n) => (
+            {[7, 14, 30, 90, 180].map((n) => (
               <option key={n} value={n}>
                 Last {n} days
               </option>
@@ -1247,8 +1660,8 @@ function Configuration({
           <input
             required
             type="number"
-            min="0"
-            max="100"
+            min="40"
+            max="90"
             value={draft.minScore}
             onChange={(e) =>
               setDraft({ ...draft, minScore: Number(e.target.value) })
@@ -1273,14 +1686,13 @@ function Configuration({
       </div>
       <p className="sl-footnote">
         These rules apply to future scans. Existing signals remain available for
-        inspection. Meta page authorization will be handled during API
-        integration.
+        inspection. Intent keywords are managed on the client ICP profile.
       </p>
       <div className="sl-dialog-actions">
         <button
           type="submit"
           className="sl-primary"
-          disabled={!draft.sources.length || !draft.keywords.trim()}
+          disabled={busy || !draft.sources.length}
         >
           <Check size={16} /> Save configuration
         </button>

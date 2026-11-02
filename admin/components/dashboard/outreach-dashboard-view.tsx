@@ -396,8 +396,8 @@ export function OutreachDashboardView({ data }: { data: OutreachDashboardData })
         isOpen={drawerOpen}
         onClose={() => setDrawerOpen(false)}
         business={selectedBusiness}
-        onOpenAccount={(b) => {
-          console.log("Account opened for:", b.name);
+        onOpenAccount={() => {
+          /* navigation handled inside ActivityDrawer */
         }}
       />
     </div>

@@ -10,11 +10,16 @@ class CrmEntry extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['organization_id', 'lead_id', 'pipeline_id', 'stage_id', 'created_by_user_id', 'assigned_to_user_id', 'identity_key', 'priority', 'budget_amount', 'budget_currency', 'details'];
+    protected $fillable = ['organization_id', 'lead_id', 'pipeline_id', 'stage_id', 'created_by_user_id', 'assigned_to_user_id', 'identity_key', 'priority', 'budget_amount', 'budget_currency', 'details', 'archived_at'];
 
     protected function casts(): array
     {
-        return ['details' => 'array', 'budget_amount' => 'float'];
+        return ['details' => 'array', 'budget_amount' => 'float', 'archived_at' => 'datetime'];
+    }
+
+    public function organization(): BelongsTo
+    {
+        return $this->belongsTo(Organization::class);
     }
 
     public function lead(): BelongsTo

@@ -1,5 +1,11 @@
 <?php
 
+use App\Http\Controllers\Api\V1\Admin\AdminAuthController;
+use App\Http\Controllers\Api\V1\Admin\AdminCrmController;
+use App\Http\Controllers\Api\V1\Admin\AdminOrganizationController;
+use App\Http\Controllers\Api\V1\Admin\AdminOutreachController;
+use App\Http\Controllers\Api\V1\Admin\AdminSmartLeadsController;
+use App\Http\Controllers\Api\V1\Admin\AdminSocialListeningController;
 use App\Http\Controllers\Api\V1\Auth\AuthController;
 use App\Http\Controllers\Api\V1\Auth\PasswordResetController;
 use App\Http\Controllers\Api\V1\CallController;
@@ -217,4 +223,81 @@ Route::middleware(['auth:sanctum', 'org.resolve'])->group(function () {
     Route::get('/integrations/factory23/status', [IntegrationController::class, 'factory23Status']);
     Route::post('/integrations/factory23/ensure', [IntegrationController::class, 'ensureFactory23CrmLink']);
     Route::post('/integrations/factory23/crm-sync', [IntegrationController::class, 'factory23CrmSync']);
+});
+
+/*
+|--------------------------------------------------------------------------
+| Platform admin API
+|--------------------------------------------------------------------------
+*/
+Route::prefix('admin')->group(function () {
+    Route::post('/auth/login', [AdminAuthController::class, 'login'])->middleware('throttle:10,1');
+
+    Route::middleware(['auth:sanctum', 'admin.auth'])->group(function () {
+        Route::post('/auth/logout', [AdminAuthController::class, 'logout']);
+        Route::get('/auth/me', [AdminAuthController::class, 'me']);
+
+        Route::get('/organizations', [AdminOrganizationController::class, 'index']);
+        Route::post('/organizations', [AdminOrganizationController::class, 'store']);
+        Route::get('/organizations/{organization}', [AdminOrganizationController::class, 'show']);
+        Route::patch('/organizations/{organization}', [AdminOrganizationController::class, 'update']);
+
+        // Phase 2 — Outreach
+        Route::get('/outreach/dashboard', [AdminOutreachController::class, 'dashboard']);
+        Route::get('/outreach/organizations', [AdminOutreachController::class, 'organizations']);
+        Route::get('/outreach/activities', [AdminOutreachController::class, 'activities']);
+        Route::get('/organizations/{organization}/timeline', [AdminOutreachController::class, 'timeline']);
+        Route::post('/organizations/{organization}/admin-notes', [AdminOutreachController::class, 'storeNote']);
+
+        // Phase 3 — Smart Leads
+        Route::get('/organizations/{organization}/leads', [AdminSmartLeadsController::class, 'index']);
+        Route::get('/organizations/{organization}/smart-leads/analytics', [AdminSmartLeadsController::class, 'analytics']);
+        Route::post('/leads/prepare-outreach', [AdminSmartLeadsController::class, 'prepareOutreach'])
+            ->middleware('throttle:30,1');
+        Route::get('/leads/{lead}', [AdminSmartLeadsController::class, 'show']);
+        Route::post('/leads/{lead}/notes', [AdminSmartLeadsController::class, 'storeNote'])
+            ->middleware('throttle:60,1');
+
+        // Phase 4 — Social Listening
+        Route::get('/social-listening/overview', [AdminSocialListeningController::class, 'overview']);
+        Route::get('/social-listening/signals/export', [AdminSocialListeningController::class, 'export'])
+            ->middleware('throttle:10,1');
+        Route::get('/social-listening/signals', [AdminSocialListeningController::class, 'signals']);
+        Route::post('/social-listening/signals/review', [AdminSocialListeningController::class, 'review'])
+            ->middleware('throttle:30,1');
+        Route::get('/social-listening/runs', [AdminSocialListeningController::class, 'runs']);
+        Route::post('/social-listening/runs/{run}/retry', [AdminSocialListeningController::class, 'retryRun'])
+            ->middleware('throttle:20,1');
+        Route::get('/organizations/{organization}/social-listening/settings', [AdminSocialListeningController::class, 'showSettings']);
+        Route::patch('/organizations/{organization}/social-listening/settings', [AdminSocialListeningController::class, 'updateSettings']);
+        Route::post('/organizations/{organization}/social-listening/pause', [AdminSocialListeningController::class, 'pause'])
+            ->middleware('throttle:20,1');
+        Route::post('/organizations/{organization}/social-listening/resume', [AdminSocialListeningController::class, 'resume'])
+            ->middleware('throttle:20,1');
+        Route::post('/organizations/{organization}/social-listening/runs', [AdminSocialListeningController::class, 'queueRun'])
+            ->middleware('throttle:10,1');
+
+        // Phase 5 — CRM
+        Route::get('/crm/overview', [AdminCrmController::class, 'overview']);
+        Route::get('/crm/entries/export', [AdminCrmController::class, 'export'])
+            ->middleware('throttle:10,1');
+        Route::get('/crm/entries', [AdminCrmController::class, 'entries']);
+        Route::post('/crm/entries/archive', [AdminCrmController::class, 'archive'])
+            ->middleware('throttle:30,1');
+        Route::post('/crm/entries/restore', [AdminCrmController::class, 'restore'])
+            ->middleware('throttle:30,1');
+        Route::get('/crm/entries/{entry}', [AdminCrmController::class, 'show']);
+        Route::patch('/crm/entries/{entry}', [AdminCrmController::class, 'update'])
+            ->middleware('throttle:60,1');
+        Route::post('/crm/entries/{entry}/notes', [AdminCrmController::class, 'storeNote'])
+            ->middleware('throttle:60,1');
+        Route::post('/crm/entries/{entry}/duplicate-dismiss', [AdminCrmController::class, 'dismissDuplicate'])
+            ->middleware('throttle:30,1');
+        Route::post('/crm/entries/{entry}/complete-follow-up', [AdminCrmController::class, 'completeFollowUp'])
+            ->middleware('throttle:30,1');
+        Route::get('/crm/activity', [AdminCrmController::class, 'activity']);
+        Route::get('/organizations/{organization}/crm/review-policy', [AdminCrmController::class, 'showReviewPolicy']);
+        Route::put('/organizations/{organization}/crm/review-policy', [AdminCrmController::class, 'updateReviewPolicy'])
+            ->middleware('throttle:20,1');
+    });
 });
