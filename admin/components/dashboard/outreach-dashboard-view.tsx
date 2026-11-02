@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import Image from "next/image";
-import Link from "next/link";
 import type { OutreachDashboardData, OutreachBusiness } from "@/lib/outreach-dashboard";
 import { ActivityDrawer } from "./activity-drawer";
 import { BusinessLogo } from "./business-logo";

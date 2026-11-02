@@ -48,6 +48,7 @@ export function ActivityDrawer({
   onOpenAccount,
 }: ActivityDrawerProps) {
   const router = useRouter();
+  const businessId = business?.id ?? null;
   const [activeTab, setActiveTab] = useState<"all" | "emails" | "meetings" | "notes">("all");
   const [newNote, setNewNote] = useState("");
   const [timeline, setTimeline] = useState<TimelineItem[]>([]);
@@ -56,11 +57,11 @@ export function ActivityDrawer({
   const [saving, setSaving] = useState(false);
 
   const loadTimeline = useCallback(async () => {
-    if (!business?.id) return;
+    if (!businessId) return;
     setLoading(true);
     setError("");
     try {
-      const result = await fetchOrganizationTimeline(Number(business.id));
+      const result = await fetchOrganizationTimeline(Number(businessId));
       setTimeline(result.data);
     } catch (err) {
       setError(err instanceof AdminApiError ? err.message : "Failed to load timeline");
@@ -68,7 +69,7 @@ export function ActivityDrawer({
     } finally {
       setLoading(false);
     }
-  }, [business?.id]);
+  }, [businessId]);
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -87,8 +88,9 @@ export function ActivityDrawer({
   }, [isOpen]);
 
   useEffect(() => {
-    if (isOpen && business?.id) void loadTimeline();
-  }, [isOpen, business?.id, loadTimeline]);
+    if (!isOpen || !businessId) return;
+    void loadTimeline();
+  }, [isOpen, businessId, loadTimeline]);
 
   if (!business) return null;
 
