@@ -136,7 +136,15 @@ jobs:
           token: ${{ secrets.DO_ACCESS_TOKEN }}
 
       - name: Login to DO Container Registry
-        run: doctl registry login --expiry-seconds 600
+        run: |
+          doctl account get
+          STATUS="$(doctl account get --format Status --no-header | tr -d '[:space:]')"
+          if [ "$STATUS" != "active" ]; then
+            echo "::error::DigitalOcean team status is '$STATUS' (not active). Registry push will 403 until billing/support unlocks the P23 Africa team that owns factory-reg."
+            doctl account get
+            exit 1
+          fi
+          doctl registry login --expiry-seconds 1800
 
       - name: Extract metadata (tags, labels)
         id: meta
@@ -159,8 +167,10 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=registry,ref=${{ env.IMAGE_NAME }}:buildcache
-          cache-to: type=registry,ref=${{ env.IMAGE_NAME }}:buildcache,mode=max
+          # Use GitHub Actions cache — avoids DOCR 403 on cache import/export when
+          # the registry token/team cannot write (and keeps layer cache off DOCR quota).
+          cache-from: type=gha,scope=sales-engine-api
+          cache-to: type=gha,mode=max,scope=sales-engine-api
           platforms: linux/amd64
           secrets: |
             composer_auth={"github-oauth":{"github.com":"${{ secrets.COMPOSER_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}"}}

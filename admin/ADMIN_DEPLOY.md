@@ -72,6 +72,33 @@ npm run build
 - [ ] Confirm client `User` tokens receive `403` on `/api/v1/admin/*`
 - [ ] No demo fixture banners in production UI
 
+## Production Docker push (GitHub Actions)
+
+Deploy workflow: `.github/workflows/deploy-sales-engine-api.yml`  
+Image: `registry.digitalocean.com/factory-reg/sales-engine-api`  
+Secret: `DO_ACCESS_TOKEN` (must be a PAT for the **P23 Africa** team that owns `factory-reg`)
+
+If build succeeds but push fails with:
+
+```text
+403 Forbidden … /v2/registry/auth … "You are not allowed to perform this operation"
+```
+
+check the DigitalOcean team status first (not the Dockerfile):
+
+```bash
+doctl auth switch --context factory-new   # or your P23 Africa context
+doctl account get
+```
+
+A `Status: locked` with a payment / improper-use message means **registry pull/push is blocked until the team is unlocked**. Fix:
+
+1. Sign in as `toukafernande2020@gmail.com` (P23 Africa) → Billing → settle any unpaid invoice
+2. If still locked, open a DigitalOcean support ticket asking to unlock the team
+3. Confirm `doctl account get` shows `active`, then re-run the deploy workflow
+
+Do not rotate `DO_ACCESS_TOKEN` hoping to fix a locked-team 403 — a valid token on a locked team still cannot push.
+
 ## Out of scope (v1)
 
 - Admin impersonation into the client app
