@@ -248,7 +248,7 @@ export function useLeadStagePages(
                 };
             });
         },
-        [resetKey],
+        [resetKey, setPageState],
     );
 
     const isError = queries.some((query) => query.isError);

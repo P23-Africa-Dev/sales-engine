@@ -525,7 +525,7 @@ function LeadBoard({
   const containersRef = useRef<DndContainer[]>(initialContainers);
   const initialContainersRef = useRef(initialContainers);
   const boardKeyRef = useRef(boardKey);
-  const statusPendingRef = useRef(false);
+  const [statusPending, setStatusPending] = useState(false);
   const boardKeyAtPendingStartRef = useRef(boardKey);
   const dragOriginRef = useRef<string | null>(null);
   // Active tab state for column navigation
@@ -537,21 +537,20 @@ function LeadBoard({
       : activeTabId;
   const [prevBoardKey, setPrevBoardKey] = useState(boardKey);
 
-  initialContainersRef.current = initialContainers;
-  boardKeyRef.current = boardKey;
-
   if (boardKey !== prevBoardKey) {
     setPrevBoardKey(boardKey);
     // Only adopt server columns when lead/status content actually changed,
     // and never while a status mutation is in flight (avoids optimistic snap-back).
-    if (!statusPendingRef.current) {
+    if (!statusPending) {
       setContainers(initialContainers);
     }
   }
 
   useEffect(() => {
     containersRef.current = containers;
-  }, [containers]);
+    initialContainersRef.current = initialContainers;
+    boardKeyRef.current = boardKey;
+  }, [boardKey, containers, initialContainers]);
 
   function apply(updater: DndContainer[] | ((prev: DndContainer[]) => DndContainer[])) {
     setContainers((prev) => {
@@ -563,14 +562,14 @@ function LeadBoard({
 
   async function persistStageMove(leadId: string, status: ApiLeadStatus) {
     boardKeyAtPendingStartRef.current = boardKeyRef.current;
-    statusPendingRef.current = true;
+    setStatusPending(true);
     try {
       await onStatusChange(leadId, status);
     } catch {
       apply(initialContainersRef.current);
       throw new Error("status update failed");
     } finally {
-      statusPendingRef.current = false;
+      setStatusPending(false);
       // If refetch already landed a new boardKey during the mutation, adopt it now.
       if (boardKeyRef.current !== boardKeyAtPendingStartRef.current) {
         apply(initialContainersRef.current);
