@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { useLead, useUpdateLead, useAddLeadNote, useAddLeadActivity, useCrmAssignees, useCrmLabels } from "@/hooks/use-crm";
+import { useLead, useUpdateLead, useAddLeadNote, useAddLeadActivity, useCrmAssignees, useCrmLabels, useCrmPipelines } from "@/hooks/use-crm";
 import { useAuthStore } from "@/store/auth";
 import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
@@ -359,6 +359,7 @@ type EditLeadForm = {
   position: string;
   profileUrls: string[];
   status: ApiLeadStatus;
+  pipeline_id: string;
   source: string;
   priority: ApiLeadPriority;
   assigned_to_user_id: string;
@@ -383,7 +384,12 @@ export default function LeadDetailsPage() {
   const companyId = apiCompanyId ?? undefined;
   const [isAddOpen, setIsAddOpen] = useState(false);
   const { data: labels = [] } = useCrmLabels(companyId, "/admin");
+  const { data: pipelines = [] } = useCrmPipelines(companyId, "/admin");
   const statusOptions = labels.map(label => ({ label: label.name, color: label.color, slug: label.slug }));
+  const pipelineOptions = [
+    { value: "", label: "Select Pipeline" },
+    ...pipelines.map((pipeline) => ({ value: String(pipeline.id), label: pipeline.name })),
+  ];
 
   // Real data fetching
   const { data: leadData, isLoading, isPending, isError } = useLead(leadId, companyId, "/admin");
@@ -406,6 +412,7 @@ export default function LeadDetailsPage() {
     position: "",
     profileUrls: [""],
     status: "new",
+    pipeline_id: "",
     source: "",
     priority: "medium",
     assigned_to_user_id: "",
@@ -437,6 +444,7 @@ export default function LeadDetailsPage() {
       ? lead.profile_urls.map(toTrimmedString).filter(Boolean)
       : [""],
     status: lead.status || "new",
+    pipeline_id: lead.pipeline_id != null ? String(lead.pipeline_id) : "",
     source: toTrimmedString(lead.source),
     priority: lead.priority || "medium",
     assigned_to_user_id: lead.assigned_to_user_id ? String(lead.assigned_to_user_id) : "",
@@ -522,6 +530,11 @@ export default function LeadDetailsPage() {
       sort_order: index,
     }));
     const primaryContact = contacts[0];
+    if (!editForm.pipeline_id) {
+      toast.error("Pipeline is required.");
+      return;
+    }
+
     const payload: UpdateLeadPayload = {
       name: primaryContact.name,
       email: primaryContact.email,
@@ -533,6 +546,7 @@ export default function LeadDetailsPage() {
       position: editForm.position.trim() || null,
       profile_urls: cleanedProfileUrls.length > 0 ? cleanedProfileUrls : null,
       status: editForm.status,
+      pipeline_id: Number(editForm.pipeline_id),
       source: editForm.source,
       priority: editForm.priority,
       next_action: editForm.next_action,
@@ -875,9 +889,18 @@ export default function LeadDetailsPage() {
                   <label className="text-gray-400 text-[12px] font-medium uppercase tracking-widest">
                     Pipeline
                   </label>
-                  <p className="text-[#0B1215] text-[16px] font-semibold truncate">
-                    {leadDisplay.pipelineName}
-                  </p>
+                  {isEditing ? (
+                    <SearchableSelect
+                      value={editForm.pipeline_id}
+                      onChange={(v) => updateField("pipeline_id", v)}
+                      options={pipelineOptions}
+                      className="bg-white border border-gray-100 rounded-xl px-3 py-1.5 text-[14px] min-w-40"
+                    />
+                  ) : (
+                    <p className="text-[#0B1215] text-[16px] font-semibold truncate">
+                      {leadDisplay.pipelineName}
+                    </p>
+                  )}
                 </div>
                 <div className="flex flex-col gap-1">
                   <label className="text-gray-400 text-[12px] font-medium uppercase tracking-widest">

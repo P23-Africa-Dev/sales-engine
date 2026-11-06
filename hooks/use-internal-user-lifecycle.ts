@@ -51,6 +51,7 @@ export function useDeleteInternalUser() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["internal-users"] });
       queryClient.invalidateQueries({ queryKey: ["internal-user-audit-logs"] });
+      queryClient.invalidateQueries({ queryKey: ["billing-status"] });
     },
   });
 }

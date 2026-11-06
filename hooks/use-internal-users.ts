@@ -89,6 +89,7 @@ export function useCreateInternalUser(options?: {
       createInternalUser(payload, token),
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ["internal-users"] });
+      queryClient.invalidateQueries({ queryKey: ["billing-status"] });
       options?.onSuccess?.(res.data.user);
     },
   });

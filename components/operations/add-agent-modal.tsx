@@ -110,6 +110,8 @@ export function AddAgentModal({ onClose }: { onClose: () => void }) {
     seatUsage != null &&
     seatUsage.remaining !== null &&
     seatUsage.remaining <= 0;
+  const seatCapLabel =
+    seatUsage?.limit != null ? `${seatUsage.used} of ${seatUsage.limit}` : null;
 
   const createMutation = useCreateInternalUser();
   const { data: currenciesData, isLoading: loadingCurrencies } = useSupportedCurrencies();
@@ -244,14 +246,19 @@ export function AddAgentModal({ onClose }: { onClose: () => void }) {
     e.preventDefault();
 
     if (seatsAtCap) {
-      toast.error("Your plan is at its seat limit. Upgrade to add more users.", {
-        action: {
-          label: "Upgrade plan",
-          onClick: () => {
-            window.location.href = "/billing/change-plan";
+      toast.error(
+        seatCapLabel
+          ? `Your plan is at its seat limit (${seatCapLabel}). Upgrade to add more users.`
+          : "Your plan is at its seat limit. Upgrade to add more users.",
+        {
+          action: {
+            label: "Upgrade plan",
+            onClick: () => {
+              window.location.href = "/billing/change-plan";
+            },
           },
         },
-      });
+      );
       return;
     }
     const errs = validate();
@@ -375,7 +382,7 @@ export function AddAgentModal({ onClose }: { onClose: () => void }) {
 
               {seatsAtCap && (
                 <p className="text-[12px] text-amber-700 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2">
-                  Your plan is at capacity. Upgrade to add more team members.
+                  Your plan is at capacity{seatCapLabel ? ` (${seatCapLabel})` : ""}. Upgrade to add more team members.
                 </p>
               )}
 
