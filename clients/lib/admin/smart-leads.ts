@@ -65,46 +65,6 @@ export interface BusinessProspectAnalytics {
   };
 }
 
-export interface VelocityDayPoint {
-  day: string;
-  dayLabel: string;
-  touches: number;
-  opens: number;
-  replies: number;
-  meetings: number;
-}
-
-export function getBusinessVelocityData(businessId: string): VelocityDayPoint[] {
-  // 14-day deterministic realistic outreach touches curve
-  const days = [
-    "Day 1", "Day 2", "Day 3", "Day 4", "Day 5", "Day 6", "Day 7",
-    "Day 8", "Day 9", "Day 10", "Day 11", "Day 12", "Day 13", "Today"
-  ];
-  const labels = [
-    "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun",
-    "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Today"
-  ];
-
-  // Base seeds for variety across businesses
-  const seedMultiplier = businessId === "nord-tech" ? 1.2 : businessId === "alpine" ? 0.95 : 1.05;
-  const touchBases = [22, 38, 45, 41, 35, 12, 9, 28, 48, 52, 44, 39, 15, 34];
-
-  return days.map((day, i) => {
-    const touches = Math.round(touchBases[i] * seedMultiplier);
-    const opens = Math.round(touches * (0.68 + (i % 3) * 0.05));
-    const replies = Math.max(1, Math.round(opens * (0.22 + (i % 2) * 0.04)));
-    const meetings = i % 3 === 0 ? Math.max(1, Math.round(replies * 0.35)) : 0;
-    return {
-      day,
-      dayLabel: labels[i],
-      touches,
-      opens,
-      replies,
-      meetings,
-    };
-  });
-}
-
 export interface OnboardedBusiness {
   id: string;
   name: string;

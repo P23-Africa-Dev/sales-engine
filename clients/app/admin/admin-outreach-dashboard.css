@@ -4540,3 +4540,197 @@
 .drawer-meta-link:hover {
   text-decoration: underline;
 }
+
+/* Key Business Accounts */
+.key-accounts .smart-leads-badge { align-self: flex-start; }
+.key-accounts .smart-leads-master-pane {
+  background: linear-gradient(145deg, #032026, #032b34);
+  border-color: #1b3a44;
+  color: #fdfdfd;
+  box-shadow: inset 0 1px 2px #ffffff14, 0 8px 24px #0004;
+}
+.key-accounts .pane-title-row h2 { color: #fdfdfd; }
+.key-accounts .pane-subtitle,
+.key-accounts .master-search-wrap .search-icon,
+.key-accounts .master-search-wrap input::placeholder { color: #8da5aa; }
+.key-accounts .count-badge {
+  background: #0a363a;
+  border-color: #136b68;
+  color: #2be9c9;
+  white-space: nowrap;
+}
+.key-accounts .master-search-wrap input,
+.key-accounts .master-filter-select,
+.key-accounts .master-filter-select option {
+  background: #05171d;
+  border-color: #24434d;
+  color: #e2e8f0;
+  color-scheme: dark;
+}
+.key-accounts .master-search-wrap input:focus,
+.key-accounts .master-filter-select:focus { border-color: #2be9c9; }
+.key-accounts .account-filters {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.key-accounts .account-filters select { min-width: 0; }
+.key-accounts .account-filters select:last-child { grid-column: 1 / -1; }
+.key-accounts .business-cards-list {
+  list-style: none;
+  padding: 2px calc(6 * var(--ds)) 2px 2px;
+  scrollbar-color: #244955 #052229;
+}
+.key-accounts .business-cards-list li { min-width: 0; }
+.key-accounts .business-selector-card.is-selected {
+  background: #c974f4;
+  border-color: #a855f7;
+  box-shadow: 0 0 0 2px #a855f766;
+}
+.key-accounts .is-selected .biz-legal-name,
+.key-accounts .is-selected .account-card-meta { color: #24132f; }
+.key-accounts .is-selected .active-dot-indicator {
+  background: #070b16;
+  box-shadow: 0 0 8px #070b1655;
+}
+.key-accounts .account-card-meta {
+  display: grid;
+  gap: 3px;
+  font-size: calc(11 * var(--ds));
+  color: #475569;
+}
+.key-accounts .profile-title-row h2 {
+  font-size: calc(22 * var(--ds));
+  font-weight: 700;
+  color: #0f172a;
+}
+.key-accounts .profile-avatar { flex-shrink: 0; }
+.key-accounts .business-profile-header { background: #fff; }
+.key-accounts .profile-main-info > div { min-width: 0; overflow-wrap: anywhere; }
+.key-accounts .telemetry-pill {
+  background: var(--metric-background);
+  border-color: transparent;
+  color: #070b16;
+}
+.key-accounts .telemetry-pill dd { margin-inline-start: 0; }
+.key-accounts .telemetry-pill :is(.telemetry-label, .telemetry-val, .telemetry-sub) { color: inherit; }
+.key-accounts .telemetry-emails { --metric-background: #c974f4; }
+.key-accounts .telemetry-prospects { --metric-background: #ff70a6; }
+.key-accounts .telemetry-fit { --metric-background: #2be9c9; }
+.key-accounts .telemetry-meetings {
+  --metric-background: #39233a;
+  border-color: #754686;
+  color: #fdfdfd;
+}
+.key-accounts .account-engagement-rates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: calc(6 * var(--ds)) calc(20 * var(--ds));
+  font-size: calc(11 * var(--ds));
+  color: #475569;
+}
+.key-accounts .account-engagement-rates > div { display: flex; gap: calc(5 * var(--ds)); }
+.key-accounts .account-engagement-rates dd { font-weight: 700; color: #0f172a; }
+.key-accounts .account-signal-legend { cursor: default; }
+.key-accounts .account-touch-header { flex-wrap: wrap; }
+.key-accounts .velocity-metric-tabs { flex-wrap: wrap; }
+.key-accounts .velocity-bars-row { gap: 3px; }
+.key-accounts .velocity-bar-col { min-width: 0; cursor: default; }
+.key-accounts .bar-day-label { font-size: clamp(8px, .8vw, 11px); }
+.key-accounts .account-empty { padding: 20px; }
+.key-accounts .tier-highlight-box { text-align: left; }
+.key-accounts .tier-box-desc { display: block; }
+
+.key-accounts .prospects-white-table {
+  min-width: max(830px, calc(1000 * var(--ds)));
+  table-layout: fixed;
+  white-space: nowrap;
+}
+.key-accounts .prospects-white-table .th-signal { width: calc(205 * var(--ds)); }
+.key-accounts .prospects-white-table .th-contact { width: calc(166 * var(--ds)); }
+.key-accounts .prospects-white-table .th-fit { width: calc(110 * var(--ds)); }
+.key-accounts .prospects-white-table .th-actions {
+  width: calc(244 * var(--ds));
+  text-align: right;
+}
+.key-accounts .prospect-row { height: calc(76 * var(--ds)); }
+.key-accounts .prospect-row td { padding-block: calc(9 * var(--ds)); }
+.key-accounts .company-headline-row { flex-wrap: nowrap; }
+.key-accounts .company-industry-tag { max-width: 42%; }
+.key-accounts .contact-verified-badge { flex-shrink: 0; }
+.key-accounts .prospects-white-table :is(
+  .company-name-text,
+  .company-industry-tag,
+  .company-sub-meta,
+  .signal-trigger-title,
+  .signal-why-now,
+  .contact-name-text,
+  .contact-title-text
+) {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.key-accounts .prospect-row:nth-child(even):not(.is-selected):not(:hover) {
+  background: #fbfcfe;
+}
+
+@media (min-width: 1024px) {
+  html:has(.admin-view > main > .key-accounts) {
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+
+  .admin-view:has(> main > .key-accounts) {
+    height: 100dvh;
+    min-height: 0;
+    overflow: clip;
+  }
+
+  .admin-view > main:has(> .key-accounts) {
+    display: flex;
+    min-height: 0;
+    overflow: clip;
+  }
+
+  .smart-leads-container.key-accounts {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-width: 0;
+    padding-bottom: calc(14 * var(--ds));
+  }
+
+  .key-accounts .smart-leads-header,
+  .key-accounts .enrollment-success-banner {
+    flex-shrink: 0;
+  }
+
+  .key-accounts .smart-leads-workspace {
+    flex: 1;
+    min-height: 0;
+    align-items: stretch;
+  }
+
+  .key-accounts .smart-leads-master-pane {
+    position: relative;
+    top: auto;
+    height: auto;
+    min-height: 0;
+    max-height: none;
+    align-self: stretch;
+  }
+
+  .key-accounts .smart-leads-detail-pane {
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+    scrollbar-gutter: stable;
+    padding: 0 calc(8 * var(--ds)) calc(110 * var(--ds)) 0;
+  }
+
+  .key-accounts .smart-leads-detail-pane > * {
+    flex-shrink: 0;
+  }
+}
