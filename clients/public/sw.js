@@ -39,7 +39,15 @@ self.addEventListener("fetch", (event) => {
     url.pathname.startsWith("/api/") ||
     url.pathname.startsWith("/backend/")
   ) {
-    event.respondWith(networkFirst(request, API_CACHE));
+    event.respondWith(
+      networkFirst(request, API_CACHE).catch(
+        () =>
+          new Response(JSON.stringify({ success: false, message: "Offline" }), {
+            status: 503,
+            headers: { "Content-Type": "application/json" },
+          }),
+      ),
+    );
     return;
   }
 
@@ -53,11 +61,13 @@ self.addEventListener("fetch", (event) => {
     request.headers.get("Next-Router-Prefetch") === "1" ||
     request.headers.get("Next-Router-State-Tree") != null;
 
-  if (
-    url.pathname.startsWith("/_next/") ||
-    url.pathname.startsWith("/fonts/") ||
-    isRscRequest
-  ) {
+  // Keep the framework assets and route payloads in sync with fresh HTML.
+  if (url.pathname.startsWith("/_next/") || isRscRequest) {
+    event.respondWith(networkFirst(request, STATIC_CACHE));
+    return;
+  }
+
+  if (url.pathname.startsWith("/fonts/")) {
     event.respondWith(staleWhileRevalidate(request, STATIC_CACHE));
     return;
   }
@@ -127,15 +137,10 @@ async function networkFirst(request, cacheName) {
       cache.put(request, response.clone());
     }
     return response;
-  } catch {
+  } catch (error) {
     const cached = await caches.match(request);
-    return (
-      cached ||
-      new Response(JSON.stringify({ success: false, message: "Offline" }), {
-        status: 503,
-        headers: { "Content-Type": "application/json" },
-      })
-    );
+    if (cached) return cached;
+    throw error;
   }
 }
 

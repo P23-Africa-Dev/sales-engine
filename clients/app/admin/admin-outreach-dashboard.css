@@ -3441,6 +3441,9 @@
     flex-direction: column;
     gap: calc(18 * var(--ds));
   }
+  .smart-leads-detail-pane {
+    align-self: stretch;
+  }
   .smart-leads-master-pane {
     width: 100%;
     position: static;
@@ -3631,6 +3634,12 @@
   padding: calc(3 * var(--ds));
   border-radius: calc(10 * var(--ds));
   border: 1px solid #e2e8f0;
+}
+
+@media (max-width: 768px) {
+  .prospects-tier-tabs {
+    flex-wrap: wrap;
+  }
 }
 
 .tier-tab-pill {

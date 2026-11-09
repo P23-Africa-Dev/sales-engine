@@ -14,7 +14,7 @@ import { ChevronDown, LogOut, Users } from "lucide-react";
 const navItems = [
   { name: "Dashboard", href: "/admin", icon: "/dashboard-design/469fa.svg" },
   { name: "Smart Leads", href: "/admin/smart-leads", icon: "/dashboard-design/8ea52.svg" },
-  { name: "Social Listening", href: "/admin/social-listening", icon: "/dashboard-design/d3b09.svg" },
+  // { name: "Social Listening", href: "/admin/social-listening", icon: "/dashboard-design/d3b09.svg" },
   { name: "CRM", href: "/admin/crm", icon: "/dashboard-design/f4304.svg" },
   { name: "Map", href: "/admin/map", icon: "/dashboard-design/map-nav.svg" },
 ];
