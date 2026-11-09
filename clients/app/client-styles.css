@@ -1,0 +1,4 @@
+/* Client-view stylesheets (kept out of the root layout so the admin view does not inherit them). */
+@import "./outreach-dashboard.css";
+@import "./sales-workspace.css";
+@import "./outreach-activities.css";

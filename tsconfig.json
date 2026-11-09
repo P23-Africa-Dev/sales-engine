@@ -34,6 +34,7 @@
   "exclude": [
     "node_modules",
     "admin",
+    "clients",
     "backend",
     "the-factory-agent-pwa",
     "tests",

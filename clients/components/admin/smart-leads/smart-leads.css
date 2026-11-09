@@ -1,0 +1,633 @@
+/* Smart Leads uses the shared admin surfaces and tenant workspace pattern. */
+.sp-root {
+  font-variant-numeric: tabular-nums;
+}
+.sp-workspace {
+  align-items: start;
+}
+.sp-detail {
+  min-width: 0;
+}
+/* ChartPanel removes margins for grid charts; this standalone chart needs
+   the same separation as the other stacked workspace panels. */
+.sp-detail > .sp-signals {
+  margin-bottom: 28px;
+}
+.sp-client-list .sl-panel-head {
+  padding: 22px 20px;
+}
+.sp-client-list .sl-panel-head h2 {
+  font-size: 19px;
+}
+.sp-client-filters {
+  display: grid;
+  gap: 12px;
+  margin: 0 18px 16px;
+}
+.sp-client-filters label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: #626879;
+  font-size: 11px;
+}
+.sp-client-filters select {
+  width: 100%;
+  font-size: 11px;
+  padding: 10px;
+}
+.sp-business-item > div > span {
+  display: block;
+  font-size: 10px;
+  color: #626879;
+  margin-top: 5px;
+}
+.sp-business-item.active > div > span {
+  color: #d2e6e8;
+}
+.sp-client-footnote {
+  padding: 16px 24px 0;
+  font-size: 11px !important;
+}
+.sp-business-summary .sl-panel-head h2 {
+  font-size: 25px;
+}
+.sp-business-summary .sl-monogram {
+  width: 46px;
+  height: 46px;
+  font-size: 14px;
+  background: #e8dcf0;
+  color: #764b88;
+}
+.sp-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 20px;
+  padding: 0 26px 26px;
+}
+.sp-metrics > div {
+  border-top: 1px solid #e1dfe5;
+  padding-top: 18px;
+}
+.sp-metrics > div > span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  color: #626879;
+  font-size: 9px;
+  letter-spacing: 0.3px;
+}
+.sp-metrics strong {
+  display: block;
+  font-size: 31px;
+  font-weight: 500;
+  line-height: 1.65;
+  color: #39233a;
+}
+.sp-metrics small {
+  display: block;
+  font-size: 10px;
+}
+.sp-analytics {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+  gap: 24px;
+  margin-bottom: 26px;
+}
+.sp-analytics .sl-panel {
+  margin-bottom: 0;
+}
+.sp-intent-chart .crm-donut {
+  width: 185px;
+  height: 185px;
+  margin-bottom: 18px;
+}
+.sp-intent-chart .sl-panel-head h2,
+.sp-velocity-chart .sl-panel-head h2 {
+  font-size: 20px;
+}
+.sp-legend-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 8px;
+}
+.sp-intent-chart .crm-source-legend button > span {
+  font-size: 12px;
+}
+.sp-velocity-switch {
+  width: fit-content;
+  margin: 0 24px 18px;
+}
+.sp-velocity-summary {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  margin: 0 24px 24px;
+}
+.sp-velocity-summary strong {
+  font-size: 33px;
+  font-weight: 500;
+  color: #39233a;
+}
+.sp-velocity-summary > span {
+  font-size: 11px;
+  color: #626879;
+}
+.sp-velocity-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 7px;
+  padding: 0 24px;
+}
+.sp-velocity-column {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  cursor: crosshair;
+  outline-offset: 3px;
+}
+.sp-velocity-track {
+  height: 172px;
+  display: flex;
+  align-items: flex-end;
+  background: #f5f1f7;
+  border-radius: 5px;
+  overflow: hidden;
+}
+.sp-velocity-fill {
+  width: 100%;
+  display: block;
+  border-radius: 5px 5px 0 0;
+  background: #9561a6;
+  transform-origin: bottom;
+  animation: crm-bar 0.65s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.sp-velocity-column:hover .sp-velocity-fill {
+  background: #673c72;
+}
+.sp-velocity-column > small {
+  display: block;
+  min-height: 30px;
+  padding-top: 9px;
+  font-size: 10px;
+  text-align: center;
+}
+.sp-velocity-column > .crm-tooltip {
+  bottom: 85%;
+  left: 50%;
+  transform: translateX(-50%);
+}
+.sp-velocity-column:first-child > .crm-tooltip {
+  left: 0;
+  transform: none;
+}
+.sp-velocity-column:nth-last-child(-n + 4) > .crm-tooltip {
+  left: auto;
+  right: 0;
+  transform: none;
+}
+.sp-root .sp-chart-note {
+  padding: 10px 24px 22px;
+  font-size: 11px;
+}
+.sp-signals .sl-panel-head {
+  padding-bottom: 18px;
+}
+.sp-signal-controls {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  padding: 0 26px 24px;
+}
+.sp-root .sp-signal-controls button {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 9px;
+  text-align: left;
+  border: 1px solid #e2dce8;
+  border-radius: 12px;
+  background: #f6f3f8;
+  padding: 16px;
+}
+.sp-signal-controls button > span:first-child {
+  font-size: 12px;
+}
+.sp-signal-controls strong {
+  font-size: 24px;
+  font-weight: 500;
+  color: #673c72;
+}
+.sp-signal-track {
+  display: block;
+  height: 5px;
+  border-radius: 3px;
+  background: #e2d8e8;
+  overflow: hidden;
+}
+.sp-signal-track > span {
+  display: block;
+  height: 100%;
+  background: #9561a6;
+}
+.sp-root .sp-signal-controls button[aria-pressed="true"] {
+  background: #39233a;
+  color: #fff;
+  border-color: #39233a;
+}
+.sp-signal-controls button[aria-pressed="true"] strong {
+  color: #fff;
+}
+.sp-tier-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 26px 22px;
+}
+.sl-root .sp-tier-filters button,
+.sl-dialog .sp-tier-filters button {
+  font-size: 11px;
+  background: #f5f1f7;
+  border: 0;
+  padding: 9px 12px;
+}
+.sl-root .sp-tier-filters button[aria-pressed="true"],
+.sl-dialog .sp-tier-filters button[aria-pressed="true"] {
+  background: #2ae9c9;
+  color: #06252b;
+  font-weight: 600;
+}
+.sp-tier-filters button > span {
+  display: inline-block;
+  border-radius: 5px;
+  background: #e7e0ed;
+  color: #5c4168;
+  padding: 1px 5px;
+  margin-left: 5px;
+}
+.sp-root .sp-prospect-table {
+  min-width: 950px;
+}
+.sp-prospect-table td:first-child,
+.sp-prospect-table th:first-child {
+  padding-right: 0;
+}
+.sp-prospect-table td:nth-child(2) {
+  min-width: 260px;
+  max-width: 320px;
+}
+.sp-table-signal {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 11px;
+  color: #764b88;
+  line-height: 1.6;
+  margin-top: 9px;
+}
+.sp-table-signal svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.sl-root .sp-copy {
+  font-size: 11px;
+  margin-top: 6px;
+}
+.sl-root td .sp-fit-score {
+  font-size: 22px;
+  font-weight: 500;
+  color: #673c72;
+  margin-bottom: 5px;
+}
+.sp-tier-high {
+  background: #eadcf1;
+  color: #69417b;
+}
+.sp-tier-middle {
+  background: #d9f4ea;
+  color: #126052;
+}
+.sp-tier-low {
+  background: #faeacb;
+  color: #885313;
+}
+.sp-status {
+  font-size: 11px;
+  display: block;
+  max-width: 125px;
+}
+.sp-page-size {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sl-root .sp-page-size select {
+  font-size: 11px;
+  padding: 5px 8px;
+}
+.sp-dialog-owner {
+  display: block;
+  font-size: 11px;
+  color: #eadcea;
+  margin-top: 6px;
+}
+.sp-prospect-dialog .sl-config-grid {
+  margin: 24px 0;
+}
+.sp-evidence {
+  background: #f4edf6;
+  padding: 20px;
+  border-radius: 12px;
+  margin-bottom: 24px;
+}
+.sp-tech-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 14px;
+}
+.sp-contact {
+  padding-bottom: 24px;
+  border-bottom: 1px solid #e1dfe5;
+  margin-bottom: 24px;
+}
+.sp-contact > strong {
+  display: block;
+  font-size: 14px;
+  margin-top: 14px;
+}
+.sp-contact-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  margin-top: 12px;
+  overflow-wrap: anywhere;
+}
+.sp-contact-line svg {
+  flex-shrink: 0;
+  color: #764b88;
+}
+.sp-prospect-dialog .sp-tier-filters {
+  padding: 0 0 20px;
+}
+.sp-activity article,
+.sp-notes article {
+  border-top: 1px solid #e1dfe5;
+  padding: 18px 0;
+}
+.sp-activity strong {
+  font-weight: 500;
+  font-size: 13px;
+}
+.sp-activity p,
+.sp-notes p {
+  font-size: 12px;
+}
+.sp-activity small,
+.sp-notes small {
+  display: block;
+  margin-top: 8px;
+}
+.sp-notes h4 {
+  margin-top: 20px;
+}
+.sp-enrollment-dialog {
+  height: auto;
+  max-height: 90dvh;
+  width: min(520px, calc(100% - 32px));
+  inset: 0;
+  margin: auto;
+  border-radius: 16px;
+}
+@media (max-width: 1200px) {
+  .sp-analytics {
+    grid-template-columns: 1fr;
+  }
+  .sp-metrics {
+    grid-template-columns: 1fr 1fr;
+  }
+  .sp-signal-controls {
+    grid-template-columns: 1fr 1fr;
+  }
+  .sp-intent-chart .crm-donut {
+    width: 190px;
+    height: 190px;
+  }
+  .sp-intent-chart .crm-source-legend {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .sp-root .sp-intent-chart .crm-source-legend button {
+    flex-wrap: wrap;
+  }
+  .sp-intent-chart .crm-source-legend small {
+    margin-left: 5px;
+  }
+}
+@media (max-width: 760px) {
+  .sp-client-list {
+    max-height: 360px;
+    overflow-y: auto;
+  }
+  .sp-metrics {
+    padding: 0 18px 22px;
+    gap: 16px;
+  }
+  .sp-analytics {
+    gap: 24px;
+  }
+  .sp-intent-chart .crm-source-legend {
+    display: flex;
+  }
+  .sp-signal-controls {
+    padding: 0 18px 20px;
+    gap: 10px;
+  }
+  .sp-tier-filters {
+    padding: 0 18px 20px;
+  }
+  .sp-directory .sl-pagination > div {
+    flex-wrap: wrap;
+  }
+  .sp-velocity-bars {
+    gap: 5px;
+    padding: 0 18px;
+  }
+  .sp-velocity-track {
+    height: 154px;
+  }
+  .sp-velocity-switch {
+    margin-left: 18px;
+  }
+  .sp-velocity-summary {
+    margin-left: 18px;
+  }
+  .sp-root .sp-chart-note {
+    padding: 10px 18px 20px;
+  }
+  .sp-business-summary .sl-panel-head h2 {
+    font-size: 22px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sp-velocity-fill {
+    animation: none !important;
+  }
+}
+.sp-root .crm-source-legend button {
+  display: flex;
+  justify-content: space-between;
+  text-align: left;
+  background: #513b53;
+  color: #fff;
+  border: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+}
+.sp-root .crm-source-legend button:hover {
+  background: #69516b;
+  box-shadow: none;
+}
+.sp-mobile-controls {
+  display: none;
+}
+@media (max-width: 760px) {
+  .sp-mobile-controls {
+    display: flex;
+    align-items: flex-end;
+    gap: 10px;
+    margin-bottom: 24px;
+    flex-wrap: wrap;
+  }
+  .sp-mobile-controls label {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    flex: 1;
+    color: #d8e5e7;
+    font-size: 12px;
+    min-width: 170px;
+  }
+  .sp-mobile-controls select {
+    width: 100%;
+    font-size: 12px;
+  }
+  .sp-client-list {
+    display: none;
+  }
+  .sp-client-list.sp-mobile-open {
+    display: block;
+    max-height: 480px;
+  }
+}
+
+/* One dashboard elevation for every top-level Smart Leads surface. */
+.sp-root .sl-panel {
+  box-shadow: var(--outreach-shadow);
+}
+.sp-root .sp-client-list {
+  background: linear-gradient(155deg, #efe7f3, #e1d7e9);
+  color: #241d2d;
+}
+.sp-client-list .sp-client-filters input,
+.sp-client-list .sp-client-filters select {
+  background: #fff;
+}
+.sp-root .sp-client-list .sl-business-item:not(.active):hover {
+  background: #fff9;
+}
+.sp-coverage-chart {
+  padding: 0 26px 24px;
+}
+.sp-coverage-axis {
+  display: flex;
+  justify-content: space-between;
+  margin: 0 90px 12px 120px;
+  color: #626879;
+  font-size: 10px;
+}
+.sp-root .sp-coverage-row {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr) 80px;
+  gap: 10px;
+  width: 100%;
+  align-items: center;
+  text-align: left;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  padding: 12px 0;
+}
+.sp-root .sp-coverage-row:hover,
+.sp-root .sp-coverage-row[aria-pressed="true"] {
+  background: #f2edf5;
+}
+.sp-coverage-row > span:first-child {
+  font-size: 12px;
+}
+.sp-coverage-row > strong {
+  font-size: 18px;
+  color: #673c72;
+  text-align: right;
+}
+.sp-coverage-row strong small {
+  display: block;
+  font-size: 10px;
+  font-weight: 400;
+  color: #626879;
+}
+.sp-coverage-plot {
+  position: relative;
+}
+.sp-coverage-plot .sp-signal-track {
+  height: 26px;
+  border-radius: 5px;
+  background:
+    repeating-linear-gradient(
+      to right,
+      #e8e2ed 0,
+      #e8e2ed 1px,
+      transparent 1px,
+      transparent 25%
+    ),
+    #f5f3f6;
+}
+.sp-coverage-fill {
+  border-radius: 5px;
+  transform-origin: left;
+}
+.crm-chart.is-visible .sp-coverage-fill {
+  animation: sp-coverage-grow 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@keyframes sp-coverage-grow {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+@media (max-width: 760px) {
+  .sp-coverage-chart {
+    padding: 0 18px 20px;
+  }
+  .sp-coverage-axis {
+    margin-left: 90px;
+    margin-right: 50px;
+  }
+  .sp-root .sp-coverage-row {
+    grid-template-columns: 80px minmax(0, 1fr) 40px;
+  }
+  .sp-coverage-row strong small {
+    display: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .crm-chart.is-visible .sp-coverage-fill {
+    animation: none;
+  }
+}

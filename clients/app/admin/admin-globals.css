@@ -1,0 +1,6 @@
+/* Admin view base styles (Tailwind itself is loaded once by app/globals.css). */
+body {
+  background: #041014;
+  color: #fdfdfd;
+  min-height: 100vh;
+}

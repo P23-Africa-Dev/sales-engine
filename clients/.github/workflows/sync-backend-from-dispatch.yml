@@ -1,0 +1,113 @@
+name: Sync Backend Snapshot
+
+on:
+  repository_dispatch:
+    types:
+      - backend-sync-request
+  workflow_dispatch:
+    inputs:
+      backend_repository:
+        description: Backend repository in owner/repo format
+        required: true
+      backend_ref:
+        description: Backend branch or tag to sync from
+        required: true
+        default: main
+      target_branch:
+        description: Frontend branch to receive synced backend files
+        required: true
+        default: main
+
+permissions:
+  contents: write
+
+jobs:
+  sync-backend:
+    name: Sync backend folder into frontend repository
+    runs-on: ubuntu-latest
+
+    env:
+      DEFAULT_TARGET_BRANCH: main
+
+    steps:
+      - name: Resolve sync parameters
+        id: params
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
+            echo "backend_repository=${{ github.event.client_payload.backend_repository }}" >> "$GITHUB_OUTPUT"
+            echo "backend_ref=${{ github.event.client_payload.backend_ref }}" >> "$GITHUB_OUTPUT"
+            echo "target_branch=${{ vars.FRONTEND_SYNC_TARGET_BRANCH || env.DEFAULT_TARGET_BRANCH }}" >> "$GITHUB_OUTPUT"
+            echo "backend_sha=${{ github.event.client_payload.backend_sha }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "backend_repository=${{ inputs.backend_repository }}" >> "$GITHUB_OUTPUT"
+            echo "backend_ref=${{ inputs.backend_ref }}" >> "$GITHUB_OUTPUT"
+            echo "target_branch=${{ inputs.target_branch }}" >> "$GITHUB_OUTPUT"
+            echo "backend_sha=manual" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Validate required parameters
+        shell: bash
+        run: |
+          if [ -z "${{ steps.params.outputs.backend_repository }}" ]; then
+            echo "backend_repository is empty."
+            echo "Set backend workflow payload or run workflow_dispatch with backend_repository."
+            exit 1
+          fi
+
+      - name: Checkout frontend repository target branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.params.outputs.target_branch }}
+          fetch-depth: 0
+
+      - name: Checkout backend repository snapshot
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.params.outputs.backend_repository }}
+          ref: ${{ steps.params.outputs.backend_ref }}
+          path: .tmp/backend-source
+          fetch-depth: 1
+          token: ${{ secrets.BACKEND_REPO_READ_TOKEN != '' && secrets.BACKEND_REPO_READ_TOKEN || github.token }}
+
+      - name: Normalize backend path if currently gitlink
+        shell: bash
+        run: |
+          if git ls-files -s backend | grep -q '^160000 '; then
+            git rm --cached backend
+            rm -rf backend
+          fi
+
+      - name: Sync backend snapshot into backend directory
+        shell: bash
+        run: |
+          mkdir -p backend
+          rsync -a --delete \
+            --exclude '.git' \
+            .tmp/backend-source/ backend/
+
+      - name: Commit synced changes if needed
+        id: commit
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if git diff --quiet -- backend; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git add backend
+          git commit -m "chore(sync): update backend snapshot from ${{ steps.params.outputs.backend_repository }}@${{ steps.params.outputs.backend_ref }} (${{ steps.params.outputs.backend_sha }})"
+          git push origin "${{ steps.params.outputs.target_branch }}"
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Sync summary
+        shell: bash
+        run: |
+          if [ "${{ steps.commit.outputs.changed }}" = "true" ]; then
+            echo "Backend sync committed to ${{ steps.params.outputs.target_branch }}"
+          else
+            echo "No backend changes detected"
+          fi
