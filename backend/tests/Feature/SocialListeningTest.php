@@ -525,7 +525,7 @@ class SocialListeningTest extends TestCase
                 'organic' => [[
                     'title' => 'Anyone recommend FMCG logistics software in Lagos?',
                     'link' => 'https://linkedin.com/posts/fresh-1',
-                    'snippet' => $quote . '.',
+                    'snippet' => $quote.'.',
                     'date' => '2 days ago',
                 ]],
             ], 200),
@@ -1028,7 +1028,7 @@ class SocialListeningTest extends TestCase
             'google.serper.dev/*' => Http::response([
                 'organic' => [[
                     'title' => 'Looking for a distribution tool',
-                    'snippet' => $quote . '.',
+                    'snippet' => $quote.'.',
                     'link' => 'https://linkedin.com/posts/kill-switch-1',
                     'date' => '1 day ago',
                 ]],
@@ -1090,6 +1090,54 @@ class SocialListeningTest extends TestCase
         Http::assertSent(function ($request) {
             return str_contains((string) ($request->data()['q'] ?? ''), 'New Market Entry');
         });
+    }
+
+    public function test_source_out_of_credits_is_not_called_again_in_the_same_run(): void
+    {
+        config([
+            'services.glm.api_key' => '',
+            'services.serper.api_key' => 'test-serper-key',
+            'services.x.bearer_token' => 'test-x-token',
+        ]);
+
+        [$user, $org] = $this->actingAsOrgMember();
+        $icp = IcpProfile::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'Out of credits ICP',
+            'is_active' => true,
+            'config' => array_merge(IcpProfile::defaultConfig(), [
+                'signalTypePacks' => [SignalTypeDefinition::PACK_NONE],
+            ]),
+        ]);
+
+        $settings = SocialListeningSetting::query()->create(array_merge(
+            SocialListeningSetting::defaultsForOrg($org->id, $icp->id),
+            ['enabled_sources' => ['linkedin_public'], 'min_score' => 30, 'intent_filters' => []],
+        ));
+
+        $xCalls = 0;
+        $serperCalls = 0;
+        Http::fake([
+            'api.twitter.com/*' => function () use (&$xCalls) {
+                $xCalls++;
+
+                return Http::response(['title' => 'CreditsDepleted'], 402);
+            },
+            'google.serper.dev/*' => function () use (&$serperCalls) {
+                $serperCalls++;
+
+                return Http::response(['organic' => []], 200);
+            },
+        ]);
+
+        $run = app(SocialListeningOrchestrator::class)->run($org, $icp, $settings, $user);
+
+        $this->assertSame('completed', $run->status);
+        $this->assertSame(1, $xCalls);
+        $this->assertGreaterThan(1, $serperCalls);
+        $xRow = collect($run->result_summary['sources'])->firstWhere('key', 'x_native');
+        $this->assertSame('credits', $xRow['status']);
+        $this->assertSame(1, $xRow['attempts']);
     }
 
     public function test_none_pack_disables_discrete_signal_type_queries(): void
@@ -1201,7 +1249,7 @@ class SocialListeningTest extends TestCase
                 return Http::response([
                     'organic' => [[
                         'title' => $isSignalTypeQuery ? 'Company X opens Kenyan subsidiary' : 'Looking for recommendations',
-                        'snippet' => $quote . '.',
+                        'snippet' => $quote.'.',
                         'link' => $isSignalTypeQuery
                             ? 'https://linkedin.com/posts/market-entry-1'
                             : 'https://linkedin.com/posts/generic-2',
@@ -1490,7 +1538,7 @@ class SocialListeningTest extends TestCase
             'google.serper.dev/*' => Http::response([
                 'organic' => [[
                     'title' => 'Looking for a distribution tool',
-                    'snippet' => $quote . '.',
+                    'snippet' => $quote.'.',
                     'link' => 'https://linkedin.com/posts/no-industry',
                     'date' => '1 day ago',
                 ]],

@@ -87,6 +87,17 @@ class SocialSourceHealth
     }
 
     /**
+     * A source that refused a call for lack of credits or access will refuse
+     * every later call in the same run, so further calls only burn budget.
+     */
+    public function isBlocked(string $key): bool
+    {
+        $status = $this->sources[$key]['status'] ?? null;
+
+        return in_array($status, [self::CREDITS, self::UNAUTHORIZED, self::NEEDS_UPGRADE], true);
+    }
+
+    /**
      * @return list<array{key: string, label: string, status: string, attempts: int, hits: int, last_status: int|null, reason: string|null}>
      */
     public function snapshot(): array

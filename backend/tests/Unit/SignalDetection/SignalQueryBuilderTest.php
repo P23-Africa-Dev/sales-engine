@@ -40,6 +40,34 @@ class SignalQueryBuilderTest extends TestCase
         $this->assertStringNotContainsString('51-200', $queries);
         $this->assertStringContainsString('New Market Entry', $queries);
         $this->assertStringContainsString('office openings', $queries);
-        $this->assertStringContainsString('6 months', $queries);
+        $this->assertStringNotContainsString('6 months', $queries);
+    }
+
+    public function test_trigger_snippet_does_not_end_on_a_dangling_word(): void
+    {
+        $type = new SignalTypeDefinition([
+            'key' => 'new_market_entry',
+            'label' => 'New Market Entry',
+            'trigger_description' => 'Company announces opening an office, subsidiary, warehouse, or plant in a new territory.',
+            'pack' => SignalTypeDefinition::PACK_DEFAULT,
+            'default_recency_window_days' => 180,
+        ]);
+
+        $brief = new IcpBrief(
+            name: 'ICP',
+            description: '',
+            industries: [],
+            territories: [],
+            companySizes: [],
+            decisionMakers: [],
+            customPrompt: '',
+            minMatchScore: 60,
+            autoSyncCrm: false,
+            query: '',
+        );
+
+        $queries = (new SignalQueryBuilder)->buildQueriesForType($type, $brief);
+
+        $this->assertSame(['New Market Entry Company announces opening an office, subsidiary, warehouse'], $queries);
     }
 }

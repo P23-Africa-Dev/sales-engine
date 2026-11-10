@@ -635,6 +635,9 @@ class SocialListeningOrchestrator
                     if ($key === 'meta_graph_pages' && ($context['meta_page_ids'] ?? []) === []) {
                         continue;
                     }
+                    if (app(SocialSourceHealth::class)->isBlocked($key)) {
+                        continue;
+                    }
                     if (! $this->canSpendCall()) {
                         return;
                     }

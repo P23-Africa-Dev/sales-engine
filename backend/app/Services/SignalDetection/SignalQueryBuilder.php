@@ -11,12 +11,19 @@ use App\Services\Discovery\DTO\IcpBrief;
  */
 class SignalQueryBuilder
 {
+    /** @var list<string> */
+    private const DANGLING_WORDS = ['or', 'and', 'a', 'an', 'the', 'of', 'to', 'in', 'into', 'for', 'with', 'by', 'on', 'at', 'from'];
+
     /**
      * @return list<string>
      */
+    /**
+     * Recency is not written into the query text: the search call already
+     * carries the run's freshness window (Serper `tbs`), and a literal
+     * "in the last 6 months" only narrows matches to pages using that phrase.
+     */
     public function buildQueriesForType(SignalTypeDefinition $type, IcpBrief $brief): array
     {
-        $recency = $this->recencyPhrase((int) $type->default_recency_window_days);
         $interest = trim($brief->customPrompt) !== ''
             ? trim($brief->customPrompt)
             : trim($brief->description);
@@ -27,28 +34,21 @@ class SignalQueryBuilder
             $type->label,
             $triggerHint,
             $place,
-            $recency,
         ])));
 
         $queries = [$primary];
 
         if ($interest !== '') {
-            $queries[] = trim(implode(' ', array_filter([$triggerHint ?: $type->label, $interest, $place, $recency])));
+            $queries[] = trim(implode(' ', array_filter([$triggerHint ?: $type->label, $interest, $place])));
         }
 
         return array_values(array_unique(array_filter($queries)));
     }
 
-    private function recencyPhrase(int $windowDays): string
-    {
-        return match (true) {
-            $windowDays >= 150 => 'in the last 6 months',
-            $windowDays >= 60 => 'in the last 3 months',
-            $windowDays >= 21 => 'in the last month',
-            default => 'past week OR latest OR just announced',
-        };
-    }
-
+    /**
+     * First eight words of the trigger's first sentence, without a dangling
+     * "or", "and", comma or similar left by the cut.
+     */
     private function triggerSnippet(SignalTypeDefinition $type): string
     {
         $text = trim((string) $type->trigger_description);
@@ -57,9 +57,18 @@ class SignalQueryBuilder
         }
 
         $sentence = preg_split('/(?<=[.!?])\s+/u', $text)[0] ?? $text;
-        $words = preg_split('/\s+/u', trim($sentence)) ?: [];
+        $words = array_slice(preg_split('/\s+/u', trim($sentence)) ?: [], 0, 8);
 
-        return implode(' ', array_slice($words, 0, 8));
+        while ($words !== []) {
+            $last = rtrim((string) end($words), ',;:.!?');
+            if ($last !== '' && ! in_array(mb_strtolower($last), self::DANGLING_WORDS, true)) {
+                $words[count($words) - 1] = $last;
+                break;
+            }
+            array_pop($words);
+        }
+
+        return implode(' ', $words);
     }
 
     /**
