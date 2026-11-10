@@ -210,7 +210,21 @@ jobs:
             docker compose up -d --force-recreate --no-deps sales-php sales-queue sales-discovery sales-scheduler
             docker compose up -d --force-recreate --no-deps sales-nginx
             docker exec factory-sales-php-1 php artisan migrate --force --no-interaction
-            HEALTH=$(docker exec factory-sales-nginx-1 wget -qO- http://127.0.0.1/api/v1/health)
+            # init-php.sh runs config/route/event/view cache before `exec php-fpm`,
+            # so nginx returns 502 until FPM listens on :9000. Retry for up to ~2 min.
+            HEALTH=""
+            for attempt in $(seq 1 40); do
+              HEALTH=$(docker exec factory-sales-nginx-1 wget -qO- http://127.0.0.1/api/v1/health 2>/dev/null || true)
+              if echo "$HEALTH" | grep -q '"status":"ok"'; then
+                break
+              fi
+              echo "Health attempt ${attempt}: not ready yet"
+              sleep 3
+            done
             echo "$HEALTH"
-            echo "$HEALTH" | grep -q '"status":"ok"'
+            if ! echo "$HEALTH" | grep -q '"status":"ok"'; then
+              echo "Health check failed; recent sales-php logs:"
+              docker logs --tail 80 factory-sales-php-1 || true
+              exit 1
+            fi
             echo "$HEALTH" | grep -q '"service":"sales-engine"'
