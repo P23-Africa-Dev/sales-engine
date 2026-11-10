@@ -18,6 +18,19 @@ function Avatar({ color }: { color: string }) {
   );
 }
 
+function ReadinessScore({ value }: { value: number }) {
+  return (
+    <div className="business-score" role="img" aria-label={`Deal readiness ${value}%`}>
+      <svg viewBox="0 0 40 40" aria-hidden="true">
+        <circle className="business-score-track" cx="20" cy="20" r="17" />
+        <circle cx="20" cy="20" r="17" pathLength="100" strokeDasharray={`${value} 100`}
+          strokeLinecap="round" transform="rotate(-90 20 20)" />
+      </svg>
+      <span aria-hidden="true">{value}%</span>
+    </div>
+  );
+}
+
 function EmptyIllustration() {
   const layers = [
     ["08585.svg", 0, 0, 150, 150],
@@ -64,7 +77,7 @@ export function OutreachDashboardView({ data }: { data: OutreachDashboardData })
     values.some((value) => value.toLowerCase().includes(query.trim().toLowerCase()));
 
   const businesses = data.businesses.filter((item) =>
-    matches([item.name, item.industry, item.country, item.website, item.owner])
+    matches([item.name, item.company, item.industry, item.country, item.website, item.contact, item.owner])
   );
   const outreach = data.outreach.filter((item) =>
     matches([item.name, item.channel, item.status, item.owner])
@@ -99,8 +112,7 @@ export function OutreachDashboardView({ data }: { data: OutreachDashboardData })
       ["Industry", item.industry],
       ["Country", item.country],
       ["Website", item.website],
-      ["Account Owner", item.owner],
-      ["Created", item.created],
+      ["Contact", item.contact],
     ];
   }
 
@@ -184,7 +196,7 @@ export function OutreachDashboardView({ data }: { data: OutreachDashboardData })
         </div>
 
         <h2 className="prospects-title">
-          {view === "businesses" ? "Number of Businesses" : "All Outreach"}
+          {view === "businesses" ? "Key Business Account" : "All Outreach"}
         </h2>
 
         <div className="prospects-content">
@@ -202,7 +214,8 @@ export function OutreachDashboardView({ data }: { data: OutreachDashboardData })
                       setQuery(event.target.value);
                       setPage(1);
                     }}
-                    placeholder={view === "businesses" ? "Search businesses, industry, country, owner…" : "Search outreach by name, channel, status, owner…"}
+                    aria-label={view === "businesses" ? "Search business accounts" : "Search outreach"}
+                    placeholder={view === "businesses" ? "Search business, industry, country, website, or contact…" : "Search outreach by name, channel, status, owner…"}
                     autoFocus
                   />
                   {query && (
@@ -280,11 +293,11 @@ export function OutreachDashboardView({ data }: { data: OutreachDashboardData })
                             }}
                           >
                             <td className="business-avatar-cell">
-                              <BusinessLogo
+                              {"industry" in item ? <Avatar color={item.avatarColor} /> : <BusinessLogo
                                 id={businessId}
                                 name={item.name}
                                 color={item.avatarColor}
-                              />
+                              />}
                             </td>
                             {cells.map(([label, value]) => (
                               <td key={label}>
@@ -292,6 +305,9 @@ export function OutreachDashboardView({ data }: { data: OutreachDashboardData })
                                 <span title={value}>{value || "—"}</span>
                               </td>
                             ))}
+                            {"industry" in item && (
+                              <td className="business-score-cell"><ReadinessScore value={item.readinessPercent} /></td>
+                            )}
                           </tr>
                         );
                       })}
@@ -354,10 +370,10 @@ export function OutreachDashboardView({ data }: { data: OutreachDashboardData })
             <h2>Activity Overview</h2>
             <div className="activity-summary">
               <div>
-                <h3>No of Emails</h3>
-                <div className="activity-email">
-                  <strong>{number(selectedBusiness?.emailsSent)}</strong>
-                  <span>Sent</span>
+                <h3>Pipeline Value</h3>
+                <div className="activity-pipeline">
+                  <strong>{number(selectedBusiness?.pipelineValue)}</strong>
+                  <Link href="/admin/crm" className="activity-crm-link">Open CRM</Link>
                 </div>
               </div>
               <div>
@@ -370,8 +386,8 @@ export function OutreachDashboardView({ data }: { data: OutreachDashboardData })
             <div className="activity-stats">
               <div>
                 <Image src={asset("fa628.svg")} alt="" width={18} height={18} />
-                <strong>{number(selectedBusiness?.prospects)}</strong>
-                <span>No of Prospects</span>
+                <strong>{number(selectedBusiness?.outreachCount)}</strong>
+                <span>No of Outreach</span>
               </div>
               <div>
                 <Image src={asset("fa628.svg")} alt="" width={18} height={18} />
@@ -385,12 +401,14 @@ export function OutreachDashboardView({ data }: { data: OutreachDashboardData })
               onClick={() => setDrawerOpen(true)}
               aria-haspopup="dialog"
               aria-expanded={drawerOpen}
+              disabled={!selectedBusiness}
             >
-              View Full Activities
+              View Full Activity
             </button>
           </aside>
         </div>
       </section>
+      <p className="dashboard-data-note">Sample data · {data.samplePeriod}</p>
 
       <ActivityDrawer
         isOpen={drawerOpen}

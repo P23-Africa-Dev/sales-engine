@@ -9,7 +9,7 @@ import { useAuthStore } from "@/store/auth";
 import { clearAuthSession } from "@/lib/auth/session";
 import { clearSalesEngineSession } from "@/lib/sales-engine/session";
 import { ViewModeToggle } from "@/components/layout/view-mode-toggle";
-import { ChevronDown, LogOut, Users } from "lucide-react";
+import { ChevronDown, LogOut, Settings } from "lucide-react";
 
 const navItems = [
   { name: "Dashboard", href: "/admin", icon: "/dashboard-design/469fa.svg" },
@@ -114,6 +114,16 @@ export function Navbar() {
           <Image src="/dashboard-design/26ef3.svg" alt="Notifications" width={24} height={24} />
         </button>
 
+        {pathname === "/admin" && (
+          <Link
+            href="/admin/account-management"
+            aria-label="Account settings"
+            className="hidden text-white/80 transition-colors hover:text-white sm:inline-flex"
+          >
+            <Settings size={24} strokeWidth={1.5} aria-hidden="true" />
+          </Link>
+        )}
+
         <div className="relative">
           <button 
             type="button"
@@ -167,14 +177,14 @@ export function Navbar() {
               {/* Menu Items */}
               <div className="p-2">
                 <ViewModeToggle mode="admin" />
-                <Link
+                {/* <Link
                   href="/admin/account-management"
                   className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-white/80 hover:bg-white/5 hover:text-white transition-colors"
                   onClick={() => setIsDropdownOpen(false)}
                 >
                   <Users className="w-4 h-4" />
                   Account Management
-                </Link>
+                </Link> */}
               </div>
 
               {/* Logout */}

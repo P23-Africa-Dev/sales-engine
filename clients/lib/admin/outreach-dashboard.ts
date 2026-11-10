@@ -15,10 +15,14 @@ export type OutreachBusiness = {
   industry: string;
   country: string;
   website: string;
+  contact: string;
   owner: string;
   created: string;
   avatarColor: string;
   company: string;
+  readinessPercent: number;
+  pipelineValue: number;
+  outreachCount: number;
   emailsSent: number | null;
   prospects: number | null;
   followUpsCompleted: number | null;
@@ -37,6 +41,7 @@ export type DashboardOutreach = {
 
 export type OutreachDashboardData = {
   source: string;
+  samplePeriod: string;
   counts: { outreach: number; businesses: number };
   metrics: OutreachDashboardMetric[];
   defaultBusinessId: string | null;

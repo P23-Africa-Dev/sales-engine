@@ -1,5 +1,6 @@
 {
   "source": "demo",
+  "samplePeriod": "March 2026",
   "counts": {
     "outreach": 200,
     "businesses": 200
@@ -7,7 +8,7 @@
   "metrics": [
     {
       "id": "email",
-      "title": "No of Emails",
+      "title": "No of company contacted",
       "total": 220000,
       "primaryLabel": "Sent",
       "secondaryLabel": "Received",
@@ -17,7 +18,7 @@
     },
     {
       "id": "sms",
-      "title": "No of SMS",
+      "title": "No of meetings and site visits",
       "total": 20090,
       "primaryLabel": "Sent",
       "secondaryLabel": "Received",
@@ -27,10 +28,10 @@
     },
     {
       "id": "in-person",
-      "title": "No of In-persons Outreach",
+      "title": "No of Outreach",
       "total": 120009,
-      "primaryLabel": "Completed",
-      "secondaryLabel": "Pending",
+      "primaryLabel": "Calls",
+      "secondaryLabel": "WhatsApp",
       "primaryPercent": 55.333333,
       "secondaryPercent": 32,
       "avatars": 5
@@ -45,26 +46,34 @@
       "country": "Switzerland",
       "website": "alpine-robotics.ch",
       "owner": "Stefan Lindner",
-      "created": "April 18, 2026",
+      "created": "March 05, 2026",
       "avatarColor": "#2563eb",
       "company": "Alpine Robotics Zurich",
       "emailsSent": 32000,
       "prospects": 6400,
-      "followUpsCompleted": 18
+      "followUpsCompleted": 18,
+      "contact": "stefan.lindner@example.com",
+      "readinessPercent": 62,
+      "pipelineValue": 27000,
+      "outreachCount": 9200
     },
     {
       "id": "nord-tech",
       "name": "NordTech Solutions GmbH",
-      "industry": "Industrial Automation",
+      "industry": "Industrial Equipment",
       "country": "Germany",
       "website": "nordtech-solutions.com",
       "owner": "Michael Weber",
-      "created": "June 14, 2026",
+      "created": "March 12, 2026",
       "avatarColor": "#0d9488",
-      "company": "NordTech Berlin",
+      "company": "Nord Tech",
       "emailsSent": 50000,
       "prospects": 10000,
-      "followUpsCompleted": 27
+      "followUpsCompleted": 27,
+      "contact": "michael.weber@example.com",
+      "readinessPercent": 73,
+      "pipelineValue": 50000,
+      "outreachCount": 10000
     },
     {
       "id": "meridian",
@@ -73,12 +82,16 @@
       "country": "Denmark",
       "website": "meridian-biotech.io",
       "owner": "Freja Nielsen",
-      "created": "August 22, 2026",
+      "created": "March 19, 2026",
       "avatarColor": "#7c3aed",
       "company": "Meridian BioTech Copenhagen",
       "emailsSent": 18000,
       "prospects": 3600,
-      "followUpsCompleted": 12
+      "followUpsCompleted": 12,
+      "contact": "freja.nielsen@example.com",
+      "readinessPercent": 84,
+      "pipelineValue": 42500,
+      "outreachCount": 11520
     },
     {
       "id": "atlas",
@@ -87,12 +100,16 @@
       "country": "Netherlands",
       "website": "atlas-logistics.nl",
       "owner": "Lukas van Dijk",
-      "created": "October 09, 2026",
+      "created": "March 03, 2026",
       "avatarColor": "#d97706",
       "company": "Atlas Logistics Rotterdam",
       "emailsSent": 24000,
       "prospects": 4800,
-      "followUpsCompleted": 21
+      "followUpsCompleted": 21,
+      "contact": "lukas.van.dijk@example.com",
+      "readinessPercent": 95,
+      "pipelineValue": 50250,
+      "outreachCount": 12680
     },
     {
       "id": "biz-5",
@@ -101,12 +118,16 @@
       "country": "Sweden",
       "website": "novus-medical-instruments.com",
       "owner": "Sarah Jenkins",
-      "created": "November 16, 2026",
+      "created": "March 10, 2026",
       "avatarColor": "#c974f4",
       "company": "Novus Medical Instruments (Geneva)",
       "emailsSent": 27285,
       "prospects": 6195,
-      "followUpsCompleted": 20
+      "followUpsCompleted": 20,
+      "contact": "sarah.jenkins@example.com",
+      "readinessPercent": 64,
+      "pipelineValue": 58000,
+      "outreachCount": 13840
     },
     {
       "id": "biz-6",
@@ -115,12 +136,16 @@
       "country": "Belgium",
       "website": "aether-nano-systems.com",
       "owner": "Lukas Fischer",
-      "created": "January 19, 2026",
+      "created": "March 17, 2026",
       "avatarColor": "#42a8a1",
       "company": "Aether Nano Systems (Copenhagen)",
       "emailsSent": 30742,
       "prospects": 7034,
-      "followUpsCompleted": 37
+      "followUpsCompleted": 37,
+      "contact": "lukas.fischer@example.com",
+      "readinessPercent": 75,
+      "pipelineValue": 65750,
+      "outreachCount": 15000
     },
     {
       "id": "biz-7",
@@ -129,12 +154,16 @@
       "country": "Switzerland",
       "website": "aerodynamics-ag.com",
       "owner": "David Kim",
-      "created": "March 22, 2026",
+      "created": "March 01, 2026",
       "avatarColor": "#c9ae4d",
       "company": "AeroDynamics AG (Frankfurt)",
       "emailsSent": 34199,
       "prospects": 7873,
-      "followUpsCompleted": 19
+      "followUpsCompleted": 19,
+      "contact": "david.kim@example.com",
+      "readinessPercent": 86,
+      "pipelineValue": 73500,
+      "outreachCount": 1160
     },
     {
       "id": "biz-8",
@@ -143,12 +172,16 @@
       "country": "Germany",
       "website": "helios-energy-systems.com",
       "owner": "Michael Weber",
-      "created": "May 25, 2026",
+      "created": "March 08, 2026",
       "avatarColor": "#a842a2",
       "company": "Helios Energy Systems (Zurich)",
       "emailsSent": 37656,
       "prospects": 8712,
-      "followUpsCompleted": 36
+      "followUpsCompleted": 36,
+      "contact": "michael.weber@example.com",
+      "readinessPercent": 55,
+      "pipelineValue": 81250,
+      "outreachCount": 2320
     },
     {
       "id": "biz-9",
@@ -157,12 +190,16 @@
       "country": "Germany",
       "website": "synapse-software-gmbh.com",
       "owner": "Sophie Dupont",
-      "created": "July 28, 2026",
+      "created": "March 15, 2026",
       "avatarColor": "#dc9c56",
       "company": "Synapse Software GmbH (Brussels)",
       "emailsSent": 41113,
       "prospects": 9551,
-      "followUpsCompleted": 18
+      "followUpsCompleted": 18,
+      "contact": "sophie.dupont@example.com",
+      "readinessPercent": 66,
+      "pipelineValue": 89000,
+      "outreachCount": 3480
     },
     {
       "id": "biz-10",
@@ -171,12 +208,16 @@
       "country": "Denmark",
       "website": "quantex-ai-labs.com",
       "owner": "Elena Rostova",
-      "created": "September 03, 2026",
+      "created": "March 22, 2026",
       "avatarColor": "#2ae9c9",
       "company": "Quantex AI Labs (Hamburg)",
       "emailsSent": 44570,
       "prospects": 10390,
-      "followUpsCompleted": 35
+      "followUpsCompleted": 35,
+      "contact": "elena.rostova@example.com",
+      "readinessPercent": 77,
+      "pipelineValue": 96750,
+      "outreachCount": 4640
     },
     {
       "id": "biz-11",
@@ -185,12 +226,16 @@
       "country": "Netherlands",
       "website": "kronos-materials-gmbh.com",
       "owner": "Anna Lindqvist",
-      "created": "November 06, 2026",
+      "created": "March 06, 2026",
       "avatarColor": "#c974f4",
       "company": "Kronos Materials GmbH (Vienna)",
       "emailsSent": 48027,
       "prospects": 11229,
-      "followUpsCompleted": 17
+      "followUpsCompleted": 17,
+      "contact": "anna.lindqvist@example.com",
+      "readinessPercent": 88,
+      "pipelineValue": 104500,
+      "outreachCount": 5800
     },
     {
       "id": "biz-12",
@@ -199,12 +244,16 @@
       "country": "Austria",
       "website": "solaris-clean-tech.com",
       "owner": "Marcus Vance",
-      "created": "January 09, 2026",
+      "created": "March 13, 2026",
       "avatarColor": "#42a8a1",
       "company": "Solaris Clean Tech (Rotterdam)",
       "emailsSent": 51484,
       "prospects": 12068,
-      "followUpsCompleted": 34
+      "followUpsCompleted": 34,
+      "contact": "marcus.vance@example.com",
+      "readinessPercent": 57,
+      "pipelineValue": 17250,
+      "outreachCount": 6960
     },
     {
       "id": "biz-13",
@@ -213,12 +262,16 @@
       "country": "Germany",
       "website": "vector-grid-solutions.com",
       "owner": "Sarah Jenkins",
-      "created": "March 12, 2026",
+      "created": "March 20, 2026",
       "avatarColor": "#c9ae4d",
       "company": "Vector Grid Solutions (Munich)",
       "emailsSent": 54941,
       "prospects": 12907,
-      "followUpsCompleted": 16
+      "followUpsCompleted": 16,
+      "contact": "sarah.jenkins@example.com",
+      "readinessPercent": 68,
+      "pipelineValue": 25000,
+      "outreachCount": 8120
     },
     {
       "id": "biz-14",
@@ -227,12 +280,16 @@
       "country": "Sweden",
       "website": "bavaria-logistics-se.com",
       "owner": "Lukas Fischer",
-      "created": "May 15, 2026",
+      "created": "March 04, 2026",
       "avatarColor": "#a842a2",
       "company": "Bavaria Logistics SE (Cologne)",
       "emailsSent": 58398,
       "prospects": 13746,
-      "followUpsCompleted": 33
+      "followUpsCompleted": 33,
+      "contact": "lukas.fischer@example.com",
+      "readinessPercent": 79,
+      "pipelineValue": 32750,
+      "outreachCount": 9280
     },
     {
       "id": "biz-15",
@@ -241,12 +298,16 @@
       "country": "Belgium",
       "website": "apex-robotics-ltd.com",
       "owner": "David Kim",
-      "created": "July 18, 2026",
+      "created": "March 11, 2026",
       "avatarColor": "#dc9c56",
       "company": "Apex Robotics Ltd (Amsterdam)",
       "emailsSent": 61855,
       "prospects": 14585,
-      "followUpsCompleted": 15
+      "followUpsCompleted": 15,
+      "contact": "david.kim@example.com",
+      "readinessPercent": 90,
+      "pipelineValue": 40500,
+      "outreachCount": 10440
     },
     {
       "id": "biz-16",
@@ -255,12 +316,16 @@
       "country": "Switzerland",
       "website": "kaiser-precision-tools.com",
       "owner": "Michael Weber",
-      "created": "September 21, 2026",
+      "created": "March 18, 2026",
       "avatarColor": "#2ae9c9",
       "company": "Kaiser Precision Tools (Berlin)",
       "emailsSent": 65312,
       "prospects": 15424,
-      "followUpsCompleted": 32
+      "followUpsCompleted": 32,
+      "contact": "michael.weber@example.com",
+      "readinessPercent": 59,
+      "pipelineValue": 48250,
+      "outreachCount": 11600
     },
     {
       "id": "biz-17",
@@ -269,12 +334,16 @@
       "country": "Germany",
       "website": "echo-cloud-systems.com",
       "owner": "Sophie Dupont",
-      "created": "November 24, 2026",
+      "created": "March 02, 2026",
       "avatarColor": "#c974f4",
       "company": "Echo Cloud Systems (Düsseldorf)",
       "emailsSent": 68769,
       "prospects": 16263,
-      "followUpsCompleted": 14
+      "followUpsCompleted": 14,
+      "contact": "sophie.dupont@example.com",
+      "readinessPercent": 70,
+      "pipelineValue": 56000,
+      "outreachCount": 12760
     },
     {
       "id": "biz-18",
@@ -283,12 +352,16 @@
       "country": "Germany",
       "website": "orbit-cyber-defense.com",
       "owner": "Elena Rostova",
-      "created": "January 27, 2026",
+      "created": "March 09, 2026",
       "avatarColor": "#42a8a1",
       "company": "Orbit Cyber Defense (Basel)",
       "emailsSent": 72226,
       "prospects": 2102,
-      "followUpsCompleted": 31
+      "followUpsCompleted": 31,
+      "contact": "elena.rostova@example.com",
+      "readinessPercent": 81,
+      "pipelineValue": 63750,
+      "outreachCount": 13920
     },
     {
       "id": "biz-19",
@@ -297,12 +370,16 @@
       "country": "Denmark",
       "website": "titan-heavy-machinery.com",
       "owner": "Anna Lindqvist",
-      "created": "March 02, 2026",
+      "created": "March 16, 2026",
       "avatarColor": "#c9ae4d",
       "company": "Titan Heavy Machinery (Stockholm)",
       "emailsSent": 75683,
       "prospects": 2941,
-      "followUpsCompleted": 13
+      "followUpsCompleted": 13,
+      "contact": "anna.lindqvist@example.com",
+      "readinessPercent": 92,
+      "pipelineValue": 71500,
+      "outreachCount": 15080
     },
     {
       "id": "biz-20",
@@ -311,12 +388,16 @@
       "country": "Netherlands",
       "website": "nordtech-solutions-gmbh.com",
       "owner": "Marcus Vance",
-      "created": "May 05, 2026",
+      "created": "March 23, 2026",
       "avatarColor": "#a842a2",
       "company": "NordTech Solutions GmbH (Stuttgart)",
       "emailsSent": 79140,
       "prospects": 3780,
-      "followUpsCompleted": 30
+      "followUpsCompleted": 30,
+      "contact": "marcus.vance@example.com",
+      "readinessPercent": 61,
+      "pipelineValue": 79250,
+      "outreachCount": 1240
     },
     {
       "id": "biz-21",
@@ -325,12 +406,16 @@
       "country": "Austria",
       "website": "vanguard-automation.com",
       "owner": "Sarah Jenkins",
-      "created": "July 08, 2026",
+      "created": "March 07, 2026",
       "avatarColor": "#dc9c56",
       "company": "Vanguard Automation (Geneva)",
       "emailsSent": 82597,
       "prospects": 4619,
-      "followUpsCompleted": 12
+      "followUpsCompleted": 12,
+      "contact": "sarah.jenkins@example.com",
+      "readinessPercent": 72,
+      "pipelineValue": 87000,
+      "outreachCount": 2400
     },
     {
       "id": "biz-22",
@@ -339,12 +424,16 @@
       "country": "Germany",
       "website": "starlight-biotech.com",
       "owner": "Lukas Fischer",
-      "created": "September 11, 2026",
+      "created": "March 14, 2026",
       "avatarColor": "#2ae9c9",
       "company": "Starlight Biotech (Copenhagen)",
       "emailsSent": 11054,
       "prospects": 5458,
-      "followUpsCompleted": 29
+      "followUpsCompleted": 29,
+      "contact": "lukas.fischer@example.com",
+      "readinessPercent": 83,
+      "pipelineValue": 94750,
+      "outreachCount": 3560
     },
     {
       "id": "biz-23",
@@ -353,12 +442,16 @@
       "country": "Sweden",
       "website": "lumina-optics-corp.com",
       "owner": "David Kim",
-      "created": "November 14, 2026",
+      "created": "March 21, 2026",
       "avatarColor": "#c974f4",
       "company": "Lumina Optics Corp (Frankfurt)",
       "emailsSent": 14511,
       "prospects": 6297,
-      "followUpsCompleted": 11
+      "followUpsCompleted": 11,
+      "contact": "david.kim@example.com",
+      "readinessPercent": 94,
+      "pipelineValue": 102500,
+      "outreachCount": 4720
     },
     {
       "id": "biz-24",
@@ -367,12 +460,16 @@
       "country": "Belgium",
       "website": "zephyr-marine-engineering.com",
       "owner": "Michael Weber",
-      "created": "January 17, 2026",
+      "created": "March 05, 2026",
       "avatarColor": "#42a8a1",
       "company": "Zephyr Marine Engineering (Zurich)",
       "emailsSent": 17968,
       "prospects": 7136,
-      "followUpsCompleted": 28
+      "followUpsCompleted": 28,
+      "contact": "michael.weber@example.com",
+      "readinessPercent": 63,
+      "pipelineValue": 15250,
+      "outreachCount": 5880
     },
     {
       "id": "biz-25",
@@ -381,12 +478,16 @@
       "country": "Switzerland",
       "website": "novus-medical-instruments.com",
       "owner": "Sophie Dupont",
-      "created": "March 20, 2026",
+      "created": "March 12, 2026",
       "avatarColor": "#c9ae4d",
       "company": "Novus Medical Instruments (Brussels)",
       "emailsSent": 21425,
       "prospects": 7975,
-      "followUpsCompleted": 10
+      "followUpsCompleted": 10,
+      "contact": "sophie.dupont@example.com",
+      "readinessPercent": 74,
+      "pipelineValue": 23000,
+      "outreachCount": 7040
     },
     {
       "id": "biz-26",
@@ -395,12 +496,16 @@
       "country": "Germany",
       "website": "aether-nano-systems.com",
       "owner": "Elena Rostova",
-      "created": "May 23, 2026",
+      "created": "March 19, 2026",
       "avatarColor": "#a842a2",
       "company": "Aether Nano Systems (Hamburg)",
       "emailsSent": 24882,
       "prospects": 8814,
-      "followUpsCompleted": 27
+      "followUpsCompleted": 27,
+      "contact": "elena.rostova@example.com",
+      "readinessPercent": 85,
+      "pipelineValue": 30750,
+      "outreachCount": 8200
     },
     {
       "id": "biz-27",
@@ -409,12 +514,16 @@
       "country": "Germany",
       "website": "aerodynamics-ag.com",
       "owner": "Anna Lindqvist",
-      "created": "July 26, 2026",
+      "created": "March 03, 2026",
       "avatarColor": "#dc9c56",
       "company": "AeroDynamics AG (Vienna)",
       "emailsSent": 28339,
       "prospects": 9653,
-      "followUpsCompleted": 9
+      "followUpsCompleted": 9,
+      "contact": "anna.lindqvist@example.com",
+      "readinessPercent": 96,
+      "pipelineValue": 38500,
+      "outreachCount": 9360
     },
     {
       "id": "biz-28",
@@ -423,12 +532,16 @@
       "country": "Denmark",
       "website": "helios-energy-systems.com",
       "owner": "Marcus Vance",
-      "created": "September 01, 2026",
+      "created": "March 10, 2026",
       "avatarColor": "#2ae9c9",
       "company": "Helios Energy Systems (Rotterdam)",
       "emailsSent": 31796,
       "prospects": 10492,
-      "followUpsCompleted": 26
+      "followUpsCompleted": 26,
+      "contact": "marcus.vance@example.com",
+      "readinessPercent": 65,
+      "pipelineValue": 46250,
+      "outreachCount": 10520
     },
     {
       "id": "biz-29",
@@ -437,12 +550,16 @@
       "country": "Netherlands",
       "website": "synapse-software-gmbh.com",
       "owner": "Sarah Jenkins",
-      "created": "November 04, 2026",
+      "created": "March 17, 2026",
       "avatarColor": "#c974f4",
       "company": "Synapse Software GmbH (Munich)",
       "emailsSent": 35253,
       "prospects": 11331,
-      "followUpsCompleted": 8
+      "followUpsCompleted": 8,
+      "contact": "sarah.jenkins@example.com",
+      "readinessPercent": 76,
+      "pipelineValue": 54000,
+      "outreachCount": 11680
     },
     {
       "id": "biz-30",
@@ -451,12 +568,16 @@
       "country": "Austria",
       "website": "quantex-ai-labs.com",
       "owner": "Lukas Fischer",
-      "created": "January 07, 2026",
+      "created": "March 01, 2026",
       "avatarColor": "#42a8a1",
       "company": "Quantex AI Labs (Cologne)",
       "emailsSent": 38710,
       "prospects": 12170,
-      "followUpsCompleted": 25
+      "followUpsCompleted": 25,
+      "contact": "lukas.fischer@example.com",
+      "readinessPercent": 87,
+      "pipelineValue": 61750,
+      "outreachCount": 12840
     },
     {
       "id": "biz-31",
@@ -465,12 +586,16 @@
       "country": "Germany",
       "website": "kronos-materials-gmbh.com",
       "owner": "David Kim",
-      "created": "March 10, 2026",
+      "created": "March 08, 2026",
       "avatarColor": "#c9ae4d",
       "company": "Kronos Materials GmbH (Amsterdam)",
       "emailsSent": 42167,
       "prospects": 13009,
-      "followUpsCompleted": 7
+      "followUpsCompleted": 7,
+      "contact": "david.kim@example.com",
+      "readinessPercent": 56,
+      "pipelineValue": 69500,
+      "outreachCount": 14000
     },
     {
       "id": "biz-32",
@@ -479,12 +604,16 @@
       "country": "Sweden",
       "website": "solaris-clean-tech.com",
       "owner": "Michael Weber",
-      "created": "May 13, 2026",
+      "created": "March 15, 2026",
       "avatarColor": "#a842a2",
       "company": "Solaris Clean Tech (Berlin)",
       "emailsSent": 45624,
       "prospects": 13848,
-      "followUpsCompleted": 24
+      "followUpsCompleted": 24,
+      "contact": "michael.weber@example.com",
+      "readinessPercent": 67,
+      "pipelineValue": 77250,
+      "outreachCount": 15160
     },
     {
       "id": "biz-33",
@@ -493,12 +622,16 @@
       "country": "Belgium",
       "website": "vector-grid-solutions.com",
       "owner": "Sophie Dupont",
-      "created": "July 16, 2026",
+      "created": "March 22, 2026",
       "avatarColor": "#dc9c56",
       "company": "Vector Grid Solutions (Düsseldorf)",
       "emailsSent": 49081,
       "prospects": 14687,
-      "followUpsCompleted": 6
+      "followUpsCompleted": 6,
+      "contact": "sophie.dupont@example.com",
+      "readinessPercent": 78,
+      "pipelineValue": 85000,
+      "outreachCount": 1320
     },
     {
       "id": "biz-34",
@@ -507,12 +640,16 @@
       "country": "Switzerland",
       "website": "bavaria-logistics-se.com",
       "owner": "Elena Rostova",
-      "created": "September 19, 2026",
+      "created": "March 06, 2026",
       "avatarColor": "#2ae9c9",
       "company": "Bavaria Logistics SE (Basel)",
       "emailsSent": 52538,
       "prospects": 15526,
-      "followUpsCompleted": 23
+      "followUpsCompleted": 23,
+      "contact": "elena.rostova@example.com",
+      "readinessPercent": 89,
+      "pipelineValue": 92750,
+      "outreachCount": 2480
     },
     {
       "id": "biz-35",
@@ -521,12 +658,16 @@
       "country": "Germany",
       "website": "apex-robotics-ltd.com",
       "owner": "Anna Lindqvist",
-      "created": "November 22, 2026",
+      "created": "March 13, 2026",
       "avatarColor": "#c974f4",
       "company": "Apex Robotics Ltd (Stockholm)",
       "emailsSent": 55995,
       "prospects": 16365,
-      "followUpsCompleted": 5
+      "followUpsCompleted": 5,
+      "contact": "anna.lindqvist@example.com",
+      "readinessPercent": 58,
+      "pipelineValue": 100500,
+      "outreachCount": 3640
     },
     {
       "id": "biz-36",
@@ -535,12 +676,16 @@
       "country": "Germany",
       "website": "kaiser-precision-tools.com",
       "owner": "Marcus Vance",
-      "created": "January 25, 2026",
+      "created": "March 20, 2026",
       "avatarColor": "#42a8a1",
       "company": "Kaiser Precision Tools (Stuttgart)",
       "emailsSent": 59452,
       "prospects": 2204,
-      "followUpsCompleted": 22
+      "followUpsCompleted": 22,
+      "contact": "marcus.vance@example.com",
+      "readinessPercent": 69,
+      "pipelineValue": 108250,
+      "outreachCount": 4800
     },
     {
       "id": "biz-37",
@@ -549,12 +694,16 @@
       "country": "Denmark",
       "website": "echo-cloud-systems.com",
       "owner": "Sarah Jenkins",
-      "created": "March 28, 2026",
+      "created": "March 04, 2026",
       "avatarColor": "#c9ae4d",
       "company": "Echo Cloud Systems (Geneva)",
       "emailsSent": 62909,
       "prospects": 3043,
-      "followUpsCompleted": 39
+      "followUpsCompleted": 39,
+      "contact": "sarah.jenkins@example.com",
+      "readinessPercent": 80,
+      "pipelineValue": 21000,
+      "outreachCount": 5960
     },
     {
       "id": "biz-38",
@@ -563,12 +712,16 @@
       "country": "Netherlands",
       "website": "orbit-cyber-defense.com",
       "owner": "Lukas Fischer",
-      "created": "May 03, 2026",
+      "created": "March 11, 2026",
       "avatarColor": "#a842a2",
       "company": "Orbit Cyber Defense (Copenhagen)",
       "emailsSent": 66366,
       "prospects": 3882,
-      "followUpsCompleted": 21
+      "followUpsCompleted": 21,
+      "contact": "lukas.fischer@example.com",
+      "readinessPercent": 91,
+      "pipelineValue": 28750,
+      "outreachCount": 7120
     },
     {
       "id": "biz-39",
@@ -577,12 +730,16 @@
       "country": "Austria",
       "website": "titan-heavy-machinery.com",
       "owner": "David Kim",
-      "created": "July 06, 2026",
+      "created": "March 18, 2026",
       "avatarColor": "#dc9c56",
       "company": "Titan Heavy Machinery (Frankfurt)",
       "emailsSent": 69823,
       "prospects": 4721,
-      "followUpsCompleted": 38
+      "followUpsCompleted": 38,
+      "contact": "david.kim@example.com",
+      "readinessPercent": 60,
+      "pipelineValue": 36500,
+      "outreachCount": 8280
     },
     {
       "id": "biz-40",
@@ -591,12 +748,16 @@
       "country": "Germany",
       "website": "nordtech-solutions-gmbh.com",
       "owner": "Michael Weber",
-      "created": "September 09, 2026",
+      "created": "March 02, 2026",
       "avatarColor": "#2ae9c9",
       "company": "NordTech Solutions GmbH (Zurich)",
       "emailsSent": 73280,
       "prospects": 5560,
-      "followUpsCompleted": 20
+      "followUpsCompleted": 20,
+      "contact": "michael.weber@example.com",
+      "readinessPercent": 71,
+      "pipelineValue": 44250,
+      "outreachCount": 9440
     },
     {
       "id": "biz-41",
@@ -605,12 +766,16 @@
       "country": "Sweden",
       "website": "vanguard-automation.com",
       "owner": "Sophie Dupont",
-      "created": "November 12, 2026",
+      "created": "March 09, 2026",
       "avatarColor": "#c974f4",
       "company": "Vanguard Automation (Brussels)",
       "emailsSent": 76737,
       "prospects": 6399,
-      "followUpsCompleted": 37
+      "followUpsCompleted": 37,
+      "contact": "sophie.dupont@example.com",
+      "readinessPercent": 82,
+      "pipelineValue": 52000,
+      "outreachCount": 10600
     },
     {
       "id": "biz-42",
@@ -619,12 +784,16 @@
       "country": "Belgium",
       "website": "starlight-biotech.com",
       "owner": "Elena Rostova",
-      "created": "January 15, 2026",
+      "created": "March 16, 2026",
       "avatarColor": "#42a8a1",
       "company": "Starlight Biotech (Hamburg)",
       "emailsSent": 80194,
       "prospects": 7238,
-      "followUpsCompleted": 19
+      "followUpsCompleted": 19,
+      "contact": "elena.rostova@example.com",
+      "readinessPercent": 93,
+      "pipelineValue": 59750,
+      "outreachCount": 11760
     },
     {
       "id": "biz-43",
@@ -633,12 +802,16 @@
       "country": "Switzerland",
       "website": "lumina-optics-corp.com",
       "owner": "Anna Lindqvist",
-      "created": "March 18, 2026",
+      "created": "March 23, 2026",
       "avatarColor": "#c9ae4d",
       "company": "Lumina Optics Corp (Vienna)",
       "emailsSent": 83651,
       "prospects": 8077,
-      "followUpsCompleted": 36
+      "followUpsCompleted": 36,
+      "contact": "anna.lindqvist@example.com",
+      "readinessPercent": 62,
+      "pipelineValue": 67500,
+      "outreachCount": 12920
     },
     {
       "id": "biz-44",
@@ -647,12 +820,16 @@
       "country": "Germany",
       "website": "zephyr-marine-engineering.com",
       "owner": "Marcus Vance",
-      "created": "May 21, 2026",
+      "created": "March 07, 2026",
       "avatarColor": "#a842a2",
       "company": "Zephyr Marine Engineering (Rotterdam)",
       "emailsSent": 12108,
       "prospects": 8916,
-      "followUpsCompleted": 18
+      "followUpsCompleted": 18,
+      "contact": "marcus.vance@example.com",
+      "readinessPercent": 73,
+      "pipelineValue": 75250,
+      "outreachCount": 14080
     },
     {
       "id": "biz-45",
@@ -661,12 +838,16 @@
       "country": "Germany",
       "website": "novus-medical-instruments.com",
       "owner": "Sarah Jenkins",
-      "created": "July 24, 2026",
+      "created": "March 14, 2026",
       "avatarColor": "#dc9c56",
       "company": "Novus Medical Instruments (Munich)",
       "emailsSent": 15565,
       "prospects": 9755,
-      "followUpsCompleted": 35
+      "followUpsCompleted": 35,
+      "contact": "sarah.jenkins@example.com",
+      "readinessPercent": 84,
+      "pipelineValue": 83000,
+      "outreachCount": 15240
     },
     {
       "id": "biz-46",
@@ -675,12 +856,16 @@
       "country": "Denmark",
       "website": "aether-nano-systems.com",
       "owner": "Lukas Fischer",
-      "created": "September 27, 2026",
+      "created": "March 21, 2026",
       "avatarColor": "#2ae9c9",
       "company": "Aether Nano Systems (Cologne)",
       "emailsSent": 19022,
       "prospects": 10594,
-      "followUpsCompleted": 17
+      "followUpsCompleted": 17,
+      "contact": "lukas.fischer@example.com",
+      "readinessPercent": 95,
+      "pipelineValue": 90750,
+      "outreachCount": 1400
     },
     {
       "id": "biz-47",
@@ -689,12 +874,16 @@
       "country": "Netherlands",
       "website": "aerodynamics-ag.com",
       "owner": "David Kim",
-      "created": "November 02, 2026",
+      "created": "March 05, 2026",
       "avatarColor": "#c974f4",
       "company": "AeroDynamics AG (Amsterdam)",
       "emailsSent": 22479,
       "prospects": 11433,
-      "followUpsCompleted": 34
+      "followUpsCompleted": 34,
+      "contact": "david.kim@example.com",
+      "readinessPercent": 64,
+      "pipelineValue": 98500,
+      "outreachCount": 2560
     },
     {
       "id": "biz-48",
@@ -703,12 +892,16 @@
       "country": "Austria",
       "website": "helios-energy-systems.com",
       "owner": "Michael Weber",
-      "created": "January 05, 2026",
+      "created": "March 12, 2026",
       "avatarColor": "#42a8a1",
       "company": "Helios Energy Systems (Berlin)",
       "emailsSent": 25936,
       "prospects": 12272,
-      "followUpsCompleted": 16
+      "followUpsCompleted": 16,
+      "contact": "michael.weber@example.com",
+      "readinessPercent": 75,
+      "pipelineValue": 106250,
+      "outreachCount": 3720
     },
     {
       "id": "biz-49",
@@ -717,12 +910,16 @@
       "country": "Germany",
       "website": "synapse-software-gmbh.com",
       "owner": "Sophie Dupont",
-      "created": "March 08, 2026",
+      "created": "March 19, 2026",
       "avatarColor": "#c9ae4d",
       "company": "Synapse Software GmbH (Düsseldorf)",
       "emailsSent": 29393,
       "prospects": 13111,
-      "followUpsCompleted": 33
+      "followUpsCompleted": 33,
+      "contact": "sophie.dupont@example.com",
+      "readinessPercent": 86,
+      "pipelineValue": 19000,
+      "outreachCount": 4880
     },
     {
       "id": "biz-50",
@@ -731,12 +928,16 @@
       "country": "Sweden",
       "website": "quantex-ai-labs.com",
       "owner": "Elena Rostova",
-      "created": "May 11, 2026",
+      "created": "March 03, 2026",
       "avatarColor": "#a842a2",
       "company": "Quantex AI Labs (Basel)",
       "emailsSent": 32850,
       "prospects": 13950,
-      "followUpsCompleted": 15
+      "followUpsCompleted": 15,
+      "contact": "elena.rostova@example.com",
+      "readinessPercent": 55,
+      "pipelineValue": 26750,
+      "outreachCount": 6040
     },
     {
       "id": "biz-51",
@@ -745,12 +946,16 @@
       "country": "Belgium",
       "website": "kronos-materials-gmbh.com",
       "owner": "Anna Lindqvist",
-      "created": "July 14, 2026",
+      "created": "March 10, 2026",
       "avatarColor": "#dc9c56",
       "company": "Kronos Materials GmbH (Stockholm)",
       "emailsSent": 36307,
       "prospects": 14789,
-      "followUpsCompleted": 32
+      "followUpsCompleted": 32,
+      "contact": "anna.lindqvist@example.com",
+      "readinessPercent": 66,
+      "pipelineValue": 34500,
+      "outreachCount": 7200
     },
     {
       "id": "biz-52",
@@ -759,12 +964,16 @@
       "country": "Switzerland",
       "website": "solaris-clean-tech.com",
       "owner": "Marcus Vance",
-      "created": "September 17, 2026",
+      "created": "March 17, 2026",
       "avatarColor": "#2ae9c9",
       "company": "Solaris Clean Tech (Stuttgart)",
       "emailsSent": 39764,
       "prospects": 15628,
-      "followUpsCompleted": 14
+      "followUpsCompleted": 14,
+      "contact": "marcus.vance@example.com",
+      "readinessPercent": 77,
+      "pipelineValue": 42250,
+      "outreachCount": 8360
     },
     {
       "id": "biz-53",
@@ -773,12 +982,16 @@
       "country": "Germany",
       "website": "vector-grid-solutions.com",
       "owner": "Sarah Jenkins",
-      "created": "November 20, 2026",
+      "created": "March 01, 2026",
       "avatarColor": "#c974f4",
       "company": "Vector Grid Solutions (Geneva)",
       "emailsSent": 43221,
       "prospects": 16467,
-      "followUpsCompleted": 31
+      "followUpsCompleted": 31,
+      "contact": "sarah.jenkins@example.com",
+      "readinessPercent": 88,
+      "pipelineValue": 50000,
+      "outreachCount": 9520
     },
     {
       "id": "biz-54",
@@ -787,12 +1000,16 @@
       "country": "Germany",
       "website": "bavaria-logistics-se.com",
       "owner": "Lukas Fischer",
-      "created": "January 23, 2026",
+      "created": "March 08, 2026",
       "avatarColor": "#42a8a1",
       "company": "Bavaria Logistics SE (Copenhagen)",
       "emailsSent": 46678,
       "prospects": 2306,
-      "followUpsCompleted": 13
+      "followUpsCompleted": 13,
+      "contact": "lukas.fischer@example.com",
+      "readinessPercent": 57,
+      "pipelineValue": 57750,
+      "outreachCount": 10680
     },
     {
       "id": "biz-55",
@@ -801,12 +1018,16 @@
       "country": "Denmark",
       "website": "apex-robotics-ltd.com",
       "owner": "David Kim",
-      "created": "March 26, 2026",
+      "created": "March 15, 2026",
       "avatarColor": "#c9ae4d",
       "company": "Apex Robotics Ltd (Frankfurt)",
       "emailsSent": 50135,
       "prospects": 3145,
-      "followUpsCompleted": 30
+      "followUpsCompleted": 30,
+      "contact": "david.kim@example.com",
+      "readinessPercent": 68,
+      "pipelineValue": 65500,
+      "outreachCount": 11840
     },
     {
       "id": "biz-56",
@@ -815,12 +1036,16 @@
       "country": "Netherlands",
       "website": "kaiser-precision-tools.com",
       "owner": "Michael Weber",
-      "created": "May 01, 2026",
+      "created": "March 22, 2026",
       "avatarColor": "#a842a2",
       "company": "Kaiser Precision Tools (Zurich)",
       "emailsSent": 53592,
       "prospects": 3984,
-      "followUpsCompleted": 12
+      "followUpsCompleted": 12,
+      "contact": "michael.weber@example.com",
+      "readinessPercent": 79,
+      "pipelineValue": 73250,
+      "outreachCount": 13000
     },
     {
       "id": "biz-57",
@@ -829,12 +1054,16 @@
       "country": "Austria",
       "website": "echo-cloud-systems.com",
       "owner": "Sophie Dupont",
-      "created": "July 04, 2026",
+      "created": "March 06, 2026",
       "avatarColor": "#dc9c56",
       "company": "Echo Cloud Systems (Brussels)",
       "emailsSent": 57049,
       "prospects": 4823,
-      "followUpsCompleted": 29
+      "followUpsCompleted": 29,
+      "contact": "sophie.dupont@example.com",
+      "readinessPercent": 90,
+      "pipelineValue": 81000,
+      "outreachCount": 14160
     },
     {
       "id": "biz-58",
@@ -843,12 +1072,16 @@
       "country": "Germany",
       "website": "orbit-cyber-defense.com",
       "owner": "Elena Rostova",
-      "created": "September 07, 2026",
+      "created": "March 13, 2026",
       "avatarColor": "#2ae9c9",
       "company": "Orbit Cyber Defense (Hamburg)",
       "emailsSent": 60506,
       "prospects": 5662,
-      "followUpsCompleted": 11
+      "followUpsCompleted": 11,
+      "contact": "elena.rostova@example.com",
+      "readinessPercent": 59,
+      "pipelineValue": 88750,
+      "outreachCount": 15320
     },
     {
       "id": "biz-59",
@@ -857,12 +1090,16 @@
       "country": "Sweden",
       "website": "titan-heavy-machinery.com",
       "owner": "Anna Lindqvist",
-      "created": "November 10, 2026",
+      "created": "March 20, 2026",
       "avatarColor": "#c974f4",
       "company": "Titan Heavy Machinery (Vienna)",
       "emailsSent": 63963,
       "prospects": 6501,
-      "followUpsCompleted": 28
+      "followUpsCompleted": 28,
+      "contact": "anna.lindqvist@example.com",
+      "readinessPercent": 70,
+      "pipelineValue": 96500,
+      "outreachCount": 1480
     },
     {
       "id": "biz-60",
@@ -871,12 +1108,16 @@
       "country": "Belgium",
       "website": "nordtech-solutions-gmbh.com",
       "owner": "Marcus Vance",
-      "created": "January 13, 2026",
+      "created": "March 04, 2026",
       "avatarColor": "#42a8a1",
       "company": "NordTech Solutions GmbH (Rotterdam)",
       "emailsSent": 67420,
       "prospects": 7340,
-      "followUpsCompleted": 10
+      "followUpsCompleted": 10,
+      "contact": "marcus.vance@example.com",
+      "readinessPercent": 81,
+      "pipelineValue": 104250,
+      "outreachCount": 2640
     },
     {
       "id": "biz-61",
@@ -885,12 +1126,16 @@
       "country": "Switzerland",
       "website": "vanguard-automation.com",
       "owner": "Sarah Jenkins",
-      "created": "March 16, 2026",
+      "created": "March 11, 2026",
       "avatarColor": "#c9ae4d",
       "company": "Vanguard Automation (Munich)",
       "emailsSent": 70877,
       "prospects": 8179,
-      "followUpsCompleted": 27
+      "followUpsCompleted": 27,
+      "contact": "sarah.jenkins@example.com",
+      "readinessPercent": 92,
+      "pipelineValue": 17000,
+      "outreachCount": 3800
     },
     {
       "id": "biz-62",
@@ -899,12 +1144,16 @@
       "country": "Germany",
       "website": "starlight-biotech.com",
       "owner": "Lukas Fischer",
-      "created": "May 19, 2026",
+      "created": "March 18, 2026",
       "avatarColor": "#a842a2",
       "company": "Starlight Biotech (Cologne)",
       "emailsSent": 74334,
       "prospects": 9018,
-      "followUpsCompleted": 9
+      "followUpsCompleted": 9,
+      "contact": "lukas.fischer@example.com",
+      "readinessPercent": 61,
+      "pipelineValue": 24750,
+      "outreachCount": 4960
     },
     {
       "id": "biz-63",
@@ -913,12 +1162,16 @@
       "country": "Germany",
       "website": "lumina-optics-corp.com",
       "owner": "David Kim",
-      "created": "July 22, 2026",
+      "created": "March 02, 2026",
       "avatarColor": "#dc9c56",
       "company": "Lumina Optics Corp (Amsterdam)",
       "emailsSent": 77791,
       "prospects": 9857,
-      "followUpsCompleted": 26
+      "followUpsCompleted": 26,
+      "contact": "david.kim@example.com",
+      "readinessPercent": 72,
+      "pipelineValue": 32500,
+      "outreachCount": 6120
     },
     {
       "id": "biz-64",
@@ -927,12 +1180,16 @@
       "country": "Denmark",
       "website": "zephyr-marine-engineering.com",
       "owner": "Michael Weber",
-      "created": "September 25, 2026",
+      "created": "March 09, 2026",
       "avatarColor": "#2ae9c9",
       "company": "Zephyr Marine Engineering (Berlin)",
       "emailsSent": 81248,
       "prospects": 10696,
-      "followUpsCompleted": 8
+      "followUpsCompleted": 8,
+      "contact": "michael.weber@example.com",
+      "readinessPercent": 83,
+      "pipelineValue": 40250,
+      "outreachCount": 7280
     },
     {
       "id": "biz-65",
@@ -941,12 +1198,16 @@
       "country": "Netherlands",
       "website": "novus-medical-instruments.com",
       "owner": "Sophie Dupont",
-      "created": "November 28, 2026",
+      "created": "March 16, 2026",
       "avatarColor": "#c974f4",
       "company": "Novus Medical Instruments (Düsseldorf)",
       "emailsSent": 84705,
       "prospects": 11535,
-      "followUpsCompleted": 25
+      "followUpsCompleted": 25,
+      "contact": "sophie.dupont@example.com",
+      "readinessPercent": 94,
+      "pipelineValue": 48000,
+      "outreachCount": 8440
     },
     {
       "id": "biz-66",
@@ -955,12 +1216,16 @@
       "country": "Austria",
       "website": "aether-nano-systems.com",
       "owner": "Elena Rostova",
-      "created": "January 03, 2026",
+      "created": "March 23, 2026",
       "avatarColor": "#42a8a1",
       "company": "Aether Nano Systems (Basel)",
       "emailsSent": 13162,
       "prospects": 12374,
-      "followUpsCompleted": 7
+      "followUpsCompleted": 7,
+      "contact": "elena.rostova@example.com",
+      "readinessPercent": 63,
+      "pipelineValue": 55750,
+      "outreachCount": 9600
     },
     {
       "id": "biz-67",
@@ -969,12 +1234,16 @@
       "country": "Germany",
       "website": "aerodynamics-ag.com",
       "owner": "Anna Lindqvist",
-      "created": "March 06, 2026",
+      "created": "March 07, 2026",
       "avatarColor": "#c9ae4d",
       "company": "AeroDynamics AG (Stockholm)",
       "emailsSent": 16619,
       "prospects": 13213,
-      "followUpsCompleted": 24
+      "followUpsCompleted": 24,
+      "contact": "anna.lindqvist@example.com",
+      "readinessPercent": 74,
+      "pipelineValue": 63500,
+      "outreachCount": 10760
     },
     {
       "id": "biz-68",
@@ -983,12 +1252,16 @@
       "country": "Sweden",
       "website": "helios-energy-systems.com",
       "owner": "Marcus Vance",
-      "created": "May 09, 2026",
+      "created": "March 14, 2026",
       "avatarColor": "#a842a2",
       "company": "Helios Energy Systems (Stuttgart)",
       "emailsSent": 20076,
       "prospects": 14052,
-      "followUpsCompleted": 6
+      "followUpsCompleted": 6,
+      "contact": "marcus.vance@example.com",
+      "readinessPercent": 85,
+      "pipelineValue": 71250,
+      "outreachCount": 11920
     },
     {
       "id": "biz-69",
@@ -997,12 +1270,16 @@
       "country": "Belgium",
       "website": "synapse-software-gmbh.com",
       "owner": "Sarah Jenkins",
-      "created": "July 12, 2026",
+      "created": "March 21, 2026",
       "avatarColor": "#dc9c56",
       "company": "Synapse Software GmbH (Geneva)",
       "emailsSent": 23533,
       "prospects": 14891,
-      "followUpsCompleted": 23
+      "followUpsCompleted": 23,
+      "contact": "sarah.jenkins@example.com",
+      "readinessPercent": 96,
+      "pipelineValue": 79000,
+      "outreachCount": 13080
     },
     {
       "id": "biz-70",
@@ -1011,12 +1288,16 @@
       "country": "Switzerland",
       "website": "quantex-ai-labs.com",
       "owner": "Lukas Fischer",
-      "created": "September 15, 2026",
+      "created": "March 05, 2026",
       "avatarColor": "#2ae9c9",
       "company": "Quantex AI Labs (Copenhagen)",
       "emailsSent": 26990,
       "prospects": 15730,
-      "followUpsCompleted": 5
+      "followUpsCompleted": 5,
+      "contact": "lukas.fischer@example.com",
+      "readinessPercent": 65,
+      "pipelineValue": 86750,
+      "outreachCount": 14240
     },
     {
       "id": "biz-71",
@@ -1025,12 +1306,16 @@
       "country": "Germany",
       "website": "kronos-materials-gmbh.com",
       "owner": "David Kim",
-      "created": "November 18, 2026",
+      "created": "March 12, 2026",
       "avatarColor": "#c974f4",
       "company": "Kronos Materials GmbH (Frankfurt)",
       "emailsSent": 30447,
       "prospects": 16569,
-      "followUpsCompleted": 22
+      "followUpsCompleted": 22,
+      "contact": "david.kim@example.com",
+      "readinessPercent": 76,
+      "pipelineValue": 94500,
+      "outreachCount": 15400
     },
     {
       "id": "biz-72",
@@ -1039,12 +1324,16 @@
       "country": "Germany",
       "website": "solaris-clean-tech.com",
       "owner": "Michael Weber",
-      "created": "January 21, 2026",
+      "created": "March 19, 2026",
       "avatarColor": "#42a8a1",
       "company": "Solaris Clean Tech (Zurich)",
       "emailsSent": 33904,
       "prospects": 2408,
-      "followUpsCompleted": 39
+      "followUpsCompleted": 39,
+      "contact": "michael.weber@example.com",
+      "readinessPercent": 87,
+      "pipelineValue": 102250,
+      "outreachCount": 1560
     },
     {
       "id": "biz-73",
@@ -1053,12 +1342,16 @@
       "country": "Denmark",
       "website": "vector-grid-solutions.com",
       "owner": "Sophie Dupont",
-      "created": "March 24, 2026",
+      "created": "March 03, 2026",
       "avatarColor": "#c9ae4d",
       "company": "Vector Grid Solutions (Brussels)",
       "emailsSent": 37361,
       "prospects": 3247,
-      "followUpsCompleted": 21
+      "followUpsCompleted": 21,
+      "contact": "sophie.dupont@example.com",
+      "readinessPercent": 56,
+      "pipelineValue": 15000,
+      "outreachCount": 2720
     },
     {
       "id": "biz-74",
@@ -1067,12 +1360,16 @@
       "country": "Netherlands",
       "website": "bavaria-logistics-se.com",
       "owner": "Elena Rostova",
-      "created": "May 27, 2026",
+      "created": "March 10, 2026",
       "avatarColor": "#a842a2",
       "company": "Bavaria Logistics SE (Hamburg)",
       "emailsSent": 40818,
       "prospects": 4086,
-      "followUpsCompleted": 38
+      "followUpsCompleted": 38,
+      "contact": "elena.rostova@example.com",
+      "readinessPercent": 67,
+      "pipelineValue": 22750,
+      "outreachCount": 3880
     },
     {
       "id": "biz-75",
@@ -1081,12 +1378,16 @@
       "country": "Austria",
       "website": "apex-robotics-ltd.com",
       "owner": "Anna Lindqvist",
-      "created": "July 02, 2026",
+      "created": "March 17, 2026",
       "avatarColor": "#dc9c56",
       "company": "Apex Robotics Ltd (Vienna)",
       "emailsSent": 44275,
       "prospects": 4925,
-      "followUpsCompleted": 20
+      "followUpsCompleted": 20,
+      "contact": "anna.lindqvist@example.com",
+      "readinessPercent": 78,
+      "pipelineValue": 30500,
+      "outreachCount": 5040
     },
     {
       "id": "biz-76",
@@ -1095,12 +1396,16 @@
       "country": "Germany",
       "website": "kaiser-precision-tools.com",
       "owner": "Marcus Vance",
-      "created": "September 05, 2026",
+      "created": "March 01, 2026",
       "avatarColor": "#2ae9c9",
       "company": "Kaiser Precision Tools (Rotterdam)",
       "emailsSent": 47732,
       "prospects": 5764,
-      "followUpsCompleted": 37
+      "followUpsCompleted": 37,
+      "contact": "marcus.vance@example.com",
+      "readinessPercent": 89,
+      "pipelineValue": 38250,
+      "outreachCount": 6200
     },
     {
       "id": "biz-77",
@@ -1109,12 +1414,16 @@
       "country": "Sweden",
       "website": "echo-cloud-systems.com",
       "owner": "Sarah Jenkins",
-      "created": "November 08, 2026",
+      "created": "March 08, 2026",
       "avatarColor": "#c974f4",
       "company": "Echo Cloud Systems (Munich)",
       "emailsSent": 51189,
       "prospects": 6603,
-      "followUpsCompleted": 19
+      "followUpsCompleted": 19,
+      "contact": "sarah.jenkins@example.com",
+      "readinessPercent": 58,
+      "pipelineValue": 46000,
+      "outreachCount": 7360
     },
     {
       "id": "biz-78",
@@ -1123,12 +1432,16 @@
       "country": "Belgium",
       "website": "orbit-cyber-defense.com",
       "owner": "Lukas Fischer",
-      "created": "January 11, 2026",
+      "created": "March 15, 2026",
       "avatarColor": "#42a8a1",
       "company": "Orbit Cyber Defense (Cologne)",
       "emailsSent": 54646,
       "prospects": 7442,
-      "followUpsCompleted": 36
+      "followUpsCompleted": 36,
+      "contact": "lukas.fischer@example.com",
+      "readinessPercent": 69,
+      "pipelineValue": 53750,
+      "outreachCount": 8520
     },
     {
       "id": "biz-79",
@@ -1137,12 +1450,16 @@
       "country": "Switzerland",
       "website": "titan-heavy-machinery.com",
       "owner": "David Kim",
-      "created": "March 14, 2026",
+      "created": "March 22, 2026",
       "avatarColor": "#c9ae4d",
       "company": "Titan Heavy Machinery (Amsterdam)",
       "emailsSent": 58103,
       "prospects": 8281,
-      "followUpsCompleted": 18
+      "followUpsCompleted": 18,
+      "contact": "david.kim@example.com",
+      "readinessPercent": 80,
+      "pipelineValue": 61500,
+      "outreachCount": 9680
     },
     {
       "id": "biz-80",
@@ -1151,12 +1468,16 @@
       "country": "Germany",
       "website": "nordtech-solutions-gmbh.com",
       "owner": "Michael Weber",
-      "created": "May 17, 2026",
+      "created": "March 06, 2026",
       "avatarColor": "#a842a2",
       "company": "NordTech Solutions GmbH (Berlin)",
       "emailsSent": 61560,
       "prospects": 9120,
-      "followUpsCompleted": 35
+      "followUpsCompleted": 35,
+      "contact": "michael.weber@example.com",
+      "readinessPercent": 91,
+      "pipelineValue": 69250,
+      "outreachCount": 10840
     },
     {
       "id": "biz-81",
@@ -1165,12 +1486,16 @@
       "country": "Germany",
       "website": "vanguard-automation.com",
       "owner": "Sophie Dupont",
-      "created": "July 20, 2026",
+      "created": "March 13, 2026",
       "avatarColor": "#dc9c56",
       "company": "Vanguard Automation (Düsseldorf)",
       "emailsSent": 65017,
       "prospects": 9959,
-      "followUpsCompleted": 17
+      "followUpsCompleted": 17,
+      "contact": "sophie.dupont@example.com",
+      "readinessPercent": 60,
+      "pipelineValue": 77000,
+      "outreachCount": 12000
     },
     {
       "id": "biz-82",
@@ -1179,12 +1504,16 @@
       "country": "Denmark",
       "website": "starlight-biotech.com",
       "owner": "Elena Rostova",
-      "created": "September 23, 2026",
+      "created": "March 20, 2026",
       "avatarColor": "#2ae9c9",
       "company": "Starlight Biotech (Basel)",
       "emailsSent": 68474,
       "prospects": 10798,
-      "followUpsCompleted": 34
+      "followUpsCompleted": 34,
+      "contact": "elena.rostova@example.com",
+      "readinessPercent": 71,
+      "pipelineValue": 84750,
+      "outreachCount": 13160
     },
     {
       "id": "biz-83",
@@ -1193,12 +1522,16 @@
       "country": "Netherlands",
       "website": "lumina-optics-corp.com",
       "owner": "Anna Lindqvist",
-      "created": "November 26, 2026",
+      "created": "March 04, 2026",
       "avatarColor": "#c974f4",
       "company": "Lumina Optics Corp (Stockholm)",
       "emailsSent": 71931,
       "prospects": 11637,
-      "followUpsCompleted": 16
+      "followUpsCompleted": 16,
+      "contact": "anna.lindqvist@example.com",
+      "readinessPercent": 82,
+      "pipelineValue": 92500,
+      "outreachCount": 14320
     },
     {
       "id": "biz-84",
@@ -1207,12 +1540,16 @@
       "country": "Austria",
       "website": "zephyr-marine-engineering.com",
       "owner": "Marcus Vance",
-      "created": "January 01, 2026",
+      "created": "March 11, 2026",
       "avatarColor": "#42a8a1",
       "company": "Zephyr Marine Engineering (Stuttgart)",
       "emailsSent": 75388,
       "prospects": 12476,
-      "followUpsCompleted": 33
+      "followUpsCompleted": 33,
+      "contact": "marcus.vance@example.com",
+      "readinessPercent": 93,
+      "pipelineValue": 100250,
+      "outreachCount": 15480
     },
     {
       "id": "biz-85",
@@ -1221,12 +1558,16 @@
       "country": "Germany",
       "website": "novus-medical-instruments.com",
       "owner": "Sarah Jenkins",
-      "created": "March 04, 2026",
+      "created": "March 18, 2026",
       "avatarColor": "#c9ae4d",
       "company": "Novus Medical Instruments (Geneva)",
       "emailsSent": 78845,
       "prospects": 13315,
-      "followUpsCompleted": 15
+      "followUpsCompleted": 15,
+      "contact": "sarah.jenkins@example.com",
+      "readinessPercent": 62,
+      "pipelineValue": 108000,
+      "outreachCount": 1640
     },
     {
       "id": "biz-86",
@@ -1235,12 +1576,16 @@
       "country": "Sweden",
       "website": "aether-nano-systems.com",
       "owner": "Lukas Fischer",
-      "created": "May 07, 2026",
+      "created": "March 02, 2026",
       "avatarColor": "#a842a2",
       "company": "Aether Nano Systems (Copenhagen)",
       "emailsSent": 82302,
       "prospects": 14154,
-      "followUpsCompleted": 32
+      "followUpsCompleted": 32,
+      "contact": "lukas.fischer@example.com",
+      "readinessPercent": 73,
+      "pipelineValue": 20750,
+      "outreachCount": 2800
     },
     {
       "id": "biz-87",
@@ -1249,12 +1594,16 @@
       "country": "Belgium",
       "website": "aerodynamics-ag.com",
       "owner": "David Kim",
-      "created": "July 10, 2026",
+      "created": "March 09, 2026",
       "avatarColor": "#dc9c56",
       "company": "AeroDynamics AG (Frankfurt)",
       "emailsSent": 10759,
       "prospects": 14993,
-      "followUpsCompleted": 14
+      "followUpsCompleted": 14,
+      "contact": "david.kim@example.com",
+      "readinessPercent": 84,
+      "pipelineValue": 28500,
+      "outreachCount": 3960
     },
     {
       "id": "biz-88",
@@ -1263,12 +1612,16 @@
       "country": "Switzerland",
       "website": "helios-energy-systems.com",
       "owner": "Michael Weber",
-      "created": "September 13, 2026",
+      "created": "March 16, 2026",
       "avatarColor": "#2ae9c9",
       "company": "Helios Energy Systems (Zurich)",
       "emailsSent": 14216,
       "prospects": 15832,
-      "followUpsCompleted": 31
+      "followUpsCompleted": 31,
+      "contact": "michael.weber@example.com",
+      "readinessPercent": 95,
+      "pipelineValue": 36250,
+      "outreachCount": 5120
     },
     {
       "id": "biz-89",
@@ -1277,12 +1630,16 @@
       "country": "Germany",
       "website": "synapse-software-gmbh.com",
       "owner": "Sophie Dupont",
-      "created": "November 16, 2026",
+      "created": "March 23, 2026",
       "avatarColor": "#c974f4",
       "company": "Synapse Software GmbH (Brussels)",
       "emailsSent": 17673,
       "prospects": 16671,
-      "followUpsCompleted": 13
+      "followUpsCompleted": 13,
+      "contact": "sophie.dupont@example.com",
+      "readinessPercent": 64,
+      "pipelineValue": 44000,
+      "outreachCount": 6280
     },
     {
       "id": "biz-90",
@@ -1291,12 +1648,16 @@
       "country": "Germany",
       "website": "quantex-ai-labs.com",
       "owner": "Elena Rostova",
-      "created": "January 19, 2026",
+      "created": "March 07, 2026",
       "avatarColor": "#42a8a1",
       "company": "Quantex AI Labs (Hamburg)",
       "emailsSent": 21130,
       "prospects": 2510,
-      "followUpsCompleted": 30
+      "followUpsCompleted": 30,
+      "contact": "elena.rostova@example.com",
+      "readinessPercent": 75,
+      "pipelineValue": 51750,
+      "outreachCount": 7440
     },
     {
       "id": "biz-91",
@@ -1305,12 +1666,16 @@
       "country": "Denmark",
       "website": "kronos-materials-gmbh.com",
       "owner": "Anna Lindqvist",
-      "created": "March 22, 2026",
+      "created": "March 14, 2026",
       "avatarColor": "#c9ae4d",
       "company": "Kronos Materials GmbH (Vienna)",
       "emailsSent": 24587,
       "prospects": 3349,
-      "followUpsCompleted": 12
+      "followUpsCompleted": 12,
+      "contact": "anna.lindqvist@example.com",
+      "readinessPercent": 86,
+      "pipelineValue": 59500,
+      "outreachCount": 8600
     },
     {
       "id": "biz-92",
@@ -1319,12 +1684,16 @@
       "country": "Netherlands",
       "website": "solaris-clean-tech.com",
       "owner": "Marcus Vance",
-      "created": "May 25, 2026",
+      "created": "March 21, 2026",
       "avatarColor": "#a842a2",
       "company": "Solaris Clean Tech (Rotterdam)",
       "emailsSent": 28044,
       "prospects": 4188,
-      "followUpsCompleted": 29
+      "followUpsCompleted": 29,
+      "contact": "marcus.vance@example.com",
+      "readinessPercent": 55,
+      "pipelineValue": 67250,
+      "outreachCount": 9760
     },
     {
       "id": "biz-93",
@@ -1333,12 +1702,16 @@
       "country": "Austria",
       "website": "vector-grid-solutions.com",
       "owner": "Sarah Jenkins",
-      "created": "July 28, 2026",
+      "created": "March 05, 2026",
       "avatarColor": "#dc9c56",
       "company": "Vector Grid Solutions (Munich)",
       "emailsSent": 31501,
       "prospects": 5027,
-      "followUpsCompleted": 11
+      "followUpsCompleted": 11,
+      "contact": "sarah.jenkins@example.com",
+      "readinessPercent": 66,
+      "pipelineValue": 75000,
+      "outreachCount": 10920
     },
     {
       "id": "biz-94",
@@ -1347,12 +1720,16 @@
       "country": "Germany",
       "website": "bavaria-logistics-se.com",
       "owner": "Lukas Fischer",
-      "created": "September 03, 2026",
+      "created": "March 12, 2026",
       "avatarColor": "#2ae9c9",
       "company": "Bavaria Logistics SE (Cologne)",
       "emailsSent": 34958,
       "prospects": 5866,
-      "followUpsCompleted": 28
+      "followUpsCompleted": 28,
+      "contact": "lukas.fischer@example.com",
+      "readinessPercent": 77,
+      "pipelineValue": 82750,
+      "outreachCount": 12080
     },
     {
       "id": "biz-95",
@@ -1361,12 +1738,16 @@
       "country": "Sweden",
       "website": "apex-robotics-ltd.com",
       "owner": "David Kim",
-      "created": "November 06, 2026",
+      "created": "March 19, 2026",
       "avatarColor": "#c974f4",
       "company": "Apex Robotics Ltd (Amsterdam)",
       "emailsSent": 38415,
       "prospects": 6705,
-      "followUpsCompleted": 10
+      "followUpsCompleted": 10,
+      "contact": "david.kim@example.com",
+      "readinessPercent": 88,
+      "pipelineValue": 90500,
+      "outreachCount": 13240
     },
     {
       "id": "biz-96",
@@ -1375,12 +1756,16 @@
       "country": "Belgium",
       "website": "kaiser-precision-tools.com",
       "owner": "Michael Weber",
-      "created": "January 09, 2026",
+      "created": "March 03, 2026",
       "avatarColor": "#42a8a1",
       "company": "Kaiser Precision Tools (Berlin)",
       "emailsSent": 41872,
       "prospects": 7544,
-      "followUpsCompleted": 27
+      "followUpsCompleted": 27,
+      "contact": "michael.weber@example.com",
+      "readinessPercent": 57,
+      "pipelineValue": 98250,
+      "outreachCount": 14400
     },
     {
       "id": "biz-97",
@@ -1389,12 +1774,16 @@
       "country": "Switzerland",
       "website": "echo-cloud-systems.com",
       "owner": "Sophie Dupont",
-      "created": "March 12, 2026",
+      "created": "March 10, 2026",
       "avatarColor": "#c9ae4d",
       "company": "Echo Cloud Systems (Düsseldorf)",
       "emailsSent": 45329,
       "prospects": 8383,
-      "followUpsCompleted": 9
+      "followUpsCompleted": 9,
+      "contact": "sophie.dupont@example.com",
+      "readinessPercent": 68,
+      "pipelineValue": 106000,
+      "outreachCount": 15560
     },
     {
       "id": "biz-98",
@@ -1403,12 +1792,16 @@
       "country": "Germany",
       "website": "orbit-cyber-defense.com",
       "owner": "Elena Rostova",
-      "created": "May 15, 2026",
+      "created": "March 17, 2026",
       "avatarColor": "#a842a2",
       "company": "Orbit Cyber Defense (Basel)",
       "emailsSent": 48786,
       "prospects": 9222,
-      "followUpsCompleted": 26
+      "followUpsCompleted": 26,
+      "contact": "elena.rostova@example.com",
+      "readinessPercent": 79,
+      "pipelineValue": 18750,
+      "outreachCount": 1720
     },
     {
       "id": "biz-99",
@@ -1417,12 +1810,16 @@
       "country": "Germany",
       "website": "titan-heavy-machinery.com",
       "owner": "Anna Lindqvist",
-      "created": "July 18, 2026",
+      "created": "March 01, 2026",
       "avatarColor": "#dc9c56",
       "company": "Titan Heavy Machinery (Stockholm)",
       "emailsSent": 52243,
       "prospects": 10061,
-      "followUpsCompleted": 8
+      "followUpsCompleted": 8,
+      "contact": "anna.lindqvist@example.com",
+      "readinessPercent": 90,
+      "pipelineValue": 26500,
+      "outreachCount": 2880
     },
     {
       "id": "biz-100",
@@ -1431,12 +1828,16 @@
       "country": "Denmark",
       "website": "nordtech-solutions-gmbh.com",
       "owner": "Marcus Vance",
-      "created": "September 21, 2026",
+      "created": "March 08, 2026",
       "avatarColor": "#2ae9c9",
       "company": "NordTech Solutions GmbH (Stuttgart)",
       "emailsSent": 55700,
       "prospects": 10900,
-      "followUpsCompleted": 25
+      "followUpsCompleted": 25,
+      "contact": "marcus.vance@example.com",
+      "readinessPercent": 59,
+      "pipelineValue": 34250,
+      "outreachCount": 4040
     },
     {
       "id": "biz-101",
@@ -1445,12 +1846,16 @@
       "country": "Netherlands",
       "website": "vanguard-automation.com",
       "owner": "Sarah Jenkins",
-      "created": "November 24, 2026",
+      "created": "March 15, 2026",
       "avatarColor": "#c974f4",
       "company": "Vanguard Automation (Geneva)",
       "emailsSent": 59157,
       "prospects": 11739,
-      "followUpsCompleted": 7
+      "followUpsCompleted": 7,
+      "contact": "sarah.jenkins@example.com",
+      "readinessPercent": 70,
+      "pipelineValue": 42000,
+      "outreachCount": 5200
     },
     {
       "id": "biz-102",
@@ -1459,12 +1864,16 @@
       "country": "Austria",
       "website": "starlight-biotech.com",
       "owner": "Lukas Fischer",
-      "created": "January 27, 2026",
+      "created": "March 22, 2026",
       "avatarColor": "#42a8a1",
       "company": "Starlight Biotech (Copenhagen)",
       "emailsSent": 62614,
       "prospects": 12578,
-      "followUpsCompleted": 24
+      "followUpsCompleted": 24,
+      "contact": "lukas.fischer@example.com",
+      "readinessPercent": 81,
+      "pipelineValue": 49750,
+      "outreachCount": 6360
     },
     {
       "id": "biz-103",
@@ -1473,12 +1882,16 @@
       "country": "Germany",
       "website": "lumina-optics-corp.com",
       "owner": "David Kim",
-      "created": "March 02, 2026",
+      "created": "March 06, 2026",
       "avatarColor": "#c9ae4d",
       "company": "Lumina Optics Corp (Frankfurt)",
       "emailsSent": 66071,
       "prospects": 13417,
-      "followUpsCompleted": 6
+      "followUpsCompleted": 6,
+      "contact": "david.kim@example.com",
+      "readinessPercent": 92,
+      "pipelineValue": 57500,
+      "outreachCount": 7520
     },
     {
       "id": "biz-104",
@@ -1487,12 +1900,16 @@
       "country": "Sweden",
       "website": "zephyr-marine-engineering.com",
       "owner": "Michael Weber",
-      "created": "May 05, 2026",
+      "created": "March 13, 2026",
       "avatarColor": "#a842a2",
       "company": "Zephyr Marine Engineering (Zurich)",
       "emailsSent": 69528,
       "prospects": 14256,
-      "followUpsCompleted": 23
+      "followUpsCompleted": 23,
+      "contact": "michael.weber@example.com",
+      "readinessPercent": 61,
+      "pipelineValue": 65250,
+      "outreachCount": 8680
     },
     {
       "id": "biz-105",
@@ -1501,12 +1918,16 @@
       "country": "Belgium",
       "website": "novus-medical-instruments.com",
       "owner": "Sophie Dupont",
-      "created": "July 08, 2026",
+      "created": "March 20, 2026",
       "avatarColor": "#dc9c56",
       "company": "Novus Medical Instruments (Brussels)",
       "emailsSent": 72985,
       "prospects": 15095,
-      "followUpsCompleted": 5
+      "followUpsCompleted": 5,
+      "contact": "sophie.dupont@example.com",
+      "readinessPercent": 72,
+      "pipelineValue": 73000,
+      "outreachCount": 9840
     },
     {
       "id": "biz-106",
@@ -1515,12 +1936,16 @@
       "country": "Switzerland",
       "website": "aether-nano-systems.com",
       "owner": "Elena Rostova",
-      "created": "September 11, 2026",
+      "created": "March 04, 2026",
       "avatarColor": "#2ae9c9",
       "company": "Aether Nano Systems (Hamburg)",
       "emailsSent": 76442,
       "prospects": 15934,
-      "followUpsCompleted": 22
+      "followUpsCompleted": 22,
+      "contact": "elena.rostova@example.com",
+      "readinessPercent": 83,
+      "pipelineValue": 80750,
+      "outreachCount": 11000
     },
     {
       "id": "biz-107",
@@ -1529,12 +1954,16 @@
       "country": "Germany",
       "website": "aerodynamics-ag.com",
       "owner": "Anna Lindqvist",
-      "created": "November 14, 2026",
+      "created": "March 11, 2026",
       "avatarColor": "#c974f4",
       "company": "AeroDynamics AG (Vienna)",
       "emailsSent": 79899,
       "prospects": 16773,
-      "followUpsCompleted": 39
+      "followUpsCompleted": 39,
+      "contact": "anna.lindqvist@example.com",
+      "readinessPercent": 94,
+      "pipelineValue": 88500,
+      "outreachCount": 12160
     },
     {
       "id": "biz-108",
@@ -1543,12 +1972,16 @@
       "country": "Germany",
       "website": "helios-energy-systems.com",
       "owner": "Marcus Vance",
-      "created": "January 17, 2026",
+      "created": "March 18, 2026",
       "avatarColor": "#42a8a1",
       "company": "Helios Energy Systems (Rotterdam)",
       "emailsSent": 83356,
       "prospects": 2612,
-      "followUpsCompleted": 21
+      "followUpsCompleted": 21,
+      "contact": "marcus.vance@example.com",
+      "readinessPercent": 63,
+      "pipelineValue": 96250,
+      "outreachCount": 13320
     },
     {
       "id": "biz-109",
@@ -1557,12 +1990,16 @@
       "country": "Denmark",
       "website": "synapse-software-gmbh.com",
       "owner": "Sarah Jenkins",
-      "created": "March 20, 2026",
+      "created": "March 02, 2026",
       "avatarColor": "#c9ae4d",
       "company": "Synapse Software GmbH (Munich)",
       "emailsSent": 11813,
       "prospects": 3451,
-      "followUpsCompleted": 38
+      "followUpsCompleted": 38,
+      "contact": "sarah.jenkins@example.com",
+      "readinessPercent": 74,
+      "pipelineValue": 104000,
+      "outreachCount": 14480
     },
     {
       "id": "biz-110",
@@ -1571,12 +2008,16 @@
       "country": "Netherlands",
       "website": "quantex-ai-labs.com",
       "owner": "Lukas Fischer",
-      "created": "May 23, 2026",
+      "created": "March 09, 2026",
       "avatarColor": "#a842a2",
       "company": "Quantex AI Labs (Cologne)",
       "emailsSent": 15270,
       "prospects": 4290,
-      "followUpsCompleted": 20
+      "followUpsCompleted": 20,
+      "contact": "lukas.fischer@example.com",
+      "readinessPercent": 85,
+      "pipelineValue": 16750,
+      "outreachCount": 15640
     },
     {
       "id": "biz-111",
@@ -1585,12 +2026,16 @@
       "country": "Austria",
       "website": "kronos-materials-gmbh.com",
       "owner": "David Kim",
-      "created": "July 26, 2026",
+      "created": "March 16, 2026",
       "avatarColor": "#dc9c56",
       "company": "Kronos Materials GmbH (Amsterdam)",
       "emailsSent": 18727,
       "prospects": 5129,
-      "followUpsCompleted": 37
+      "followUpsCompleted": 37,
+      "contact": "david.kim@example.com",
+      "readinessPercent": 96,
+      "pipelineValue": 24500,
+      "outreachCount": 1800
     },
     {
       "id": "biz-112",
@@ -1599,12 +2044,16 @@
       "country": "Germany",
       "website": "solaris-clean-tech.com",
       "owner": "Michael Weber",
-      "created": "September 01, 2026",
+      "created": "March 23, 2026",
       "avatarColor": "#2ae9c9",
       "company": "Solaris Clean Tech (Berlin)",
       "emailsSent": 22184,
       "prospects": 5968,
-      "followUpsCompleted": 19
+      "followUpsCompleted": 19,
+      "contact": "michael.weber@example.com",
+      "readinessPercent": 65,
+      "pipelineValue": 32250,
+      "outreachCount": 2960
     },
     {
       "id": "biz-113",
@@ -1613,12 +2062,16 @@
       "country": "Sweden",
       "website": "vector-grid-solutions.com",
       "owner": "Sophie Dupont",
-      "created": "November 04, 2026",
+      "created": "March 07, 2026",
       "avatarColor": "#c974f4",
       "company": "Vector Grid Solutions (Düsseldorf)",
       "emailsSent": 25641,
       "prospects": 6807,
-      "followUpsCompleted": 36
+      "followUpsCompleted": 36,
+      "contact": "sophie.dupont@example.com",
+      "readinessPercent": 76,
+      "pipelineValue": 40000,
+      "outreachCount": 4120
     },
     {
       "id": "biz-114",
@@ -1627,12 +2080,16 @@
       "country": "Belgium",
       "website": "bavaria-logistics-se.com",
       "owner": "Elena Rostova",
-      "created": "January 07, 2026",
+      "created": "March 14, 2026",
       "avatarColor": "#42a8a1",
       "company": "Bavaria Logistics SE (Basel)",
       "emailsSent": 29098,
       "prospects": 7646,
-      "followUpsCompleted": 18
+      "followUpsCompleted": 18,
+      "contact": "elena.rostova@example.com",
+      "readinessPercent": 87,
+      "pipelineValue": 47750,
+      "outreachCount": 5280
     },
     {
       "id": "biz-115",
@@ -1641,12 +2098,16 @@
       "country": "Switzerland",
       "website": "apex-robotics-ltd.com",
       "owner": "Anna Lindqvist",
-      "created": "March 10, 2026",
+      "created": "March 21, 2026",
       "avatarColor": "#c9ae4d",
       "company": "Apex Robotics Ltd (Stockholm)",
       "emailsSent": 32555,
       "prospects": 8485,
-      "followUpsCompleted": 35
+      "followUpsCompleted": 35,
+      "contact": "anna.lindqvist@example.com",
+      "readinessPercent": 56,
+      "pipelineValue": 55500,
+      "outreachCount": 6440
     },
     {
       "id": "biz-116",
@@ -1655,12 +2116,16 @@
       "country": "Germany",
       "website": "kaiser-precision-tools.com",
       "owner": "Marcus Vance",
-      "created": "May 13, 2026",
+      "created": "March 05, 2026",
       "avatarColor": "#a842a2",
       "company": "Kaiser Precision Tools (Stuttgart)",
       "emailsSent": 36012,
       "prospects": 9324,
-      "followUpsCompleted": 17
+      "followUpsCompleted": 17,
+      "contact": "marcus.vance@example.com",
+      "readinessPercent": 67,
+      "pipelineValue": 63250,
+      "outreachCount": 7600
     },
     {
       "id": "biz-117",
@@ -1669,12 +2134,16 @@
       "country": "Germany",
       "website": "echo-cloud-systems.com",
       "owner": "Sarah Jenkins",
-      "created": "July 16, 2026",
+      "created": "March 12, 2026",
       "avatarColor": "#dc9c56",
       "company": "Echo Cloud Systems (Geneva)",
       "emailsSent": 39469,
       "prospects": 10163,
-      "followUpsCompleted": 34
+      "followUpsCompleted": 34,
+      "contact": "sarah.jenkins@example.com",
+      "readinessPercent": 78,
+      "pipelineValue": 71000,
+      "outreachCount": 8760
     },
     {
       "id": "biz-118",
@@ -1683,12 +2152,16 @@
       "country": "Denmark",
       "website": "orbit-cyber-defense.com",
       "owner": "Lukas Fischer",
-      "created": "September 19, 2026",
+      "created": "March 19, 2026",
       "avatarColor": "#2ae9c9",
       "company": "Orbit Cyber Defense (Copenhagen)",
       "emailsSent": 42926,
       "prospects": 11002,
-      "followUpsCompleted": 16
+      "followUpsCompleted": 16,
+      "contact": "lukas.fischer@example.com",
+      "readinessPercent": 89,
+      "pipelineValue": 78750,
+      "outreachCount": 9920
     },
     {
       "id": "biz-119",
@@ -1697,12 +2170,16 @@
       "country": "Netherlands",
       "website": "titan-heavy-machinery.com",
       "owner": "David Kim",
-      "created": "November 22, 2026",
+      "created": "March 03, 2026",
       "avatarColor": "#c974f4",
       "company": "Titan Heavy Machinery (Frankfurt)",
       "emailsSent": 46383,
       "prospects": 11841,
-      "followUpsCompleted": 33
+      "followUpsCompleted": 33,
+      "contact": "david.kim@example.com",
+      "readinessPercent": 58,
+      "pipelineValue": 86500,
+      "outreachCount": 11080
     },
     {
       "id": "biz-120",
@@ -1711,12 +2188,16 @@
       "country": "Austria",
       "website": "nordtech-solutions-gmbh.com",
       "owner": "Michael Weber",
-      "created": "January 25, 2026",
+      "created": "March 10, 2026",
       "avatarColor": "#42a8a1",
       "company": "NordTech Solutions GmbH (Zurich)",
       "emailsSent": 49840,
       "prospects": 12680,
-      "followUpsCompleted": 15
+      "followUpsCompleted": 15,
+      "contact": "michael.weber@example.com",
+      "readinessPercent": 69,
+      "pipelineValue": 94250,
+      "outreachCount": 12240
     },
     {
       "id": "biz-121",
@@ -1725,12 +2206,16 @@
       "country": "Germany",
       "website": "vanguard-automation.com",
       "owner": "Sophie Dupont",
-      "created": "March 28, 2026",
+      "created": "March 17, 2026",
       "avatarColor": "#c9ae4d",
       "company": "Vanguard Automation (Brussels)",
       "emailsSent": 53297,
       "prospects": 13519,
-      "followUpsCompleted": 32
+      "followUpsCompleted": 32,
+      "contact": "sophie.dupont@example.com",
+      "readinessPercent": 80,
+      "pipelineValue": 102000,
+      "outreachCount": 13400
     },
     {
       "id": "biz-122",
@@ -1739,12 +2224,16 @@
       "country": "Sweden",
       "website": "starlight-biotech.com",
       "owner": "Elena Rostova",
-      "created": "May 03, 2026",
+      "created": "March 01, 2026",
       "avatarColor": "#a842a2",
       "company": "Starlight Biotech (Hamburg)",
       "emailsSent": 56754,
       "prospects": 14358,
-      "followUpsCompleted": 14
+      "followUpsCompleted": 14,
+      "contact": "elena.rostova@example.com",
+      "readinessPercent": 91,
+      "pipelineValue": 109750,
+      "outreachCount": 14560
     },
     {
       "id": "biz-123",
@@ -1753,12 +2242,16 @@
       "country": "Belgium",
       "website": "lumina-optics-corp.com",
       "owner": "Anna Lindqvist",
-      "created": "July 06, 2026",
+      "created": "March 08, 2026",
       "avatarColor": "#dc9c56",
       "company": "Lumina Optics Corp (Vienna)",
       "emailsSent": 60211,
       "prospects": 15197,
-      "followUpsCompleted": 31
+      "followUpsCompleted": 31,
+      "contact": "anna.lindqvist@example.com",
+      "readinessPercent": 60,
+      "pipelineValue": 22500,
+      "outreachCount": 15720
     },
     {
       "id": "biz-124",
@@ -1767,12 +2260,16 @@
       "country": "Switzerland",
       "website": "zephyr-marine-engineering.com",
       "owner": "Marcus Vance",
-      "created": "September 09, 2026",
+      "created": "March 15, 2026",
       "avatarColor": "#2ae9c9",
       "company": "Zephyr Marine Engineering (Rotterdam)",
       "emailsSent": 63668,
       "prospects": 16036,
-      "followUpsCompleted": 13
+      "followUpsCompleted": 13,
+      "contact": "marcus.vance@example.com",
+      "readinessPercent": 71,
+      "pipelineValue": 30250,
+      "outreachCount": 1880
     },
     {
       "id": "biz-125",
@@ -1781,12 +2278,16 @@
       "country": "Germany",
       "website": "novus-medical-instruments.com",
       "owner": "Sarah Jenkins",
-      "created": "November 12, 2026",
+      "created": "March 22, 2026",
       "avatarColor": "#c974f4",
       "company": "Novus Medical Instruments (Munich)",
       "emailsSent": 67125,
       "prospects": 16875,
-      "followUpsCompleted": 30
+      "followUpsCompleted": 30,
+      "contact": "sarah.jenkins@example.com",
+      "readinessPercent": 82,
+      "pipelineValue": 38000,
+      "outreachCount": 3040
     },
     {
       "id": "biz-126",
@@ -1795,12 +2296,16 @@
       "country": "Germany",
       "website": "aether-nano-systems.com",
       "owner": "Lukas Fischer",
-      "created": "January 15, 2026",
+      "created": "March 06, 2026",
       "avatarColor": "#42a8a1",
       "company": "Aether Nano Systems (Cologne)",
       "emailsSent": 70582,
       "prospects": 2714,
-      "followUpsCompleted": 12
+      "followUpsCompleted": 12,
+      "contact": "lukas.fischer@example.com",
+      "readinessPercent": 93,
+      "pipelineValue": 45750,
+      "outreachCount": 4200
     },
     {
       "id": "biz-127",
@@ -1809,12 +2314,16 @@
       "country": "Denmark",
       "website": "aerodynamics-ag.com",
       "owner": "David Kim",
-      "created": "March 18, 2026",
+      "created": "March 13, 2026",
       "avatarColor": "#c9ae4d",
       "company": "AeroDynamics AG (Amsterdam)",
       "emailsSent": 74039,
       "prospects": 3553,
-      "followUpsCompleted": 29
+      "followUpsCompleted": 29,
+      "contact": "david.kim@example.com",
+      "readinessPercent": 62,
+      "pipelineValue": 53500,
+      "outreachCount": 5360
     },
     {
       "id": "biz-128",
@@ -1823,12 +2332,16 @@
       "country": "Netherlands",
       "website": "helios-energy-systems.com",
       "owner": "Michael Weber",
-      "created": "May 21, 2026",
+      "created": "March 20, 2026",
       "avatarColor": "#a842a2",
       "company": "Helios Energy Systems (Berlin)",
       "emailsSent": 77496,
       "prospects": 4392,
-      "followUpsCompleted": 11
+      "followUpsCompleted": 11,
+      "contact": "michael.weber@example.com",
+      "readinessPercent": 73,
+      "pipelineValue": 61250,
+      "outreachCount": 6520
     },
     {
       "id": "biz-129",
@@ -1837,12 +2350,16 @@
       "country": "Austria",
       "website": "synapse-software-gmbh.com",
       "owner": "Sophie Dupont",
-      "created": "July 24, 2026",
+      "created": "March 04, 2026",
       "avatarColor": "#dc9c56",
       "company": "Synapse Software GmbH (Düsseldorf)",
       "emailsSent": 80953,
       "prospects": 5231,
-      "followUpsCompleted": 28
+      "followUpsCompleted": 28,
+      "contact": "sophie.dupont@example.com",
+      "readinessPercent": 84,
+      "pipelineValue": 69000,
+      "outreachCount": 7680
     },
     {
       "id": "biz-130",
@@ -1851,12 +2368,16 @@
       "country": "Germany",
       "website": "quantex-ai-labs.com",
       "owner": "Elena Rostova",
-      "created": "September 27, 2026",
+      "created": "March 11, 2026",
       "avatarColor": "#2ae9c9",
       "company": "Quantex AI Labs (Basel)",
       "emailsSent": 84410,
       "prospects": 6070,
-      "followUpsCompleted": 10
+      "followUpsCompleted": 10,
+      "contact": "elena.rostova@example.com",
+      "readinessPercent": 95,
+      "pipelineValue": 76750,
+      "outreachCount": 8840
     },
     {
       "id": "biz-131",
@@ -1865,12 +2386,16 @@
       "country": "Sweden",
       "website": "kronos-materials-gmbh.com",
       "owner": "Anna Lindqvist",
-      "created": "November 02, 2026",
+      "created": "March 18, 2026",
       "avatarColor": "#c974f4",
       "company": "Kronos Materials GmbH (Stockholm)",
       "emailsSent": 12867,
       "prospects": 6909,
-      "followUpsCompleted": 27
+      "followUpsCompleted": 27,
+      "contact": "anna.lindqvist@example.com",
+      "readinessPercent": 64,
+      "pipelineValue": 84500,
+      "outreachCount": 10000
     },
     {
       "id": "biz-132",
@@ -1879,12 +2404,16 @@
       "country": "Belgium",
       "website": "solaris-clean-tech.com",
       "owner": "Marcus Vance",
-      "created": "January 05, 2026",
+      "created": "March 02, 2026",
       "avatarColor": "#42a8a1",
       "company": "Solaris Clean Tech (Stuttgart)",
       "emailsSent": 16324,
       "prospects": 7748,
-      "followUpsCompleted": 9
+      "followUpsCompleted": 9,
+      "contact": "marcus.vance@example.com",
+      "readinessPercent": 75,
+      "pipelineValue": 92250,
+      "outreachCount": 11160
     },
     {
       "id": "biz-133",
@@ -1893,12 +2422,16 @@
       "country": "Switzerland",
       "website": "vector-grid-solutions.com",
       "owner": "Sarah Jenkins",
-      "created": "March 08, 2026",
+      "created": "March 09, 2026",
       "avatarColor": "#c9ae4d",
       "company": "Vector Grid Solutions (Geneva)",
       "emailsSent": 19781,
       "prospects": 8587,
-      "followUpsCompleted": 26
+      "followUpsCompleted": 26,
+      "contact": "sarah.jenkins@example.com",
+      "readinessPercent": 86,
+      "pipelineValue": 100000,
+      "outreachCount": 12320
     },
     {
       "id": "biz-134",
@@ -1907,12 +2440,16 @@
       "country": "Germany",
       "website": "bavaria-logistics-se.com",
       "owner": "Lukas Fischer",
-      "created": "May 11, 2026",
+      "created": "March 16, 2026",
       "avatarColor": "#a842a2",
       "company": "Bavaria Logistics SE (Copenhagen)",
       "emailsSent": 23238,
       "prospects": 9426,
-      "followUpsCompleted": 8
+      "followUpsCompleted": 8,
+      "contact": "lukas.fischer@example.com",
+      "readinessPercent": 55,
+      "pipelineValue": 107750,
+      "outreachCount": 13480
     },
     {
       "id": "biz-135",
@@ -1921,12 +2458,16 @@
       "country": "Germany",
       "website": "apex-robotics-ltd.com",
       "owner": "David Kim",
-      "created": "July 14, 2026",
+      "created": "March 23, 2026",
       "avatarColor": "#dc9c56",
       "company": "Apex Robotics Ltd (Frankfurt)",
       "emailsSent": 26695,
       "prospects": 10265,
-      "followUpsCompleted": 25
+      "followUpsCompleted": 25,
+      "contact": "david.kim@example.com",
+      "readinessPercent": 66,
+      "pipelineValue": 20500,
+      "outreachCount": 14640
     },
     {
       "id": "biz-136",
@@ -1935,12 +2476,16 @@
       "country": "Denmark",
       "website": "kaiser-precision-tools.com",
       "owner": "Michael Weber",
-      "created": "September 17, 2026",
+      "created": "March 07, 2026",
       "avatarColor": "#2ae9c9",
       "company": "Kaiser Precision Tools (Zurich)",
       "emailsSent": 30152,
       "prospects": 11104,
-      "followUpsCompleted": 7
+      "followUpsCompleted": 7,
+      "contact": "michael.weber@example.com",
+      "readinessPercent": 77,
+      "pipelineValue": 28250,
+      "outreachCount": 15800
     },
     {
       "id": "biz-137",
@@ -1949,12 +2494,16 @@
       "country": "Netherlands",
       "website": "echo-cloud-systems.com",
       "owner": "Sophie Dupont",
-      "created": "November 20, 2026",
+      "created": "March 14, 2026",
       "avatarColor": "#c974f4",
       "company": "Echo Cloud Systems (Brussels)",
       "emailsSent": 33609,
       "prospects": 11943,
-      "followUpsCompleted": 24
+      "followUpsCompleted": 24,
+      "contact": "sophie.dupont@example.com",
+      "readinessPercent": 88,
+      "pipelineValue": 36000,
+      "outreachCount": 1960
     },
     {
       "id": "biz-138",
@@ -1963,12 +2512,16 @@
       "country": "Austria",
       "website": "orbit-cyber-defense.com",
       "owner": "Elena Rostova",
-      "created": "January 23, 2026",
+      "created": "March 21, 2026",
       "avatarColor": "#42a8a1",
       "company": "Orbit Cyber Defense (Hamburg)",
       "emailsSent": 37066,
       "prospects": 12782,
-      "followUpsCompleted": 6
+      "followUpsCompleted": 6,
+      "contact": "elena.rostova@example.com",
+      "readinessPercent": 57,
+      "pipelineValue": 43750,
+      "outreachCount": 3120
     },
     {
       "id": "biz-139",
@@ -1977,12 +2530,16 @@
       "country": "Germany",
       "website": "titan-heavy-machinery.com",
       "owner": "Anna Lindqvist",
-      "created": "March 26, 2026",
+      "created": "March 05, 2026",
       "avatarColor": "#c9ae4d",
       "company": "Titan Heavy Machinery (Vienna)",
       "emailsSent": 40523,
       "prospects": 13621,
-      "followUpsCompleted": 23
+      "followUpsCompleted": 23,
+      "contact": "anna.lindqvist@example.com",
+      "readinessPercent": 68,
+      "pipelineValue": 51500,
+      "outreachCount": 4280
     },
     {
       "id": "biz-140",
@@ -1991,12 +2548,16 @@
       "country": "Sweden",
       "website": "nordtech-solutions-gmbh.com",
       "owner": "Marcus Vance",
-      "created": "May 01, 2026",
+      "created": "March 12, 2026",
       "avatarColor": "#a842a2",
       "company": "NordTech Solutions GmbH (Rotterdam)",
       "emailsSent": 43980,
       "prospects": 14460,
-      "followUpsCompleted": 5
+      "followUpsCompleted": 5,
+      "contact": "marcus.vance@example.com",
+      "readinessPercent": 79,
+      "pipelineValue": 59250,
+      "outreachCount": 5440
     },
     {
       "id": "biz-141",
@@ -2005,12 +2566,16 @@
       "country": "Belgium",
       "website": "vanguard-automation.com",
       "owner": "Sarah Jenkins",
-      "created": "July 04, 2026",
+      "created": "March 19, 2026",
       "avatarColor": "#dc9c56",
       "company": "Vanguard Automation (Munich)",
       "emailsSent": 47437,
       "prospects": 15299,
-      "followUpsCompleted": 22
+      "followUpsCompleted": 22,
+      "contact": "sarah.jenkins@example.com",
+      "readinessPercent": 90,
+      "pipelineValue": 67000,
+      "outreachCount": 6600
     },
     {
       "id": "biz-142",
@@ -2019,12 +2584,16 @@
       "country": "Switzerland",
       "website": "starlight-biotech.com",
       "owner": "Lukas Fischer",
-      "created": "September 07, 2026",
+      "created": "March 03, 2026",
       "avatarColor": "#2ae9c9",
       "company": "Starlight Biotech (Cologne)",
       "emailsSent": 50894,
       "prospects": 16138,
-      "followUpsCompleted": 39
+      "followUpsCompleted": 39,
+      "contact": "lukas.fischer@example.com",
+      "readinessPercent": 59,
+      "pipelineValue": 74750,
+      "outreachCount": 7760
     },
     {
       "id": "biz-143",
@@ -2033,12 +2602,16 @@
       "country": "Germany",
       "website": "lumina-optics-corp.com",
       "owner": "David Kim",
-      "created": "November 10, 2026",
+      "created": "March 10, 2026",
       "avatarColor": "#c974f4",
       "company": "Lumina Optics Corp (Amsterdam)",
       "emailsSent": 54351,
       "prospects": 16977,
-      "followUpsCompleted": 21
+      "followUpsCompleted": 21,
+      "contact": "david.kim@example.com",
+      "readinessPercent": 70,
+      "pipelineValue": 82500,
+      "outreachCount": 8920
     },
     {
       "id": "biz-144",
@@ -2047,12 +2620,16 @@
       "country": "Germany",
       "website": "zephyr-marine-engineering.com",
       "owner": "Michael Weber",
-      "created": "January 13, 2026",
+      "created": "March 17, 2026",
       "avatarColor": "#42a8a1",
       "company": "Zephyr Marine Engineering (Berlin)",
       "emailsSent": 57808,
       "prospects": 2816,
-      "followUpsCompleted": 38
+      "followUpsCompleted": 38,
+      "contact": "michael.weber@example.com",
+      "readinessPercent": 81,
+      "pipelineValue": 90250,
+      "outreachCount": 10080
     },
     {
       "id": "biz-145",
@@ -2061,12 +2638,16 @@
       "country": "Denmark",
       "website": "novus-medical-instruments.com",
       "owner": "Sophie Dupont",
-      "created": "March 16, 2026",
+      "created": "March 01, 2026",
       "avatarColor": "#c9ae4d",
       "company": "Novus Medical Instruments (Düsseldorf)",
       "emailsSent": 61265,
       "prospects": 3655,
-      "followUpsCompleted": 20
+      "followUpsCompleted": 20,
+      "contact": "sophie.dupont@example.com",
+      "readinessPercent": 92,
+      "pipelineValue": 98000,
+      "outreachCount": 11240
     },
     {
       "id": "biz-146",
@@ -2075,12 +2656,16 @@
       "country": "Netherlands",
       "website": "aether-nano-systems.com",
       "owner": "Elena Rostova",
-      "created": "May 19, 2026",
+      "created": "March 08, 2026",
       "avatarColor": "#a842a2",
       "company": "Aether Nano Systems (Basel)",
       "emailsSent": 64722,
       "prospects": 4494,
-      "followUpsCompleted": 37
+      "followUpsCompleted": 37,
+      "contact": "elena.rostova@example.com",
+      "readinessPercent": 61,
+      "pipelineValue": 105750,
+      "outreachCount": 12400
     },
     {
       "id": "biz-147",
@@ -2089,12 +2674,16 @@
       "country": "Austria",
       "website": "aerodynamics-ag.com",
       "owner": "Anna Lindqvist",
-      "created": "July 22, 2026",
+      "created": "March 15, 2026",
       "avatarColor": "#dc9c56",
       "company": "AeroDynamics AG (Stockholm)",
       "emailsSent": 68179,
       "prospects": 5333,
-      "followUpsCompleted": 19
+      "followUpsCompleted": 19,
+      "contact": "anna.lindqvist@example.com",
+      "readinessPercent": 72,
+      "pipelineValue": 18500,
+      "outreachCount": 13560
     },
     {
       "id": "biz-148",
@@ -2103,12 +2692,16 @@
       "country": "Germany",
       "website": "helios-energy-systems.com",
       "owner": "Marcus Vance",
-      "created": "September 25, 2026",
+      "created": "March 22, 2026",
       "avatarColor": "#2ae9c9",
       "company": "Helios Energy Systems (Stuttgart)",
       "emailsSent": 71636,
       "prospects": 6172,
-      "followUpsCompleted": 36
+      "followUpsCompleted": 36,
+      "contact": "marcus.vance@example.com",
+      "readinessPercent": 83,
+      "pipelineValue": 26250,
+      "outreachCount": 14720
     },
     {
       "id": "biz-149",
@@ -2117,12 +2710,16 @@
       "country": "Sweden",
       "website": "synapse-software-gmbh.com",
       "owner": "Sarah Jenkins",
-      "created": "November 28, 2026",
+      "created": "March 06, 2026",
       "avatarColor": "#c974f4",
       "company": "Synapse Software GmbH (Geneva)",
       "emailsSent": 75093,
       "prospects": 7011,
-      "followUpsCompleted": 18
+      "followUpsCompleted": 18,
+      "contact": "sarah.jenkins@example.com",
+      "readinessPercent": 94,
+      "pipelineValue": 34000,
+      "outreachCount": 15880
     },
     {
       "id": "biz-150",
@@ -2131,12 +2728,16 @@
       "country": "Belgium",
       "website": "quantex-ai-labs.com",
       "owner": "Lukas Fischer",
-      "created": "January 03, 2026",
+      "created": "March 13, 2026",
       "avatarColor": "#42a8a1",
       "company": "Quantex AI Labs (Copenhagen)",
       "emailsSent": 78550,
       "prospects": 7850,
-      "followUpsCompleted": 35
+      "followUpsCompleted": 35,
+      "contact": "lukas.fischer@example.com",
+      "readinessPercent": 63,
+      "pipelineValue": 41750,
+      "outreachCount": 2040
     },
     {
       "id": "biz-151",
@@ -2145,12 +2746,16 @@
       "country": "Switzerland",
       "website": "kronos-materials-gmbh.com",
       "owner": "David Kim",
-      "created": "March 06, 2026",
+      "created": "March 20, 2026",
       "avatarColor": "#c9ae4d",
       "company": "Kronos Materials GmbH (Frankfurt)",
       "emailsSent": 82007,
       "prospects": 8689,
-      "followUpsCompleted": 17
+      "followUpsCompleted": 17,
+      "contact": "david.kim@example.com",
+      "readinessPercent": 74,
+      "pipelineValue": 49500,
+      "outreachCount": 3200
     },
     {
       "id": "biz-152",
@@ -2159,12 +2764,16 @@
       "country": "Germany",
       "website": "solaris-clean-tech.com",
       "owner": "Michael Weber",
-      "created": "May 09, 2026",
+      "created": "March 04, 2026",
       "avatarColor": "#a842a2",
       "company": "Solaris Clean Tech (Zurich)",
       "emailsSent": 10464,
       "prospects": 9528,
-      "followUpsCompleted": 34
+      "followUpsCompleted": 34,
+      "contact": "michael.weber@example.com",
+      "readinessPercent": 85,
+      "pipelineValue": 57250,
+      "outreachCount": 4360
     },
     {
       "id": "biz-153",
@@ -2173,12 +2782,16 @@
       "country": "Germany",
       "website": "vector-grid-solutions.com",
       "owner": "Sophie Dupont",
-      "created": "July 12, 2026",
+      "created": "March 11, 2026",
       "avatarColor": "#dc9c56",
       "company": "Vector Grid Solutions (Brussels)",
       "emailsSent": 13921,
       "prospects": 10367,
-      "followUpsCompleted": 16
+      "followUpsCompleted": 16,
+      "contact": "sophie.dupont@example.com",
+      "readinessPercent": 96,
+      "pipelineValue": 65000,
+      "outreachCount": 5520
     },
     {
       "id": "biz-154",
@@ -2187,12 +2800,16 @@
       "country": "Denmark",
       "website": "bavaria-logistics-se.com",
       "owner": "Elena Rostova",
-      "created": "September 15, 2026",
+      "created": "March 18, 2026",
       "avatarColor": "#2ae9c9",
       "company": "Bavaria Logistics SE (Hamburg)",
       "emailsSent": 17378,
       "prospects": 11206,
-      "followUpsCompleted": 33
+      "followUpsCompleted": 33,
+      "contact": "elena.rostova@example.com",
+      "readinessPercent": 65,
+      "pipelineValue": 72750,
+      "outreachCount": 6680
     },
     {
       "id": "biz-155",
@@ -2201,12 +2818,16 @@
       "country": "Netherlands",
       "website": "apex-robotics-ltd.com",
       "owner": "Anna Lindqvist",
-      "created": "November 18, 2026",
+      "created": "March 02, 2026",
       "avatarColor": "#c974f4",
       "company": "Apex Robotics Ltd (Vienna)",
       "emailsSent": 20835,
       "prospects": 12045,
-      "followUpsCompleted": 15
+      "followUpsCompleted": 15,
+      "contact": "anna.lindqvist@example.com",
+      "readinessPercent": 76,
+      "pipelineValue": 80500,
+      "outreachCount": 7840
     },
     {
       "id": "biz-156",
@@ -2215,12 +2836,16 @@
       "country": "Austria",
       "website": "kaiser-precision-tools.com",
       "owner": "Marcus Vance",
-      "created": "January 21, 2026",
+      "created": "March 09, 2026",
       "avatarColor": "#42a8a1",
       "company": "Kaiser Precision Tools (Rotterdam)",
       "emailsSent": 24292,
       "prospects": 12884,
-      "followUpsCompleted": 32
+      "followUpsCompleted": 32,
+      "contact": "marcus.vance@example.com",
+      "readinessPercent": 87,
+      "pipelineValue": 88250,
+      "outreachCount": 9000
     },
     {
       "id": "biz-157",
@@ -2229,12 +2854,16 @@
       "country": "Germany",
       "website": "echo-cloud-systems.com",
       "owner": "Sarah Jenkins",
-      "created": "March 24, 2026",
+      "created": "March 16, 2026",
       "avatarColor": "#c9ae4d",
       "company": "Echo Cloud Systems (Munich)",
       "emailsSent": 27749,
       "prospects": 13723,
-      "followUpsCompleted": 14
+      "followUpsCompleted": 14,
+      "contact": "sarah.jenkins@example.com",
+      "readinessPercent": 56,
+      "pipelineValue": 96000,
+      "outreachCount": 10160
     },
     {
       "id": "biz-158",
@@ -2243,12 +2872,16 @@
       "country": "Sweden",
       "website": "orbit-cyber-defense.com",
       "owner": "Lukas Fischer",
-      "created": "May 27, 2026",
+      "created": "March 23, 2026",
       "avatarColor": "#a842a2",
       "company": "Orbit Cyber Defense (Cologne)",
       "emailsSent": 31206,
       "prospects": 14562,
-      "followUpsCompleted": 31
+      "followUpsCompleted": 31,
+      "contact": "lukas.fischer@example.com",
+      "readinessPercent": 67,
+      "pipelineValue": 103750,
+      "outreachCount": 11320
     },
     {
       "id": "biz-159",
@@ -2257,12 +2890,16 @@
       "country": "Belgium",
       "website": "titan-heavy-machinery.com",
       "owner": "David Kim",
-      "created": "July 02, 2026",
+      "created": "March 07, 2026",
       "avatarColor": "#dc9c56",
       "company": "Titan Heavy Machinery (Amsterdam)",
       "emailsSent": 34663,
       "prospects": 15401,
-      "followUpsCompleted": 13
+      "followUpsCompleted": 13,
+      "contact": "david.kim@example.com",
+      "readinessPercent": 78,
+      "pipelineValue": 16500,
+      "outreachCount": 12480
     },
     {
       "id": "biz-160",
@@ -2271,12 +2908,16 @@
       "country": "Switzerland",
       "website": "nordtech-solutions-gmbh.com",
       "owner": "Michael Weber",
-      "created": "September 05, 2026",
+      "created": "March 14, 2026",
       "avatarColor": "#2ae9c9",
       "company": "NordTech Solutions GmbH (Berlin)",
       "emailsSent": 38120,
       "prospects": 16240,
-      "followUpsCompleted": 30
+      "followUpsCompleted": 30,
+      "contact": "michael.weber@example.com",
+      "readinessPercent": 89,
+      "pipelineValue": 24250,
+      "outreachCount": 13640
     },
     {
       "id": "biz-161",
@@ -2285,12 +2926,16 @@
       "country": "Germany",
       "website": "vanguard-automation.com",
       "owner": "Sophie Dupont",
-      "created": "November 08, 2026",
+      "created": "March 21, 2026",
       "avatarColor": "#c974f4",
       "company": "Vanguard Automation (Düsseldorf)",
       "emailsSent": 41577,
       "prospects": 2079,
-      "followUpsCompleted": 12
+      "followUpsCompleted": 12,
+      "contact": "sophie.dupont@example.com",
+      "readinessPercent": 58,
+      "pipelineValue": 32000,
+      "outreachCount": 14800
     },
     {
       "id": "biz-162",
@@ -2299,12 +2944,16 @@
       "country": "Germany",
       "website": "starlight-biotech.com",
       "owner": "Elena Rostova",
-      "created": "January 11, 2026",
+      "created": "March 05, 2026",
       "avatarColor": "#42a8a1",
       "company": "Starlight Biotech (Basel)",
       "emailsSent": 45034,
       "prospects": 2918,
-      "followUpsCompleted": 29
+      "followUpsCompleted": 29,
+      "contact": "elena.rostova@example.com",
+      "readinessPercent": 69,
+      "pipelineValue": 39750,
+      "outreachCount": 15960
     },
     {
       "id": "biz-163",
@@ -2313,12 +2962,16 @@
       "country": "Denmark",
       "website": "lumina-optics-corp.com",
       "owner": "Anna Lindqvist",
-      "created": "March 14, 2026",
+      "created": "March 12, 2026",
       "avatarColor": "#c9ae4d",
       "company": "Lumina Optics Corp (Stockholm)",
       "emailsSent": 48491,
       "prospects": 3757,
-      "followUpsCompleted": 11
+      "followUpsCompleted": 11,
+      "contact": "anna.lindqvist@example.com",
+      "readinessPercent": 80,
+      "pipelineValue": 47500,
+      "outreachCount": 2120
     },
     {
       "id": "biz-164",
@@ -2327,12 +2980,16 @@
       "country": "Netherlands",
       "website": "zephyr-marine-engineering.com",
       "owner": "Marcus Vance",
-      "created": "May 17, 2026",
+      "created": "March 19, 2026",
       "avatarColor": "#a842a2",
       "company": "Zephyr Marine Engineering (Stuttgart)",
       "emailsSent": 51948,
       "prospects": 4596,
-      "followUpsCompleted": 28
+      "followUpsCompleted": 28,
+      "contact": "marcus.vance@example.com",
+      "readinessPercent": 91,
+      "pipelineValue": 55250,
+      "outreachCount": 3280
     },
     {
       "id": "biz-165",
@@ -2341,12 +2998,16 @@
       "country": "Austria",
       "website": "novus-medical-instruments.com",
       "owner": "Sarah Jenkins",
-      "created": "July 20, 2026",
+      "created": "March 03, 2026",
       "avatarColor": "#dc9c56",
       "company": "Novus Medical Instruments (Geneva)",
       "emailsSent": 55405,
       "prospects": 5435,
-      "followUpsCompleted": 10
+      "followUpsCompleted": 10,
+      "contact": "sarah.jenkins@example.com",
+      "readinessPercent": 60,
+      "pipelineValue": 63000,
+      "outreachCount": 4440
     },
     {
       "id": "biz-166",
@@ -2355,12 +3016,16 @@
       "country": "Germany",
       "website": "aether-nano-systems.com",
       "owner": "Lukas Fischer",
-      "created": "September 23, 2026",
+      "created": "March 10, 2026",
       "avatarColor": "#2ae9c9",
       "company": "Aether Nano Systems (Copenhagen)",
       "emailsSent": 58862,
       "prospects": 6274,
-      "followUpsCompleted": 27
+      "followUpsCompleted": 27,
+      "contact": "lukas.fischer@example.com",
+      "readinessPercent": 71,
+      "pipelineValue": 70750,
+      "outreachCount": 5600
     },
     {
       "id": "biz-167",
@@ -2369,12 +3034,16 @@
       "country": "Sweden",
       "website": "aerodynamics-ag.com",
       "owner": "David Kim",
-      "created": "November 26, 2026",
+      "created": "March 17, 2026",
       "avatarColor": "#c974f4",
       "company": "AeroDynamics AG (Frankfurt)",
       "emailsSent": 62319,
       "prospects": 7113,
-      "followUpsCompleted": 9
+      "followUpsCompleted": 9,
+      "contact": "david.kim@example.com",
+      "readinessPercent": 82,
+      "pipelineValue": 78500,
+      "outreachCount": 6760
     },
     {
       "id": "biz-168",
@@ -2383,12 +3052,16 @@
       "country": "Belgium",
       "website": "helios-energy-systems.com",
       "owner": "Michael Weber",
-      "created": "January 01, 2026",
+      "created": "March 01, 2026",
       "avatarColor": "#42a8a1",
       "company": "Helios Energy Systems (Zurich)",
       "emailsSent": 65776,
       "prospects": 7952,
-      "followUpsCompleted": 26
+      "followUpsCompleted": 26,
+      "contact": "michael.weber@example.com",
+      "readinessPercent": 93,
+      "pipelineValue": 86250,
+      "outreachCount": 7920
     },
     {
       "id": "biz-169",
@@ -2397,12 +3070,16 @@
       "country": "Switzerland",
       "website": "synapse-software-gmbh.com",
       "owner": "Sophie Dupont",
-      "created": "March 04, 2026",
+      "created": "March 08, 2026",
       "avatarColor": "#c9ae4d",
       "company": "Synapse Software GmbH (Brussels)",
       "emailsSent": 69233,
       "prospects": 8791,
-      "followUpsCompleted": 8
+      "followUpsCompleted": 8,
+      "contact": "sophie.dupont@example.com",
+      "readinessPercent": 62,
+      "pipelineValue": 94000,
+      "outreachCount": 9080
     },
     {
       "id": "biz-170",
@@ -2411,12 +3088,16 @@
       "country": "Germany",
       "website": "quantex-ai-labs.com",
       "owner": "Elena Rostova",
-      "created": "May 07, 2026",
+      "created": "March 15, 2026",
       "avatarColor": "#a842a2",
       "company": "Quantex AI Labs (Hamburg)",
       "emailsSent": 72690,
       "prospects": 9630,
-      "followUpsCompleted": 25
+      "followUpsCompleted": 25,
+      "contact": "elena.rostova@example.com",
+      "readinessPercent": 73,
+      "pipelineValue": 101750,
+      "outreachCount": 10240
     },
     {
       "id": "biz-171",
@@ -2425,12 +3106,16 @@
       "country": "Germany",
       "website": "kronos-materials-gmbh.com",
       "owner": "Anna Lindqvist",
-      "created": "July 10, 2026",
+      "created": "March 22, 2026",
       "avatarColor": "#dc9c56",
       "company": "Kronos Materials GmbH (Vienna)",
       "emailsSent": 76147,
       "prospects": 10469,
-      "followUpsCompleted": 7
+      "followUpsCompleted": 7,
+      "contact": "anna.lindqvist@example.com",
+      "readinessPercent": 84,
+      "pipelineValue": 109500,
+      "outreachCount": 11400
     },
     {
       "id": "biz-172",
@@ -2439,12 +3124,16 @@
       "country": "Denmark",
       "website": "solaris-clean-tech.com",
       "owner": "Marcus Vance",
-      "created": "September 13, 2026",
+      "created": "March 06, 2026",
       "avatarColor": "#2ae9c9",
       "company": "Solaris Clean Tech (Rotterdam)",
       "emailsSent": 79604,
       "prospects": 11308,
-      "followUpsCompleted": 24
+      "followUpsCompleted": 24,
+      "contact": "marcus.vance@example.com",
+      "readinessPercent": 95,
+      "pipelineValue": 22250,
+      "outreachCount": 12560
     },
     {
       "id": "biz-173",
@@ -2453,12 +3142,16 @@
       "country": "Netherlands",
       "website": "vector-grid-solutions.com",
       "owner": "Sarah Jenkins",
-      "created": "November 16, 2026",
+      "created": "March 13, 2026",
       "avatarColor": "#c974f4",
       "company": "Vector Grid Solutions (Munich)",
       "emailsSent": 83061,
       "prospects": 12147,
-      "followUpsCompleted": 6
+      "followUpsCompleted": 6,
+      "contact": "sarah.jenkins@example.com",
+      "readinessPercent": 64,
+      "pipelineValue": 30000,
+      "outreachCount": 13720
     },
     {
       "id": "biz-174",
@@ -2467,12 +3160,16 @@
       "country": "Austria",
       "website": "bavaria-logistics-se.com",
       "owner": "Lukas Fischer",
-      "created": "January 19, 2026",
+      "created": "March 20, 2026",
       "avatarColor": "#42a8a1",
       "company": "Bavaria Logistics SE (Cologne)",
       "emailsSent": 11518,
       "prospects": 12986,
-      "followUpsCompleted": 23
+      "followUpsCompleted": 23,
+      "contact": "lukas.fischer@example.com",
+      "readinessPercent": 75,
+      "pipelineValue": 37750,
+      "outreachCount": 14880
     },
     {
       "id": "biz-175",
@@ -2481,12 +3178,16 @@
       "country": "Germany",
       "website": "apex-robotics-ltd.com",
       "owner": "David Kim",
-      "created": "March 22, 2026",
+      "created": "March 04, 2026",
       "avatarColor": "#c9ae4d",
       "company": "Apex Robotics Ltd (Amsterdam)",
       "emailsSent": 14975,
       "prospects": 13825,
-      "followUpsCompleted": 5
+      "followUpsCompleted": 5,
+      "contact": "david.kim@example.com",
+      "readinessPercent": 86,
+      "pipelineValue": 45500,
+      "outreachCount": 1040
     },
     {
       "id": "biz-176",
@@ -2495,12 +3196,16 @@
       "country": "Sweden",
       "website": "kaiser-precision-tools.com",
       "owner": "Michael Weber",
-      "created": "May 25, 2026",
+      "created": "March 11, 2026",
       "avatarColor": "#a842a2",
       "company": "Kaiser Precision Tools (Berlin)",
       "emailsSent": 18432,
       "prospects": 14664,
-      "followUpsCompleted": 22
+      "followUpsCompleted": 22,
+      "contact": "michael.weber@example.com",
+      "readinessPercent": 55,
+      "pipelineValue": 53250,
+      "outreachCount": 2200
     },
     {
       "id": "biz-177",
@@ -2509,12 +3214,16 @@
       "country": "Belgium",
       "website": "echo-cloud-systems.com",
       "owner": "Sophie Dupont",
-      "created": "July 28, 2026",
+      "created": "March 18, 2026",
       "avatarColor": "#dc9c56",
       "company": "Echo Cloud Systems (Düsseldorf)",
       "emailsSent": 21889,
       "prospects": 15503,
-      "followUpsCompleted": 39
+      "followUpsCompleted": 39,
+      "contact": "sophie.dupont@example.com",
+      "readinessPercent": 66,
+      "pipelineValue": 61000,
+      "outreachCount": 3360
     },
     {
       "id": "biz-178",
@@ -2523,12 +3232,16 @@
       "country": "Switzerland",
       "website": "orbit-cyber-defense.com",
       "owner": "Elena Rostova",
-      "created": "September 03, 2026",
+      "created": "March 02, 2026",
       "avatarColor": "#2ae9c9",
       "company": "Orbit Cyber Defense (Basel)",
       "emailsSent": 25346,
       "prospects": 16342,
-      "followUpsCompleted": 21
+      "followUpsCompleted": 21,
+      "contact": "elena.rostova@example.com",
+      "readinessPercent": 77,
+      "pipelineValue": 68750,
+      "outreachCount": 4520
     },
     {
       "id": "biz-179",
@@ -2537,12 +3250,16 @@
       "country": "Germany",
       "website": "titan-heavy-machinery.com",
       "owner": "Anna Lindqvist",
-      "created": "November 06, 2026",
+      "created": "March 09, 2026",
       "avatarColor": "#c974f4",
       "company": "Titan Heavy Machinery (Stockholm)",
       "emailsSent": 28803,
       "prospects": 2181,
-      "followUpsCompleted": 38
+      "followUpsCompleted": 38,
+      "contact": "anna.lindqvist@example.com",
+      "readinessPercent": 88,
+      "pipelineValue": 76500,
+      "outreachCount": 5680
     },
     {
       "id": "biz-180",
@@ -2551,12 +3268,16 @@
       "country": "Germany",
       "website": "nordtech-solutions-gmbh.com",
       "owner": "Marcus Vance",
-      "created": "January 09, 2026",
+      "created": "March 16, 2026",
       "avatarColor": "#42a8a1",
       "company": "NordTech Solutions GmbH (Stuttgart)",
       "emailsSent": 32260,
       "prospects": 3020,
-      "followUpsCompleted": 20
+      "followUpsCompleted": 20,
+      "contact": "marcus.vance@example.com",
+      "readinessPercent": 57,
+      "pipelineValue": 84250,
+      "outreachCount": 6840
     },
     {
       "id": "biz-181",
@@ -2565,12 +3286,16 @@
       "country": "Denmark",
       "website": "vanguard-automation.com",
       "owner": "Sarah Jenkins",
-      "created": "March 12, 2026",
+      "created": "March 23, 2026",
       "avatarColor": "#c9ae4d",
       "company": "Vanguard Automation (Geneva)",
       "emailsSent": 35717,
       "prospects": 3859,
-      "followUpsCompleted": 37
+      "followUpsCompleted": 37,
+      "contact": "sarah.jenkins@example.com",
+      "readinessPercent": 68,
+      "pipelineValue": 92000,
+      "outreachCount": 8000
     },
     {
       "id": "biz-182",
@@ -2579,12 +3304,16 @@
       "country": "Netherlands",
       "website": "starlight-biotech.com",
       "owner": "Lukas Fischer",
-      "created": "May 15, 2026",
+      "created": "March 07, 2026",
       "avatarColor": "#a842a2",
       "company": "Starlight Biotech (Copenhagen)",
       "emailsSent": 39174,
       "prospects": 4698,
-      "followUpsCompleted": 19
+      "followUpsCompleted": 19,
+      "contact": "lukas.fischer@example.com",
+      "readinessPercent": 79,
+      "pipelineValue": 99750,
+      "outreachCount": 9160
     },
     {
       "id": "biz-183",
@@ -2593,12 +3322,16 @@
       "country": "Austria",
       "website": "lumina-optics-corp.com",
       "owner": "David Kim",
-      "created": "July 18, 2026",
+      "created": "March 14, 2026",
       "avatarColor": "#dc9c56",
       "company": "Lumina Optics Corp (Frankfurt)",
       "emailsSent": 42631,
       "prospects": 5537,
-      "followUpsCompleted": 36
+      "followUpsCompleted": 36,
+      "contact": "david.kim@example.com",
+      "readinessPercent": 90,
+      "pipelineValue": 107500,
+      "outreachCount": 10320
     },
     {
       "id": "biz-184",
@@ -2607,12 +3340,16 @@
       "country": "Germany",
       "website": "zephyr-marine-engineering.com",
       "owner": "Michael Weber",
-      "created": "September 21, 2026",
+      "created": "March 21, 2026",
       "avatarColor": "#2ae9c9",
       "company": "Zephyr Marine Engineering (Zurich)",
       "emailsSent": 46088,
       "prospects": 6376,
-      "followUpsCompleted": 18
+      "followUpsCompleted": 18,
+      "contact": "michael.weber@example.com",
+      "readinessPercent": 59,
+      "pipelineValue": 20250,
+      "outreachCount": 11480
     },
     {
       "id": "biz-185",
@@ -2621,12 +3358,16 @@
       "country": "Sweden",
       "website": "novus-medical-instruments.com",
       "owner": "Sophie Dupont",
-      "created": "November 24, 2026",
+      "created": "March 05, 2026",
       "avatarColor": "#c974f4",
       "company": "Novus Medical Instruments (Brussels)",
       "emailsSent": 49545,
       "prospects": 7215,
-      "followUpsCompleted": 35
+      "followUpsCompleted": 35,
+      "contact": "sophie.dupont@example.com",
+      "readinessPercent": 70,
+      "pipelineValue": 28000,
+      "outreachCount": 12640
     },
     {
       "id": "biz-186",
@@ -2635,12 +3376,16 @@
       "country": "Belgium",
       "website": "aether-nano-systems.com",
       "owner": "Elena Rostova",
-      "created": "January 27, 2026",
+      "created": "March 12, 2026",
       "avatarColor": "#42a8a1",
       "company": "Aether Nano Systems (Hamburg)",
       "emailsSent": 53002,
       "prospects": 8054,
-      "followUpsCompleted": 17
+      "followUpsCompleted": 17,
+      "contact": "elena.rostova@example.com",
+      "readinessPercent": 81,
+      "pipelineValue": 35750,
+      "outreachCount": 13800
     },
     {
       "id": "biz-187",
@@ -2649,12 +3394,16 @@
       "country": "Switzerland",
       "website": "aerodynamics-ag.com",
       "owner": "Anna Lindqvist",
-      "created": "March 02, 2026",
+      "created": "March 19, 2026",
       "avatarColor": "#c9ae4d",
       "company": "AeroDynamics AG (Vienna)",
       "emailsSent": 56459,
       "prospects": 8893,
-      "followUpsCompleted": 34
+      "followUpsCompleted": 34,
+      "contact": "anna.lindqvist@example.com",
+      "readinessPercent": 92,
+      "pipelineValue": 43500,
+      "outreachCount": 14960
     },
     {
       "id": "biz-188",
@@ -2663,12 +3412,16 @@
       "country": "Germany",
       "website": "helios-energy-systems.com",
       "owner": "Marcus Vance",
-      "created": "May 05, 2026",
+      "created": "March 03, 2026",
       "avatarColor": "#a842a2",
       "company": "Helios Energy Systems (Rotterdam)",
       "emailsSent": 59916,
       "prospects": 9732,
-      "followUpsCompleted": 16
+      "followUpsCompleted": 16,
+      "contact": "marcus.vance@example.com",
+      "readinessPercent": 61,
+      "pipelineValue": 51250,
+      "outreachCount": 1120
     },
     {
       "id": "biz-189",
@@ -2677,12 +3430,16 @@
       "country": "Germany",
       "website": "synapse-software-gmbh.com",
       "owner": "Sarah Jenkins",
-      "created": "July 08, 2026",
+      "created": "March 10, 2026",
       "avatarColor": "#dc9c56",
       "company": "Synapse Software GmbH (Munich)",
       "emailsSent": 63373,
       "prospects": 10571,
-      "followUpsCompleted": 33
+      "followUpsCompleted": 33,
+      "contact": "sarah.jenkins@example.com",
+      "readinessPercent": 72,
+      "pipelineValue": 59000,
+      "outreachCount": 2280
     },
     {
       "id": "biz-190",
@@ -2691,12 +3448,16 @@
       "country": "Denmark",
       "website": "quantex-ai-labs.com",
       "owner": "Lukas Fischer",
-      "created": "September 11, 2026",
+      "created": "March 17, 2026",
       "avatarColor": "#2ae9c9",
       "company": "Quantex AI Labs (Cologne)",
       "emailsSent": 66830,
       "prospects": 11410,
-      "followUpsCompleted": 15
+      "followUpsCompleted": 15,
+      "contact": "lukas.fischer@example.com",
+      "readinessPercent": 83,
+      "pipelineValue": 66750,
+      "outreachCount": 3440
     },
     {
       "id": "biz-191",
@@ -2705,12 +3466,16 @@
       "country": "Netherlands",
       "website": "kronos-materials-gmbh.com",
       "owner": "David Kim",
-      "created": "November 14, 2026",
+      "created": "March 01, 2026",
       "avatarColor": "#c974f4",
       "company": "Kronos Materials GmbH (Amsterdam)",
       "emailsSent": 70287,
       "prospects": 12249,
-      "followUpsCompleted": 32
+      "followUpsCompleted": 32,
+      "contact": "david.kim@example.com",
+      "readinessPercent": 94,
+      "pipelineValue": 74500,
+      "outreachCount": 4600
     },
     {
       "id": "biz-192",
@@ -2719,12 +3484,16 @@
       "country": "Austria",
       "website": "solaris-clean-tech.com",
       "owner": "Michael Weber",
-      "created": "January 17, 2026",
+      "created": "March 08, 2026",
       "avatarColor": "#42a8a1",
       "company": "Solaris Clean Tech (Berlin)",
       "emailsSent": 73744,
       "prospects": 13088,
-      "followUpsCompleted": 14
+      "followUpsCompleted": 14,
+      "contact": "michael.weber@example.com",
+      "readinessPercent": 63,
+      "pipelineValue": 82250,
+      "outreachCount": 5760
     },
     {
       "id": "biz-193",
@@ -2733,12 +3502,16 @@
       "country": "Germany",
       "website": "vector-grid-solutions.com",
       "owner": "Sophie Dupont",
-      "created": "March 20, 2026",
+      "created": "March 15, 2026",
       "avatarColor": "#c9ae4d",
       "company": "Vector Grid Solutions (Düsseldorf)",
       "emailsSent": 77201,
       "prospects": 13927,
-      "followUpsCompleted": 31
+      "followUpsCompleted": 31,
+      "contact": "sophie.dupont@example.com",
+      "readinessPercent": 74,
+      "pipelineValue": 90000,
+      "outreachCount": 6920
     },
     {
       "id": "biz-194",
@@ -2747,12 +3520,16 @@
       "country": "Sweden",
       "website": "bavaria-logistics-se.com",
       "owner": "Elena Rostova",
-      "created": "May 23, 2026",
+      "created": "March 22, 2026",
       "avatarColor": "#a842a2",
       "company": "Bavaria Logistics SE (Basel)",
       "emailsSent": 80658,
       "prospects": 14766,
-      "followUpsCompleted": 13
+      "followUpsCompleted": 13,
+      "contact": "elena.rostova@example.com",
+      "readinessPercent": 85,
+      "pipelineValue": 97750,
+      "outreachCount": 8080
     },
     {
       "id": "biz-195",
@@ -2761,12 +3538,16 @@
       "country": "Belgium",
       "website": "apex-robotics-ltd.com",
       "owner": "Anna Lindqvist",
-      "created": "July 26, 2026",
+      "created": "March 06, 2026",
       "avatarColor": "#dc9c56",
       "company": "Apex Robotics Ltd (Stockholm)",
       "emailsSent": 84115,
       "prospects": 15605,
-      "followUpsCompleted": 30
+      "followUpsCompleted": 30,
+      "contact": "anna.lindqvist@example.com",
+      "readinessPercent": 96,
+      "pipelineValue": 105500,
+      "outreachCount": 9240
     },
     {
       "id": "biz-196",
@@ -2775,12 +3556,16 @@
       "country": "Switzerland",
       "website": "kaiser-precision-tools.com",
       "owner": "Marcus Vance",
-      "created": "September 01, 2026",
+      "created": "March 13, 2026",
       "avatarColor": "#2ae9c9",
       "company": "Kaiser Precision Tools (Stuttgart)",
       "emailsSent": 12572,
       "prospects": 16444,
-      "followUpsCompleted": 12
+      "followUpsCompleted": 12,
+      "contact": "marcus.vance@example.com",
+      "readinessPercent": 65,
+      "pipelineValue": 18250,
+      "outreachCount": 10400
     },
     {
       "id": "biz-197",
@@ -2789,12 +3574,16 @@
       "country": "Germany",
       "website": "echo-cloud-systems.com",
       "owner": "Sarah Jenkins",
-      "created": "November 04, 2026",
+      "created": "March 20, 2026",
       "avatarColor": "#c974f4",
       "company": "Echo Cloud Systems (Geneva)",
       "emailsSent": 16029,
       "prospects": 2283,
-      "followUpsCompleted": 29
+      "followUpsCompleted": 29,
+      "contact": "sarah.jenkins@example.com",
+      "readinessPercent": 76,
+      "pipelineValue": 26000,
+      "outreachCount": 11560
     },
     {
       "id": "biz-198",
@@ -2803,12 +3592,16 @@
       "country": "Germany",
       "website": "orbit-cyber-defense.com",
       "owner": "Lukas Fischer",
-      "created": "January 07, 2026",
+      "created": "March 04, 2026",
       "avatarColor": "#42a8a1",
       "company": "Orbit Cyber Defense (Copenhagen)",
       "emailsSent": 19486,
       "prospects": 3122,
-      "followUpsCompleted": 11
+      "followUpsCompleted": 11,
+      "contact": "lukas.fischer@example.com",
+      "readinessPercent": 87,
+      "pipelineValue": 33750,
+      "outreachCount": 12720
     },
     {
       "id": "biz-199",
@@ -2817,12 +3610,16 @@
       "country": "Denmark",
       "website": "titan-heavy-machinery.com",
       "owner": "David Kim",
-      "created": "March 10, 2026",
+      "created": "March 11, 2026",
       "avatarColor": "#c9ae4d",
       "company": "Titan Heavy Machinery (Frankfurt)",
       "emailsSent": 22943,
       "prospects": 3961,
-      "followUpsCompleted": 28
+      "followUpsCompleted": 28,
+      "contact": "david.kim@example.com",
+      "readinessPercent": 56,
+      "pipelineValue": 41500,
+      "outreachCount": 13880
     },
     {
       "id": "biz-200",
@@ -2831,12 +3628,16 @@
       "country": "Netherlands",
       "website": "nordtech-solutions-gmbh.com",
       "owner": "Michael Weber",
-      "created": "May 13, 2026",
+      "created": "March 18, 2026",
       "avatarColor": "#a842a2",
       "company": "NordTech Solutions GmbH (Zurich)",
       "emailsSent": 26400,
       "prospects": 4800,
-      "followUpsCompleted": 10
+      "followUpsCompleted": 10,
+      "contact": "michael.weber@example.com",
+      "readinessPercent": 67,
+      "pipelineValue": 49250,
+      "outreachCount": 15040
     }
   ],
   "outreach": [
@@ -2847,7 +3648,7 @@
       "channel": "Email",
       "status": "Sent",
       "owner": "Michael Weber",
-      "created": "June 14, 2026",
+      "created": "March 12, 2026",
       "avatarColor": "#0d9488"
     },
     {
@@ -2857,7 +3658,7 @@
       "channel": "SMS",
       "status": "Received",
       "owner": "Stefan Lindner",
-      "created": "April 18, 2026",
+      "created": "March 06, 2026",
       "avatarColor": "#2563eb"
     },
     {
@@ -2867,7 +3668,7 @@
       "channel": "In-person",
       "status": "Completed",
       "owner": "Freja Nielsen",
-      "created": "August 22, 2026",
+      "created": "March 21, 2026",
       "avatarColor": "#7c3aed"
     },
     {
@@ -2877,7 +3678,7 @@
       "channel": "Email",
       "status": "Sent",
       "owner": "Lukas van Dijk",
-      "created": "October 09, 2026",
+      "created": "March 06, 2026",
       "avatarColor": "#d97706"
     },
     {
@@ -2887,7 +3688,7 @@
       "channel": "Email",
       "status": "Received",
       "owner": "Sarah Jenkins",
-      "created": "April 26, 2026",
+      "created": "March 14, 2026",
       "avatarColor": "#c974f4"
     },
     {
@@ -2897,7 +3698,7 @@
       "channel": "In-person",
       "status": "Sent",
       "owner": "Lukas Fischer",
-      "created": "July 03, 2026",
+      "created": "March 22, 2026",
       "avatarColor": "#42a8a1"
     },
     {
@@ -2907,7 +3708,7 @@
       "channel": "Phone",
       "status": "In Review",
       "owner": "David Kim",
-      "created": "October 08, 2026",
+      "created": "March 07, 2026",
       "avatarColor": "#c9ae4d"
     },
     {
@@ -2917,7 +3718,7 @@
       "channel": "SMS",
       "status": "Opened",
       "owner": "Michael Weber",
-      "created": "January 13, 2026",
+      "created": "March 15, 2026",
       "avatarColor": "#a842a2"
     },
     {
@@ -2927,7 +3728,7 @@
       "channel": "LinkedIn",
       "status": "Scheduled",
       "owner": "Sophie Dupont",
-      "created": "April 18, 2026",
+      "created": "March 23, 2026",
       "avatarColor": "#dc9c56"
     },
     {
@@ -2937,7 +3738,7 @@
       "channel": "Email",
       "status": "Completed",
       "owner": "Elena Rostova",
-      "created": "July 23, 2026",
+      "created": "March 31, 2026",
       "avatarColor": "#2ae9c9"
     },
     {
@@ -2947,7 +3748,7 @@
       "channel": "In-person",
       "status": "Received",
       "owner": "Anna Lindqvist",
-      "created": "October 28, 2026",
+      "created": "March 16, 2026",
       "avatarColor": "#c974f4"
     },
     {
@@ -2957,7 +3758,7 @@
       "channel": "Phone",
       "status": "Sent",
       "owner": "Marcus Vance",
-      "created": "January 05, 2026",
+      "created": "March 24, 2026",
       "avatarColor": "#42a8a1"
     },
     {
@@ -2967,7 +3768,7 @@
       "channel": "SMS",
       "status": "In Review",
       "owner": "Sarah Jenkins",
-      "created": "April 10, 2026",
+      "created": "March 20, 2026",
       "avatarColor": "#c9ae4d"
     },
     {
@@ -2977,7 +3778,7 @@
       "channel": "LinkedIn",
       "status": "Opened",
       "owner": "Lukas Fischer",
-      "created": "July 15, 2026",
+      "created": "March 17, 2026",
       "avatarColor": "#a842a2"
     },
     {
@@ -2987,7 +3788,7 @@
       "channel": "Email",
       "status": "Scheduled",
       "owner": "David Kim",
-      "created": "October 20, 2026",
+      "created": "March 25, 2026",
       "avatarColor": "#dc9c56"
     },
     {
@@ -2997,7 +3798,7 @@
       "channel": "In-person",
       "status": "Completed",
       "owner": "Michael Weber",
-      "created": "January 25, 2026",
+      "created": "March 19, 2026",
       "avatarColor": "#2ae9c9"
     },
     {
@@ -3007,7 +3808,7 @@
       "channel": "Phone",
       "status": "Received",
       "owner": "Sophie Dupont",
-      "created": "April 02, 2026",
+      "created": "March 18, 2026",
       "avatarColor": "#c974f4"
     },
     {
@@ -3017,7 +3818,7 @@
       "channel": "SMS",
       "status": "Sent",
       "owner": "Elena Rostova",
-      "created": "July 07, 2026",
+      "created": "March 26, 2026",
       "avatarColor": "#42a8a1"
     },
     {
@@ -3027,7 +3828,7 @@
       "channel": "LinkedIn",
       "status": "In Review",
       "owner": "Anna Lindqvist",
-      "created": "October 12, 2026",
+      "created": "March 18, 2026",
       "avatarColor": "#c9ae4d"
     },
     {
@@ -3037,7 +3838,7 @@
       "channel": "Email",
       "status": "Opened",
       "owner": "Marcus Vance",
-      "created": "January 17, 2026",
+      "created": "March 24, 2026",
       "avatarColor": "#a842a2"
     },
     {
@@ -3047,7 +3848,7 @@
       "channel": "In-person",
       "status": "Scheduled",
       "owner": "Sarah Jenkins",
-      "created": "April 22, 2026",
+      "created": "March 27, 2026",
       "avatarColor": "#dc9c56"
     },
     {
@@ -3057,7 +3858,7 @@
       "channel": "Phone",
       "status": "Completed",
       "owner": "Lukas Fischer",
-      "created": "July 27, 2026",
+      "created": "March 17, 2026",
       "avatarColor": "#2ae9c9"
     },
     {
@@ -3067,7 +3868,7 @@
       "channel": "SMS",
       "status": "Received",
       "owner": "David Kim",
-      "created": "October 04, 2026",
+      "created": "March 21, 2026",
       "avatarColor": "#c974f4"
     },
     {
@@ -3077,7 +3878,7 @@
       "channel": "LinkedIn",
       "status": "Sent",
       "owner": "Michael Weber",
-      "created": "January 09, 2026",
+      "created": "March 28, 2026",
       "avatarColor": "#42a8a1"
     },
     {
@@ -3087,7 +3888,7 @@
       "channel": "Email",
       "status": "In Review",
       "owner": "Sophie Dupont",
-      "created": "April 14, 2026",
+      "created": "March 16, 2026",
       "avatarColor": "#c9ae4d"
     },
     {
@@ -3097,7 +3898,7 @@
       "channel": "In-person",
       "status": "Opened",
       "owner": "Elena Rostova",
-      "created": "July 19, 2026",
+      "created": "March 31, 2026",
       "avatarColor": "#a842a2"
     },
     {
@@ -3107,7 +3908,7 @@
       "channel": "Phone",
       "status": "Scheduled",
       "owner": "Anna Lindqvist",
-      "created": "October 24, 2026",
+      "created": "March 29, 2026",
       "avatarColor": "#dc9c56"
     },
     {
@@ -3117,7 +3918,7 @@
       "channel": "SMS",
       "status": "Completed",
       "owner": "Marcus Vance",
-      "created": "January 01, 2026",
+      "created": "March 15, 2026",
       "avatarColor": "#2ae9c9"
     },
     {
@@ -3127,7 +3928,7 @@
       "channel": "LinkedIn",
       "status": "Received",
       "owner": "Sarah Jenkins",
-      "created": "April 06, 2026",
+      "created": "March 30, 2026",
       "avatarColor": "#c974f4"
     },
     {
@@ -3137,7 +3938,7 @@
       "channel": "Email",
       "status": "Sent",
       "owner": "Lukas Fischer",
-      "created": "July 11, 2026",
+      "created": "March 30, 2026",
       "avatarColor": "#42a8a1"
     },
     {
@@ -3147,7 +3948,7 @@
       "channel": "In-person",
       "status": "In Review",
       "owner": "David Kim",
-      "created": "October 16, 2026",
+      "created": "March 14, 2026",
       "avatarColor": "#c9ae4d"
     },
     {
@@ -3157,7 +3958,7 @@
       "channel": "Phone",
       "status": "Opened",
       "owner": "Michael Weber",
-      "created": "January 21, 2026",
+      "created": "March 29, 2026",
       "avatarColor": "#a842a2"
     },
     {
@@ -3167,7 +3968,7 @@
       "channel": "SMS",
       "status": "Scheduled",
       "owner": "Sophie Dupont",
-      "created": "April 26, 2026",
+      "created": "March 24, 2026",
       "avatarColor": "#dc9c56"
     },
     {
@@ -3177,7 +3978,7 @@
       "channel": "LinkedIn",
       "status": "Completed",
       "owner": "Elena Rostova",
-      "created": "July 03, 2026",
+      "created": "March 13, 2026",
       "avatarColor": "#2ae9c9"
     },
     {
@@ -3187,7 +3988,7 @@
       "channel": "Email",
       "status": "Received",
       "owner": "Anna Lindqvist",
-      "created": "October 08, 2026",
+      "created": "March 28, 2026",
       "avatarColor": "#c974f4"
     },
     {
@@ -3197,7 +3998,7 @@
       "channel": "In-person",
       "status": "Sent",
       "owner": "Marcus Vance",
-      "created": "January 13, 2026",
+      "created": "March 31, 2026",
       "avatarColor": "#42a8a1"
     },
     {
@@ -3207,7 +4008,7 @@
       "channel": "Phone",
       "status": "In Review",
       "owner": "Sarah Jenkins",
-      "created": "April 18, 2026",
+      "created": "March 12, 2026",
       "avatarColor": "#c9ae4d"
     },
     {
@@ -3217,7 +4018,7 @@
       "channel": "SMS",
       "status": "Opened",
       "owner": "Lukas Fischer",
-      "created": "July 23, 2026",
+      "created": "March 27, 2026",
       "avatarColor": "#a842a2"
     },
     {
@@ -3227,7 +4028,7 @@
       "channel": "LinkedIn",
       "status": "Scheduled",
       "owner": "David Kim",
-      "created": "October 28, 2026",
+      "created": "March 28, 2026",
       "avatarColor": "#dc9c56"
     },
     {
@@ -3237,7 +4038,7 @@
       "channel": "Email",
       "status": "Completed",
       "owner": "Michael Weber",
-      "created": "January 05, 2026",
+      "created": "March 11, 2026",
       "avatarColor": "#2ae9c9"
     },
     {
@@ -3247,7 +4048,7 @@
       "channel": "In-person",
       "status": "Received",
       "owner": "Sophie Dupont",
-      "created": "April 10, 2026",
+      "created": "March 26, 2026",
       "avatarColor": "#c974f4"
     },
     {
@@ -3257,7 +4058,7 @@
       "channel": "Phone",
       "status": "Sent",
       "owner": "Elena Rostova",
-      "created": "July 15, 2026",
+      "created": "March 25, 2026",
       "avatarColor": "#42a8a1"
     },
     {
@@ -3267,7 +4068,7 @@
       "channel": "SMS",
       "status": "In Review",
       "owner": "Anna Lindqvist",
-      "created": "October 20, 2026",
+      "created": "March 29, 2026",
       "avatarColor": "#c9ae4d"
     },
     {
@@ -3277,7 +4078,7 @@
       "channel": "LinkedIn",
       "status": "Opened",
       "owner": "Marcus Vance",
-      "created": "January 25, 2026",
+      "created": "March 25, 2026",
       "avatarColor": "#a842a2"
     },
     {
@@ -3287,7 +4088,7 @@
       "channel": "Email",
       "status": "Scheduled",
       "owner": "Sarah Jenkins",
-      "created": "April 02, 2026",
+      "created": "March 22, 2026",
       "avatarColor": "#dc9c56"
     },
     {
@@ -3297,7 +4098,7 @@
       "channel": "In-person",
       "status": "Completed",
       "owner": "Lukas Fischer",
-      "created": "July 07, 2026",
+      "created": "March 22, 2026",
       "avatarColor": "#2ae9c9"
     },
     {
@@ -3307,7 +4108,7 @@
       "channel": "Phone",
       "status": "Received",
       "owner": "David Kim",
-      "created": "October 12, 2026",
+      "created": "March 24, 2026",
       "avatarColor": "#c974f4"
     },
     {
@@ -3317,7 +4118,7 @@
       "channel": "SMS",
       "status": "Sent",
       "owner": "Michael Weber",
-      "created": "January 17, 2026",
+      "created": "March 19, 2026",
       "avatarColor": "#42a8a1"
     },
     {
@@ -3327,7 +4128,7 @@
       "channel": "LinkedIn",
       "status": "In Review",
       "owner": "Sophie Dupont",
-      "created": "April 22, 2026",
+      "created": "March 28, 2026",
       "avatarColor": "#c9ae4d"
     },
     {
@@ -3337,7 +4138,7 @@
       "channel": "Email",
       "status": "Opened",
       "owner": "Elena Rostova",
-      "created": "July 27, 2026",
+      "created": "March 23, 2026",
       "avatarColor": "#a842a2"
     },
     {
@@ -3347,7 +4148,7 @@
       "channel": "In-person",
       "status": "Scheduled",
       "owner": "Anna Lindqvist",
-      "created": "October 04, 2026",
+      "created": "March 16, 2026",
       "avatarColor": "#dc9c56"
     },
     {
@@ -3357,7 +4158,7 @@
       "channel": "Phone",
       "status": "Completed",
       "owner": "Marcus Vance",
-      "created": "January 09, 2026",
+      "created": "March 23, 2026",
       "avatarColor": "#2ae9c9"
     },
     {
@@ -3367,7 +4168,7 @@
       "channel": "SMS",
       "status": "Received",
       "owner": "Sarah Jenkins",
-      "created": "April 14, 2026",
+      "created": "March 22, 2026",
       "avatarColor": "#c974f4"
     },
     {
@@ -3377,7 +4178,7 @@
       "channel": "LinkedIn",
       "status": "Sent",
       "owner": "Lukas Fischer",
-      "created": "July 19, 2026",
+      "created": "March 13, 2026",
       "avatarColor": "#42a8a1"
     },
     {
@@ -3387,7 +4188,7 @@
       "channel": "Email",
       "status": "In Review",
       "owner": "David Kim",
-      "created": "October 24, 2026",
+      "created": "March 18, 2026",
       "avatarColor": "#c9ae4d"
     },
     {
@@ -3397,7 +4198,7 @@
       "channel": "In-person",
       "status": "Opened",
       "owner": "Michael Weber",
-      "created": "January 01, 2026",
+      "created": "March 27, 2026",
       "avatarColor": "#a842a2"
     },
     {
@@ -3407,7 +4208,7 @@
       "channel": "Phone",
       "status": "Scheduled",
       "owner": "Sophie Dupont",
-      "created": "April 06, 2026",
+      "created": "March 10, 2026",
       "avatarColor": "#dc9c56"
     },
     {
@@ -3417,7 +4218,7 @@
       "channel": "SMS",
       "status": "Completed",
       "owner": "Elena Rostova",
-      "created": "July 11, 2026",
+      "created": "March 13, 2026",
       "avatarColor": "#2ae9c9"
     },
     {
@@ -3427,7 +4228,7 @@
       "channel": "LinkedIn",
       "status": "Received",
       "owner": "Anna Lindqvist",
-      "created": "October 16, 2026",
+      "created": "March 30, 2026",
       "avatarColor": "#c974f4"
     },
     {
@@ -3437,7 +4238,7 @@
       "channel": "Email",
       "status": "Sent",
       "owner": "Marcus Vance",
-      "created": "January 21, 2026",
+      "created": "March 07, 2026",
       "avatarColor": "#42a8a1"
     },
     {
@@ -3447,7 +4248,7 @@
       "channel": "In-person",
       "status": "In Review",
       "owner": "Sarah Jenkins",
-      "created": "April 26, 2026",
+      "created": "March 29, 2026",
       "avatarColor": "#c9ae4d"
     },
     {
@@ -3457,7 +4258,7 @@
       "channel": "Phone",
       "status": "Opened",
       "owner": "Lukas Fischer",
-      "created": "July 03, 2026",
+      "created": "March 23, 2026",
       "avatarColor": "#a842a2"
     },
     {
@@ -3467,7 +4268,7 @@
       "channel": "SMS",
       "status": "Scheduled",
       "owner": "David Kim",
-      "created": "October 08, 2026",
+      "created": "March 04, 2026",
       "avatarColor": "#dc9c56"
     },
     {
@@ -3477,7 +4278,7 @@
       "channel": "LinkedIn",
       "status": "Completed",
       "owner": "Michael Weber",
-      "created": "January 13, 2026",
+      "created": "March 26, 2026",
       "avatarColor": "#2ae9c9"
     },
     {
@@ -3487,7 +4288,7 @@
       "channel": "Email",
       "status": "Received",
       "owner": "Sophie Dupont",
-      "created": "April 18, 2026",
+      "created": "March 16, 2026",
       "avatarColor": "#c974f4"
     },
     {
@@ -3497,7 +4298,7 @@
       "channel": "In-person",
       "status": "Sent",
       "owner": "Elena Rostova",
-      "created": "July 23, 2026",
+      "created": "March 25, 2026",
       "avatarColor": "#42a8a1"
     },
     {
@@ -3507,7 +4308,7 @@
       "channel": "Phone",
       "status": "In Review",
       "owner": "Anna Lindqvist",
-      "created": "October 28, 2026",
+      "created": "March 23, 2026",
       "avatarColor": "#c9ae4d"
     },
     {
@@ -3517,7 +4318,7 @@
       "channel": "SMS",
       "status": "Opened",
       "owner": "Marcus Vance",
-      "created": "January 05, 2026",
+      "created": "March 27, 2026",
       "avatarColor": "#a842a2"
     },
     {
@@ -3527,7 +4328,7 @@
       "channel": "LinkedIn",
       "status": "Scheduled",
       "owner": "Sarah Jenkins",
-      "created": "April 10, 2026",
+      "created": "March 23, 2026",
       "avatarColor": "#dc9c56"
     },
     {
@@ -3537,7 +4338,7 @@
       "channel": "Email",
       "status": "Completed",
       "owner": "Lukas Fischer",
-      "created": "July 15, 2026",
+      "created": "March 20, 2026",
       "avatarColor": "#2ae9c9"
     },
     {
@@ -3547,7 +4348,7 @@
       "channel": "In-person",
       "status": "Received",
       "owner": "David Kim",
-      "created": "October 20, 2026",
+      "created": "March 22, 2026",
       "avatarColor": "#c974f4"
     },
     {
@@ -3557,7 +4358,7 @@
       "channel": "Phone",
       "status": "Sent",
       "owner": "Michael Weber",
-      "created": "January 25, 2026",
+      "created": "March 25, 2026",
       "avatarColor": "#42a8a1"
     },
     {
@@ -3567,7 +4368,7 @@
       "channel": "SMS",
       "status": "In Review",
       "owner": "Sophie Dupont",
-      "created": "April 02, 2026",
+      "created": "March 17, 2026",
       "avatarColor": "#c9ae4d"
     },
     {
@@ -3577,7 +4378,7 @@
       "channel": "LinkedIn",
       "status": "Opened",
       "owner": "Elena Rostova",
-      "created": "July 07, 2026",
+      "created": "March 17, 2026",
       "avatarColor": "#a842a2"
     },
     {
@@ -3587,7 +4388,7 @@
       "channel": "Email",
       "status": "Scheduled",
       "owner": "Anna Lindqvist",
-      "created": "October 12, 2026",
+      "created": "March 31, 2026",
       "avatarColor": "#dc9c56"
     },
     {
@@ -3597,7 +4398,7 @@
       "channel": "In-person",
       "status": "Completed",
       "owner": "Marcus Vance",
-      "created": "January 17, 2026",
+      "created": "March 14, 2026",
       "avatarColor": "#2ae9c9"
     },
     {
@@ -3607,7 +4408,7 @@
       "channel": "Phone",
       "status": "Received",
       "owner": "Sarah Jenkins",
-      "created": "April 22, 2026",
+      "created": "March 12, 2026",
       "avatarColor": "#c974f4"
     },
     {
@@ -3617,7 +4418,7 @@
       "channel": "SMS",
       "status": "Sent",
       "owner": "Lukas Fischer",
-      "created": "July 27, 2026",
+      "created": "March 24, 2026",
       "avatarColor": "#42a8a1"
     },
     {
@@ -3627,7 +4428,7 @@
       "channel": "LinkedIn",
       "status": "In Review",
       "owner": "David Kim",
-      "created": "October 04, 2026",
+      "created": "March 30, 2026",
       "avatarColor": "#c9ae4d"
     },
     {
@@ -3637,7 +4438,7 @@
       "channel": "Email",
       "status": "Opened",
       "owner": "Michael Weber",
-      "created": "January 09, 2026",
+      "created": "March 07, 2026",
       "avatarColor": "#a842a2"
     },
     {
@@ -3647,7 +4448,7 @@
       "channel": "In-person",
       "status": "Scheduled",
       "owner": "Sophie Dupont",
-      "created": "April 14, 2026",
+      "created": "March 17, 2026",
       "avatarColor": "#dc9c56"
     },
     {
@@ -3657,7 +4458,7 @@
       "channel": "Phone",
       "status": "Completed",
       "owner": "Elena Rostova",
-      "created": "July 19, 2026",
+      "created": "March 29, 2026",
       "avatarColor": "#2ae9c9"
     },
     {
@@ -3667,7 +4468,7 @@
       "channel": "SMS",
       "status": "Received",
       "owner": "Anna Lindqvist",
-      "created": "October 24, 2026",
+      "created": "March 30, 2026",
       "avatarColor": "#c974f4"
     },
     {
@@ -3677,7 +4478,7 @@
       "channel": "LinkedIn",
       "status": "Sent",
       "owner": "Marcus Vance",
-      "created": "January 01, 2026",
+      "created": "March 31, 2026",
       "avatarColor": "#42a8a1"
     },
     {
@@ -3687,7 +4488,7 @@
       "channel": "Email",
       "status": "In Review",
       "owner": "Sarah Jenkins",
-      "created": "April 06, 2026",
+      "created": "March 18, 2026",
       "avatarColor": "#c9ae4d"
     },
     {
@@ -3697,7 +4498,7 @@
       "channel": "In-person",
       "status": "Opened",
       "owner": "Lukas Fischer",
-      "created": "July 11, 2026",
+      "created": "March 27, 2026",
       "avatarColor": "#a842a2"
     },
     {
@@ -3707,7 +4508,7 @@
       "channel": "Phone",
       "status": "Scheduled",
       "owner": "David Kim",
-      "created": "October 16, 2026",
+      "created": "March 26, 2026",
       "avatarColor": "#dc9c56"
     },
     {
@@ -3717,7 +4518,7 @@
       "channel": "SMS",
       "status": "Completed",
       "owner": "Michael Weber",
-      "created": "January 21, 2026",
+      "created": "March 23, 2026",
       "avatarColor": "#2ae9c9"
     },
     {
@@ -3727,7 +4528,7 @@
       "channel": "LinkedIn",
       "status": "Received",
       "owner": "Sophie Dupont",
-      "created": "April 26, 2026",
+      "created": "March 30, 2026",
       "avatarColor": "#c974f4"
     },
     {
@@ -3737,7 +4538,7 @@
       "channel": "Email",
       "status": "Sent",
       "owner": "Elena Rostova",
-      "created": "July 03, 2026",
+      "created": "March 21, 2026",
       "avatarColor": "#42a8a1"
     },
     {
@@ -3747,7 +4548,7 @@
       "channel": "In-person",
       "status": "In Review",
       "owner": "Anna Lindqvist",
-      "created": "October 08, 2026",
+      "created": "March 14, 2026",
       "avatarColor": "#c9ae4d"
     },
     {
@@ -3757,7 +4558,7 @@
       "channel": "Phone",
       "status": "Opened",
       "owner": "Marcus Vance",
-      "created": "January 13, 2026",
+      "created": "March 24, 2026",
       "avatarColor": "#a842a2"
     },
     {
@@ -3767,7 +4568,7 @@
       "channel": "SMS",
       "status": "Scheduled",
       "owner": "Sarah Jenkins",
-      "created": "April 18, 2026",
+      "created": "March 16, 2026",
       "avatarColor": "#dc9c56"
     },
     {
@@ -3777,7 +4578,7 @@
       "channel": "LinkedIn",
       "status": "Completed",
       "owner": "Lukas Fischer",
-      "created": "July 23, 2026",
+      "created": "March 25, 2026",
       "avatarColor": "#2ae9c9"
     },
     {
@@ -3787,7 +4588,7 @@
       "channel": "Email",
       "status": "Received",
       "owner": "David Kim",
-      "created": "October 28, 2026",
+      "created": "March 22, 2026",
       "avatarColor": "#c974f4"
     },
     {
@@ -3797,7 +4598,7 @@
       "channel": "In-person",
       "status": "Sent",
       "owner": "Michael Weber",
-      "created": "January 05, 2026",
+      "created": "March 11, 2026",
       "avatarColor": "#42a8a1"
     },
     {
@@ -3807,7 +4608,7 @@
       "channel": "Phone",
       "status": "In Review",
       "owner": "Sophie Dupont",
-      "created": "April 10, 2026",
+      "created": "March 18, 2026",
       "avatarColor": "#c9ae4d"
     },
     {
@@ -3817,7 +4618,7 @@
       "channel": "SMS",
       "status": "Opened",
       "owner": "Elena Rostova",
-      "created": "July 15, 2026",
+      "created": "March 24, 2026",
       "avatarColor": "#a842a2"
     },
     {
@@ -3827,7 +4628,7 @@
       "channel": "LinkedIn",
       "status": "Scheduled",
       "owner": "Anna Lindqvist",
-      "created": "October 20, 2026",
+      "created": "March 06, 2026",
       "avatarColor": "#dc9c56"
     },
     {
@@ -3837,7 +4638,7 @@
       "channel": "Email",
       "status": "Completed",
       "owner": "Marcus Vance",
-      "created": "January 25, 2026",
+      "created": "March 11, 2026",
       "avatarColor": "#2ae9c9"
     },
     {
@@ -3847,7 +4648,7 @@
       "channel": "In-person",
       "status": "Received",
       "owner": "Sarah Jenkins",
-      "created": "April 02, 2026",
+      "created": "March 30, 2026",
       "avatarColor": "#c974f4"
     },
     {
@@ -3857,7 +4658,7 @@
       "channel": "Phone",
       "status": "Sent",
       "owner": "Lukas Fischer",
-      "created": "July 07, 2026",
+      "created": "March 23, 2026",
       "avatarColor": "#42a8a1"
     },
     {
@@ -3867,7 +4668,7 @@
       "channel": "SMS",
       "status": "In Review",
       "owner": "David Kim",
-      "created": "October 12, 2026",
+      "created": "March 30, 2026",
       "avatarColor": "#c9ae4d"
     },
     {
@@ -3877,7 +4678,7 @@
       "channel": "LinkedIn",
       "status": "Opened",
       "owner": "Michael Weber",
-      "created": "January 17, 2026",
+      "created": "March 21, 2026",
       "avatarColor": "#a842a2"
     },
     {
@@ -3887,7 +4688,7 @@
       "channel": "Email",
       "status": "Scheduled",
       "owner": "Sophie Dupont",
-      "created": "April 22, 2026",
+      "created": "March 28, 2026",
       "avatarColor": "#dc9c56"
     },
     {
@@ -3897,7 +4698,7 @@
       "channel": "In-person",
       "status": "Completed",
       "owner": "Elena Rostova",
-      "created": "July 27, 2026",
+      "created": "March 25, 2026",
       "avatarColor": "#2ae9c9"
     },
     {
@@ -3907,7 +4708,7 @@
       "channel": "Phone",
       "status": "Received",
       "owner": "Anna Lindqvist",
-      "created": "October 04, 2026",
+      "created": "March 12, 2026",
       "avatarColor": "#c974f4"
     },
     {
@@ -3917,7 +4718,7 @@
       "channel": "SMS",
       "status": "Sent",
       "owner": "Marcus Vance",
-      "created": "January 09, 2026",
+      "created": "March 27, 2026",
       "avatarColor": "#42a8a1"
     },
     {
@@ -3927,7 +4728,7 @@
       "channel": "LinkedIn",
       "status": "In Review",
       "owner": "Sarah Jenkins",
-      "created": "April 14, 2026",
+      "created": "March 20, 2026",
       "avatarColor": "#c9ae4d"
     },
     {
@@ -3937,7 +4738,7 @@
       "channel": "Email",
       "status": "Opened",
       "owner": "Lukas Fischer",
-      "created": "July 19, 2026",
+      "created": "March 26, 2026",
       "avatarColor": "#a842a2"
     },
     {
@@ -3947,7 +4748,7 @@
       "channel": "In-person",
       "status": "Scheduled",
       "owner": "David Kim",
-      "created": "October 24, 2026",
+      "created": "March 30, 2026",
       "avatarColor": "#dc9c56"
     },
     {
@@ -3957,7 +4758,7 @@
       "channel": "Phone",
       "status": "Completed",
       "owner": "Michael Weber",
-      "created": "January 01, 2026",
+      "created": "March 26, 2026",
       "avatarColor": "#2ae9c9"
     },
     {
@@ -3967,7 +4768,7 @@
       "channel": "SMS",
       "status": "Received",
       "owner": "Sophie Dupont",
-      "created": "April 06, 2026",
+      "created": "March 19, 2026",
       "avatarColor": "#c974f4"
     },
     {
@@ -3977,7 +4778,7 @@
       "channel": "LinkedIn",
       "status": "Sent",
       "owner": "Elena Rostova",
-      "created": "July 11, 2026",
+      "created": "March 19, 2026",
       "avatarColor": "#42a8a1"
     },
     {
@@ -3987,7 +4788,7 @@
       "channel": "Email",
       "status": "In Review",
       "owner": "Anna Lindqvist",
-      "created": "October 16, 2026",
+      "created": "March 25, 2026",
       "avatarColor": "#c9ae4d"
     },
     {
@@ -3997,7 +4798,7 @@
       "channel": "In-person",
       "status": "Opened",
       "owner": "Marcus Vance",
-      "created": "January 21, 2026",
+      "created": "March 12, 2026",
       "avatarColor": "#a842a2"
     },
     {
@@ -4007,7 +4808,7 @@
       "channel": "Phone",
       "status": "Scheduled",
       "owner": "Sarah Jenkins",
-      "created": "April 26, 2026",
+      "created": "March 28, 2026",
       "avatarColor": "#dc9c56"
     },
     {
@@ -4017,7 +4818,7 @@
       "channel": "SMS",
       "status": "Completed",
       "owner": "Lukas Fischer",
-      "created": "July 03, 2026",
+      "created": "March 19, 2026",
       "avatarColor": "#2ae9c9"
     },
     {
@@ -4027,7 +4828,7 @@
       "channel": "LinkedIn",
       "status": "Received",
       "owner": "David Kim",
-      "created": "October 08, 2026",
+      "created": "March 05, 2026",
       "avatarColor": "#c974f4"
     },
     {
@@ -4037,7 +4838,7 @@
       "channel": "Email",
       "status": "Sent",
       "owner": "Michael Weber",
-      "created": "January 13, 2026",
+      "created": "March 19, 2026",
       "avatarColor": "#42a8a1"
     },
     {
@@ -4047,7 +4848,7 @@
       "channel": "In-person",
       "status": "In Review",
       "owner": "Sophie Dupont",
-      "created": "April 18, 2026",
+      "created": "March 17, 2026",
       "avatarColor": "#c9ae4d"
     },
     {
@@ -4057,7 +4858,7 @@
       "channel": "Phone",
       "status": "Opened",
       "owner": "Elena Rostova",
-      "created": "July 23, 2026",
+      "created": "March 29, 2026",
       "avatarColor": "#a842a2"
     },
     {
@@ -4067,7 +4868,7 @@
       "channel": "SMS",
       "status": "Scheduled",
       "owner": "Anna Lindqvist",
-      "created": "October 28, 2026",
+      "created": "March 10, 2026",
       "avatarColor": "#dc9c56"
     },
     {
@@ -4077,7 +4878,7 @@
       "channel": "LinkedIn",
       "status": "Completed",
       "owner": "Marcus Vance",
-      "created": "January 05, 2026",
+      "created": "March 19, 2026",
       "avatarColor": "#2ae9c9"
     },
     {
@@ -4087,7 +4888,7 @@
       "channel": "Email",
       "status": "Received",
       "owner": "Sarah Jenkins",
-      "created": "April 10, 2026",
+      "created": "March 26, 2026",
       "avatarColor": "#c974f4"
     },
     {
@@ -4097,7 +4898,7 @@
       "channel": "In-person",
       "status": "Sent",
       "owner": "Lukas Fischer",
-      "created": "July 15, 2026",
+      "created": "March 27, 2026",
       "avatarColor": "#42a8a1"
     },
     {
@@ -4107,7 +4908,7 @@
       "channel": "Phone",
       "status": "In Review",
       "owner": "David Kim",
-      "created": "October 20, 2026",
+      "created": "March 25, 2026",
       "avatarColor": "#c9ae4d"
     },
     {
@@ -4117,7 +4918,7 @@
       "channel": "SMS",
       "status": "Opened",
       "owner": "Michael Weber",
-      "created": "January 25, 2026",
+      "created": "March 27, 2026",
       "avatarColor": "#a842a2"
     },
     {
@@ -4127,7 +4928,7 @@
       "channel": "LinkedIn",
       "status": "Scheduled",
       "owner": "Sophie Dupont",
-      "created": "April 02, 2026",
+      "created": "March 20, 2026",
       "avatarColor": "#dc9c56"
     },
     {
@@ -4137,7 +4938,7 @@
       "channel": "Email",
       "status": "Completed",
       "owner": "Elena Rostova",
-      "created": "July 07, 2026",
+      "created": "March 14, 2026",
       "avatarColor": "#2ae9c9"
     },
     {
@@ -4147,7 +4948,7 @@
       "channel": "In-person",
       "status": "Received",
       "owner": "Anna Lindqvist",
-      "created": "October 12, 2026",
+      "created": "March 22, 2026",
       "avatarColor": "#c974f4"
     },
     {
@@ -4157,7 +4958,7 @@
       "channel": "Phone",
       "status": "Sent",
       "owner": "Marcus Vance",
-      "created": "January 17, 2026",
+      "created": "March 13, 2026",
       "avatarColor": "#42a8a1"
     },
     {
@@ -4167,7 +4968,7 @@
       "channel": "SMS",
       "status": "In Review",
       "owner": "Sarah Jenkins",
-      "created": "April 22, 2026",
+      "created": "March 26, 2026",
       "avatarColor": "#c9ae4d"
     },
     {
@@ -4177,7 +4978,7 @@
       "channel": "LinkedIn",
       "status": "Opened",
       "owner": "Lukas Fischer",
-      "created": "July 27, 2026",
+      "created": "March 21, 2026",
       "avatarColor": "#a842a2"
     },
     {
@@ -4187,7 +4988,7 @@
       "channel": "Email",
       "status": "Scheduled",
       "owner": "David Kim",
-      "created": "October 04, 2026",
+      "created": "March 31, 2026",
       "avatarColor": "#dc9c56"
     },
     {
@@ -4197,7 +4998,7 @@
       "channel": "In-person",
       "status": "Completed",
       "owner": "Michael Weber",
-      "created": "January 09, 2026",
+      "created": "March 17, 2026",
       "avatarColor": "#2ae9c9"
     },
     {
@@ -4207,7 +5008,7 @@
       "channel": "Phone",
       "status": "Received",
       "owner": "Sophie Dupont",
-      "created": "April 14, 2026",
+      "created": "March 24, 2026",
       "avatarColor": "#c974f4"
     },
     {
@@ -4217,7 +5018,7 @@
       "channel": "SMS",
       "status": "Sent",
       "owner": "Elena Rostova",
-      "created": "July 19, 2026",
+      "created": "March 26, 2026",
       "avatarColor": "#42a8a1"
     },
     {
@@ -4227,7 +5028,7 @@
       "channel": "LinkedIn",
       "status": "In Review",
       "owner": "Anna Lindqvist",
-      "created": "October 24, 2026",
+      "created": "March 08, 2026",
       "avatarColor": "#c9ae4d"
     },
     {
@@ -4237,7 +5038,7 @@
       "channel": "Email",
       "status": "Opened",
       "owner": "Marcus Vance",
-      "created": "January 01, 2026",
+      "created": "March 31, 2026",
       "avatarColor": "#a842a2"
     },
     {
@@ -4247,7 +5048,7 @@
       "channel": "In-person",
       "status": "Scheduled",
       "owner": "Sarah Jenkins",
-      "created": "April 06, 2026",
+      "created": "March 29, 2026",
       "avatarColor": "#dc9c56"
     },
     {
@@ -4257,7 +5058,7 @@
       "channel": "Phone",
       "status": "Completed",
       "owner": "Lukas Fischer",
-      "created": "July 11, 2026",
+      "created": "March 28, 2026",
       "avatarColor": "#2ae9c9"
     },
     {
@@ -4267,7 +5068,7 @@
       "channel": "SMS",
       "status": "Received",
       "owner": "David Kim",
-      "created": "October 16, 2026",
+      "created": "March 20, 2026",
       "avatarColor": "#c974f4"
     },
     {
@@ -4277,7 +5078,7 @@
       "channel": "LinkedIn",
       "status": "Sent",
       "owner": "Michael Weber",
-      "created": "January 21, 2026",
+      "created": "March 25, 2026",
       "avatarColor": "#42a8a1"
     },
     {
@@ -4287,7 +5088,7 @@
       "channel": "Email",
       "status": "In Review",
       "owner": "Sophie Dupont",
-      "created": "April 26, 2026",
+      "created": "March 21, 2026",
       "avatarColor": "#c9ae4d"
     },
     {
@@ -4297,7 +5098,7 @@
       "channel": "In-person",
       "status": "Opened",
       "owner": "Elena Rostova",
-      "created": "July 03, 2026",
+      "created": "March 09, 2026",
       "avatarColor": "#a842a2"
     },
     {
@@ -4307,7 +5108,7 @@
       "channel": "Phone",
       "status": "Scheduled",
       "owner": "Anna Lindqvist",
-      "created": "October 08, 2026",
+      "created": "March 25, 2026",
       "avatarColor": "#dc9c56"
     },
     {
@@ -4317,7 +5118,7 @@
       "channel": "SMS",
       "status": "Completed",
       "owner": "Marcus Vance",
-      "created": "January 13, 2026",
+      "created": "March 29, 2026",
       "avatarColor": "#2ae9c9"
     },
     {
@@ -4327,7 +5128,7 @@
       "channel": "LinkedIn",
       "status": "Received",
       "owner": "Sarah Jenkins",
-      "created": "April 18, 2026",
+      "created": "March 24, 2026",
       "avatarColor": "#c974f4"
     },
     {
@@ -4337,7 +5138,7 @@
       "channel": "Email",
       "status": "Sent",
       "owner": "Lukas Fischer",
-      "created": "July 23, 2026",
+      "created": "March 29, 2026",
       "avatarColor": "#42a8a1"
     },
     {
@@ -4347,7 +5148,7 @@
       "channel": "In-person",
       "status": "In Review",
       "owner": "David Kim",
-      "created": "October 28, 2026",
+      "created": "March 26, 2026",
       "avatarColor": "#c9ae4d"
     },
     {
@@ -4357,7 +5158,7 @@
       "channel": "Phone",
       "status": "Opened",
       "owner": "Michael Weber",
-      "created": "January 05, 2026",
+      "created": "March 15, 2026",
       "avatarColor": "#a842a2"
     },
     {
@@ -4367,7 +5168,7 @@
       "channel": "SMS",
       "status": "Scheduled",
       "owner": "Sophie Dupont",
-      "created": "April 10, 2026",
+      "created": "March 16, 2026",
       "avatarColor": "#dc9c56"
     },
     {
@@ -4377,7 +5178,7 @@
       "channel": "LinkedIn",
       "status": "Completed",
       "owner": "Elena Rostova",
-      "created": "July 15, 2026",
+      "created": "March 31, 2026",
       "avatarColor": "#2ae9c9"
     },
     {
@@ -4387,7 +5188,7 @@
       "channel": "Email",
       "status": "Received",
       "owner": "Anna Lindqvist",
-      "created": "October 20, 2026",
+      "created": "March 06, 2026",
       "avatarColor": "#c974f4"
     },
     {
@@ -4397,7 +5198,7 @@
       "channel": "In-person",
       "status": "Sent",
       "owner": "Marcus Vance",
-      "created": "January 25, 2026",
+      "created": "March 26, 2026",
       "avatarColor": "#42a8a1"
     },
     {
@@ -4407,7 +5208,7 @@
       "channel": "Phone",
       "status": "In Review",
       "owner": "Sarah Jenkins",
-      "created": "April 02, 2026",
+      "created": "March 28, 2026",
       "avatarColor": "#c9ae4d"
     },
     {
@@ -4417,7 +5218,7 @@
       "channel": "SMS",
       "status": "Opened",
       "owner": "Lukas Fischer",
-      "created": "July 07, 2026",
+      "created": "March 27, 2026",
       "avatarColor": "#a842a2"
     },
     {
@@ -4427,7 +5228,7 @@
       "channel": "LinkedIn",
       "status": "Scheduled",
       "owner": "David Kim",
-      "created": "October 12, 2026",
+      "created": "March 15, 2026",
       "avatarColor": "#dc9c56"
     },
     {
@@ -4437,7 +5238,7 @@
       "channel": "Email",
       "status": "Completed",
       "owner": "Michael Weber",
-      "created": "January 17, 2026",
+      "created": "March 29, 2026",
       "avatarColor": "#2ae9c9"
     },
     {
@@ -4447,7 +5248,7 @@
       "channel": "In-person",
       "status": "Received",
       "owner": "Sophie Dupont",
-      "created": "April 22, 2026",
+      "created": "March 27, 2026",
       "avatarColor": "#c974f4"
     },
     {
@@ -4457,7 +5258,7 @@
       "channel": "Phone",
       "status": "Sent",
       "owner": "Elena Rostova",
-      "created": "July 27, 2026",
+      "created": "March 31, 2026",
       "avatarColor": "#42a8a1"
     },
     {
@@ -4467,7 +5268,7 @@
       "channel": "SMS",
       "status": "In Review",
       "owner": "Anna Lindqvist",
-      "created": "October 04, 2026",
+      "created": "March 14, 2026",
       "avatarColor": "#c9ae4d"
     },
     {
@@ -4477,7 +5278,7 @@
       "channel": "LinkedIn",
       "status": "Opened",
       "owner": "Marcus Vance",
-      "created": "January 09, 2026",
+      "created": "March 26, 2026",
       "avatarColor": "#a842a2"
     },
     {
@@ -4487,7 +5288,7 @@
       "channel": "Email",
       "status": "Scheduled",
       "owner": "Sarah Jenkins",
-      "created": "April 14, 2026",
+      "created": "March 22, 2026",
       "avatarColor": "#dc9c56"
     },
     {
@@ -4497,7 +5298,7 @@
       "channel": "In-person",
       "status": "Completed",
       "owner": "Lukas Fischer",
-      "created": "July 19, 2026",
+      "created": "March 21, 2026",
       "avatarColor": "#2ae9c9"
     },
     {
@@ -4507,7 +5308,7 @@
       "channel": "Phone",
       "status": "Received",
       "owner": "David Kim",
-      "created": "October 24, 2026",
+      "created": "March 18, 2026",
       "avatarColor": "#c974f4"
     },
     {
@@ -4517,7 +5318,7 @@
       "channel": "SMS",
       "status": "Sent",
       "owner": "Michael Weber",
-      "created": "January 01, 2026",
+      "created": "March 13, 2026",
       "avatarColor": "#42a8a1"
     },
     {
@@ -4527,7 +5328,7 @@
       "channel": "LinkedIn",
       "status": "In Review",
       "owner": "Sophie Dupont",
-      "created": "April 06, 2026",
+      "created": "March 08, 2026",
       "avatarColor": "#c9ae4d"
     },
     {
@@ -4537,7 +5338,7 @@
       "channel": "Email",
       "status": "Opened",
       "owner": "Elena Rostova",
-      "created": "July 11, 2026",
+      "created": "March 31, 2026",
       "avatarColor": "#a842a2"
     },
     {
@@ -4547,7 +5348,7 @@
       "channel": "In-person",
       "status": "Scheduled",
       "owner": "Anna Lindqvist",
-      "created": "October 16, 2026",
+      "created": "March 22, 2026",
       "avatarColor": "#dc9c56"
     },
     {
@@ -4557,7 +5358,7 @@
       "channel": "Phone",
       "status": "Completed",
       "owner": "Marcus Vance",
-      "created": "January 21, 2026",
+      "created": "March 21, 2026",
       "avatarColor": "#2ae9c9"
     },
     {
@@ -4567,7 +5368,7 @@
       "channel": "SMS",
       "status": "Received",
       "owner": "Sarah Jenkins",
-      "created": "April 26, 2026",
+      "created": "March 14, 2026",
       "avatarColor": "#c974f4"
     },
     {
@@ -4577,7 +5378,7 @@
       "channel": "LinkedIn",
       "status": "Sent",
       "owner": "Lukas Fischer",
-      "created": "July 03, 2026",
+      "created": "March 25, 2026",
       "avatarColor": "#42a8a1"
     },
     {
@@ -4587,7 +5388,7 @@
       "channel": "Email",
       "status": "In Review",
       "owner": "David Kim",
-      "created": "October 08, 2026",
+      "created": "March 10, 2026",
       "avatarColor": "#c9ae4d"
     },
     {
@@ -4597,7 +5398,7 @@
       "channel": "In-person",
       "status": "Opened",
       "owner": "Michael Weber",
-      "created": "January 13, 2026",
+      "created": "March 18, 2026",
       "avatarColor": "#a842a2"
     },
     {
@@ -4607,7 +5408,7 @@
       "channel": "Phone",
       "status": "Scheduled",
       "owner": "Sophie Dupont",
-      "created": "April 18, 2026",
+      "created": "March 26, 2026",
       "avatarColor": "#dc9c56"
     },
     {
@@ -4617,7 +5418,7 @@
       "channel": "SMS",
       "status": "Completed",
       "owner": "Elena Rostova",
-      "created": "July 23, 2026",
+      "created": "March 29, 2026",
       "avatarColor": "#2ae9c9"
     },
     {
@@ -4627,7 +5428,7 @@
       "channel": "LinkedIn",
       "status": "Received",
       "owner": "Anna Lindqvist",
-      "created": "October 28, 2026",
+      "created": "March 26, 2026",
       "avatarColor": "#c974f4"
     },
     {
@@ -4637,7 +5438,7 @@
       "channel": "Email",
       "status": "Sent",
       "owner": "Marcus Vance",
-      "created": "January 05, 2026",
+      "created": "March 19, 2026",
       "avatarColor": "#42a8a1"
     },
     {
@@ -4647,7 +5448,7 @@
       "channel": "In-person",
       "status": "In Review",
       "owner": "Sarah Jenkins",
-      "created": "April 10, 2026",
+      "created": "March 23, 2026",
       "avatarColor": "#c9ae4d"
     },
     {
@@ -4657,7 +5458,7 @@
       "channel": "Phone",
       "status": "Opened",
       "owner": "Lukas Fischer",
-      "created": "July 15, 2026",
+      "created": "March 13, 2026",
       "avatarColor": "#a842a2"
     },
     {
@@ -4667,7 +5468,7 @@
       "channel": "SMS",
       "status": "Scheduled",
       "owner": "David Kim",
-      "created": "October 20, 2026",
+      "created": "March 16, 2026",
       "avatarColor": "#dc9c56"
     },
     {
@@ -4677,7 +5478,7 @@
       "channel": "LinkedIn",
       "status": "Completed",
       "owner": "Michael Weber",
-      "created": "January 25, 2026",
+      "created": "March 28, 2026",
       "avatarColor": "#2ae9c9"
     },
     {
@@ -4687,7 +5488,7 @@
       "channel": "Email",
       "status": "Received",
       "owner": "Sophie Dupont",
-      "created": "April 02, 2026",
+      "created": "March 27, 2026",
       "avatarColor": "#c974f4"
     },
     {
@@ -4697,7 +5498,7 @@
       "channel": "In-person",
       "status": "Sent",
       "owner": "Elena Rostova",
-      "created": "July 07, 2026",
+      "created": "March 17, 2026",
       "avatarColor": "#42a8a1"
     },
     {
@@ -4707,7 +5508,7 @@
       "channel": "Phone",
       "status": "In Review",
       "owner": "Anna Lindqvist",
-      "created": "October 12, 2026",
+      "created": "March 23, 2026",
       "avatarColor": "#c9ae4d"
     },
     {
@@ -4717,7 +5518,7 @@
       "channel": "SMS",
       "status": "Opened",
       "owner": "Marcus Vance",
-      "created": "January 17, 2026",
+      "created": "March 16, 2026",
       "avatarColor": "#a842a2"
     },
     {
@@ -4727,7 +5528,7 @@
       "channel": "LinkedIn",
       "status": "Scheduled",
       "owner": "Sarah Jenkins",
-      "created": "April 22, 2026",
+      "created": "March 22, 2026",
       "avatarColor": "#dc9c56"
     },
     {
@@ -4737,7 +5538,7 @@
       "channel": "Email",
       "status": "Completed",
       "owner": "Lukas Fischer",
-      "created": "July 27, 2026",
+      "created": "March 26, 2026",
       "avatarColor": "#2ae9c9"
     },
     {
@@ -4747,7 +5548,7 @@
       "channel": "In-person",
       "status": "Received",
       "owner": "David Kim",
-      "created": "October 04, 2026",
+      "created": "March 05, 2026",
       "avatarColor": "#c974f4"
     },
     {
@@ -4757,7 +5558,7 @@
       "channel": "Phone",
       "status": "Sent",
       "owner": "Michael Weber",
-      "created": "January 09, 2026",
+      "created": "March 31, 2026",
       "avatarColor": "#42a8a1"
     },
     {
@@ -4767,7 +5568,7 @@
       "channel": "SMS",
       "status": "In Review",
       "owner": "Sophie Dupont",
-      "created": "April 14, 2026",
+      "created": "March 20, 2026",
       "avatarColor": "#c9ae4d"
     },
     {
@@ -4777,7 +5578,7 @@
       "channel": "LinkedIn",
       "status": "Opened",
       "owner": "Elena Rostova",
-      "created": "July 19, 2026",
+      "created": "March 25, 2026",
       "avatarColor": "#a842a2"
     },
     {
@@ -4787,7 +5588,7 @@
       "channel": "Email",
       "status": "Scheduled",
       "owner": "Anna Lindqvist",
-      "created": "October 24, 2026",
+      "created": "March 18, 2026",
       "avatarColor": "#dc9c56"
     },
     {
@@ -4797,7 +5598,7 @@
       "channel": "In-person",
       "status": "Completed",
       "owner": "Marcus Vance",
-      "created": "January 01, 2026",
+      "created": "March 18, 2026",
       "avatarColor": "#2ae9c9"
     },
     {
@@ -4807,7 +5608,7 @@
       "channel": "Phone",
       "status": "Received",
       "owner": "Sarah Jenkins",
-      "created": "April 06, 2026",
+      "created": "March 24, 2026",
       "avatarColor": "#c974f4"
     },
     {
@@ -4817,7 +5618,7 @@
       "channel": "SMS",
       "status": "Sent",
       "owner": "Lukas Fischer",
-      "created": "July 11, 2026",
+      "created": "March 05, 2026",
       "avatarColor": "#42a8a1"
     },
     {
@@ -4827,7 +5628,7 @@
       "channel": "LinkedIn",
       "status": "In Review",
       "owner": "David Kim",
-      "created": "October 16, 2026",
+      "created": "March 20, 2026",
       "avatarColor": "#c9ae4d"
     },
     {
@@ -4837,7 +5638,7 @@
       "channel": "Email",
       "status": "Opened",
       "owner": "Michael Weber",
-      "created": "January 21, 2026",
+      "created": "March 21, 2026",
       "avatarColor": "#a842a2"
     }
   ]

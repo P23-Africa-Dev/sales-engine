@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Image from "next/image";
 import type { OutreachBusiness } from "@/lib/admin/outreach-dashboard";
 import { BusinessLogo } from "./business-logo";
 
@@ -53,7 +52,7 @@ export function ActivityDrawer({
       id: "ev-1",
       type: "email",
       title: "Contract Proposal v2.4 Delivered & Opened",
-      time: "Today at 14:28",
+      time: "March 31, 2026 at 14:28",
       channel: "Email",
       author: business.owner,
       status: "Opened (3x)",
@@ -64,7 +63,7 @@ export function ActivityDrawer({
       id: "ev-2",
       type: "meeting",
       title: "In-Person Executive Sync",
-      time: "Yesterday at 11:00",
+      time: "March 30, 2026 at 11:00",
       channel: "In-person",
       author: business.owner,
       status: "Completed",
@@ -75,7 +74,7 @@ export function ActivityDrawer({
       id: "ev-3",
       type: "sms",
       title: "SMS Confirmation Received",
-      time: `${business.created}`,
+      time: "March 26, 2026",
       channel: "SMS",
       author: "Decision Maker",
       status: "Received",
@@ -86,7 +85,7 @@ export function ActivityDrawer({
       id: "ev-4",
       type: "email",
       title: "Initial Outreach Sequence",
-      time: "June 08, 2026",
+      time: business.created,
       channel: "Email",
       author: "Sales Automation",
       status: "Replied",
@@ -162,14 +161,14 @@ export function ActivityDrawer({
           <div className="readiness-card">
             <div className="readiness-header">
               <span className="readiness-badge">
-                ⚡ 96% Deal Readiness • High Intent
+                ⚡ {business.readinessPercent}% Deal Readiness
               </span>
               <span className="readiness-owner">
                 Owner: <strong>{business.owner}</strong>
               </span>
             </div>
             <p className="readiness-summary">
-              Decision makers actively engaged. Pricing proposal reviewed 3 times today with zero blockers reported. Client requested enterprise account onboarding.
+              The March sample records include a proposal review, an executive meeting, and a follow-up about onboarding.
             </p>
             <div className="readiness-metrics-grid">
               <div className="metric-pill">
@@ -203,7 +202,7 @@ export function ActivityDrawer({
                 </div>
                 <div className="stakeholder-info">
                   <strong>{business.owner}</strong>
-                  <span>Head of Procurement • Verified Buyer</span>
+                  <span>{business.contact}</span>
                 </div>
                 <span className="stakeholder-tag primary-contact">Primary Contact</span>
               </div>
