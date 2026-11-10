@@ -15,6 +15,7 @@ use App\Services\Discovery\DTO\IcpBrief;
 use App\Services\IcpFiltering\DTO\CandidateCompany;
 use App\Services\IcpFiltering\IcpFilterService;
 use App\Services\Intent\Contracts\SocialSourceInterface;
+use App\Services\Intent\DTO\ListeningProfile;
 use App\Services\Intent\DTO\RawSocialHit;
 use App\Services\Llm\GlmClient;
 use App\Services\SignalDetection\DTO\DetectedSignal;
@@ -33,9 +34,25 @@ class SocialListeningOrchestrator
      * Size/revenue are evaluated per-candidate when the extractor actually
      * populated them — never fail-closed on fields the pipeline cannot fill.
      */
-    private const HIT_CAP = 12;
+    private const MAX_SEARCH_CALLS = 12;
 
-    private const PER_SOURCE_CAP = 10;
+    private const SURVIVOR_TARGET = 20;
+
+    private const LOW_YIELD_FLOOR = 8;
+
+    private const ENRICH_CAP = 12;
+
+    /** @var list<string> */
+    private const FULL_TEXT_SOURCES = ['reddit_native', 'x_native'];
+
+    /** @var list<string> */
+    private const PRIMARY_SOURCES = ['reddit', 'x_mentions'];
+
+    /** @var list<string> */
+    private const LOW_YIELD_SOURCES = ['linkedin_public', 'meta_pages'];
+
+    /** @var list<string> */
+    private const LAST_RESORT_SOURCES = ['youtube', 'meta_graph_pages'];
 
     private bool $budgetExhausted = false;
 
@@ -57,6 +74,10 @@ class SocialListeningOrchestrator
         private readonly SignalQueryBuilder $signalQueryBuilder = new SignalQueryBuilder,
         private readonly SignalExtractor $signalExtractor = new SignalExtractor,
         private readonly IcpOpportunityQueryBuilder $opportunityQueries = new IcpOpportunityQueryBuilder,
+        private readonly ListeningProfileFactory $profiles = new ListeningProfileFactory,
+        private readonly OpportunityPrefilter $prefilter = new OpportunityPrefilter,
+        private readonly OpportunityGate $opportunityGate = new OpportunityGate,
+        private readonly RedditPostHydrator $redditHydrator = new RedditPostHydrator,
     ) {}
 
     public function run(
@@ -103,14 +124,14 @@ class SocialListeningOrchestrator
 
         try {
             $brief = IcpBrief::fromIcpProfile($icp);
+            $profile = $this->profiles->make($organization, $brief);
             $enabled = $settings->enabled_sources ?? SocialListeningSetting::DEFAULT_SOURCES;
-            $settingsWindow = max(1, (int) ($settings->freshness_window_days ?? 180));
+            $requestedWindow = max(1, (int) ($settings->freshness_window_days ?? 30));
+            $appliedWindow = min($requestedWindow, 30);
             $definitions = $brief->signalTypeDetectionEnabled()
                 ? $this->activeDefinitions($organization->id, $brief)
                 : collect();
-            $searchWindow = $definitions->isNotEmpty()
-                ? max($settingsWindow, (int) $definitions->max('default_recency_window_days'))
-                : $settingsWindow;
+            $searchWindow = $appliedWindow;
             $tbs = $this->freshness->serperTbs($searchWindow);
 
             $run->update(['stages' => ['analyzing_icp', 'searching_sources']]);
@@ -126,12 +147,13 @@ class SocialListeningOrchestrator
 
             $taggedHits = $this->collectHits(
                 $organization,
-                $icp,
                 $brief,
+                $profile,
                 $enabled,
                 $tbs,
                 $context,
                 $definitions,
+                $searchWindow,
             );
 
             $run->update(['stages' => ['analyzing_icp', 'searching_sources', 'enriching']]);
@@ -141,21 +163,76 @@ class SocialListeningOrchestrator
             $unlabeled = 0;
             $belowMinScore = 0;
             $duplicate = 0;
+            $notActionable = 0;
+            $modelUnavailable = ! $this->glm->isConfigured();
             $groundingRejected = ['missing_source_url' => 0, 'missing_source_date' => 0, 'stale' => 0];
+            $ready = [];
+            $hydrations = 0;
 
             foreach ($taggedHits as $entry) {
                 /** @var RawSocialHit $hit */
                 $hit = $entry['hit'];
+                if ($hydrations < 8 && preg_match('#reddit\.com#i', (string) $hit->postUrl)) {
+                    $hit = $this->redditHydrator->hydrate($hit);
+                    $hydrations++;
+                }
+
+                $postedAt = $hit->postedAt;
+                if ($postedAt === null && $hit->postUrl) {
+                    $postedAt = app(LinkedInActivityDateExtractor::class)->fromUrl($hit->postUrl);
+                }
+
+                $gate = $this->groundingGate->admit(
+                    $hit->postUrl,
+                    $postedAt,
+                    $appliedWindow,
+                    null,
+                    allowInferredDate: false,
+                );
+                if (! $gate->admitted) {
+                    $groundingRejected[$gate->reason] = ($groundingRejected[$gate->reason] ?? 0) + 1;
+
+                    continue;
+                }
+
+                if ($this->prefilter->rejection($hit, $profile) !== null) {
+                    $notActionable++;
+
+                    continue;
+                }
+
+                $ready[] = [
+                    'hit' => $hit,
+                    'signalTypeKey' => $entry['signalTypeKey'],
+                    'postedAt' => $postedAt,
+                ];
+            }
+
+            $ready = $this->rankReady($ready, $profile);
+            if (count($ready) > self::ENRICH_CAP) {
+                $notActionable += count($ready) - self::ENRICH_CAP;
+                $ready = array_slice($ready, 0, self::ENRICH_CAP);
+            }
+
+            foreach ($ready as $entry) {
+                /** @var RawSocialHit $hit */
+                $hit = $entry['hit'];
+                $postedAt = $entry['postedAt'];
                 $signalTypeKey = $entry['signalTypeKey'];
                 $signalTypeDefinition = $signalTypeKey !== null
                     ? $this->signalTypeRegistry->find($organization->id, $signalTypeKey)
                     : null;
 
+                if ($modelUnavailable) {
+                    $notActionable++;
+
+                    continue;
+                }
+
                 $detected = null;
                 if ($signalTypeDefinition !== null) {
                     $detected = $this->signalExtractor->extract($hit, $signalTypeDefinition, $organization, $brief);
                     if (! $detected->matched) {
-                        // Type match is a label, not a discard. Keep the post as an ICP opportunity.
                         $unlabeled++;
                         $signalTypeKey = null;
                         $signalTypeDefinition = null;
@@ -173,37 +250,10 @@ class SocialListeningOrchestrator
                             authorProfileUrl: $hit->authorProfileUrl,
                             postedAt: $detected->sourceDate ?? $hit->postedAt,
                             dateRaw: $hit->dateRaw,
+                            fullText: $hit->fullText,
                         );
+                        $postedAt = $hit->postedAt ?? $postedAt;
                     }
-                }
-
-                $postedAt = $hit->postedAt ?? $detected?->sourceDate;
-                if ($postedAt === null && $hit->postUrl) {
-                    $postedAt = app(LinkedInActivityDateExtractor::class)->fromUrl($hit->postUrl);
-                }
-
-                $typeWindow = max(1, (int) ($signalTypeDefinition?->default_recency_window_days ?? $settingsWindow));
-                $gateWindow = min($settingsWindow, $typeWindow);
-                if ($signalTypeDefinition !== null && $settingsWindow <= 31) {
-                    $gateWindow = $typeWindow;
-                }
-
-                $dateInferred = false;
-                $gate = $this->groundingGate->admit(
-                    $hit->postUrl,
-                    $postedAt,
-                    $gateWindow,
-                    null,
-                    allowInferredDate: trim($tbs) !== '',
-                );
-                if (! $gate->admitted) {
-                    $groundingRejected[$gate->reason] = ($groundingRejected[$gate->reason] ?? 0) + 1;
-
-                    continue;
-                }
-                if ($gate->inferred) {
-                    $dateInferred = true;
-                    $postedAt = now();
                 }
 
                 $hash = md5(mb_strtolower($hit->postUrl ?? $hit->postText));
@@ -220,7 +270,7 @@ class SocialListeningOrchestrator
 
                 $enriched = $this->enricher->enrich($organization, $icp, $hit, $signalTypeDefinition);
                 $relevance = (float) ($enriched['score'] ?? 0);
-                $score = $this->freshness->apply($relevance, $postedAt, $gateWindow);
+                $score = $this->freshness->apply($relevance, $postedAt, $appliedWindow);
                 $enriched['score'] = $score;
                 $enriched['urgency'] = $this->freshness->nudgeUrgency(
                     isset($enriched['urgency']) ? (string) $enriched['urgency'] : null,
@@ -231,40 +281,23 @@ class SocialListeningOrchestrator
                     $enriched = $this->mergeDetectedIntoEnriched($enriched, $detected);
                 }
 
-                $industry = trim((string) ($enriched['industry'] ?? '')) ?: null;
-                $territory = trim((string) ($enriched['location_text'] ?? $enriched['territory'] ?? '')) ?: null;
-                $companySize = trim((string) ($enriched['company_size'] ?? '')) ?: null;
-                $revenue = trim((string) ($enriched['revenue'] ?? '')) ?: null;
-                $availableFields = [];
-                if ($industry !== null) {
-                    $availableFields[] = 'industry';
-                }
-                if ($territory !== null) {
-                    $availableFields[] = 'territory';
-                }
-                if ($companySize !== null) {
-                    $availableFields[] = 'companySize';
-                }
-                if ($revenue !== null) {
-                    $availableFields[] = 'revenue';
+                $quoteHaystack = trim($hit->postText."\n".($hit->title ?? '')."\n".($hit->snippet ?? ''));
+                if ($this->opportunityGate->rejection($enriched, $quoteHaystack, $profile) !== null) {
+                    $notActionable++;
+
+                    continue;
                 }
 
                 $icpFilterResult = $this->icpFilter->passes(
                     $brief,
                     new CandidateCompany(
-                        industry: $industry,
-                        companySize: $companySize,
-                        revenue: $revenue,
-                        territory: $territory,
+                        industry: null,
+                        companySize: null,
+                        revenue: null,
+                        territory: null,
                     ),
-                    $settings->icp_filter_enabled ? $availableFields : [],
+                    [],
                 );
-
-                if (! $icpFilterResult->passed) {
-                    $icpRejected++;
-
-                    continue;
-                }
 
                 if ($score < (float) $settings->min_score) {
                     $belowMinScore++;
@@ -273,6 +306,8 @@ class SocialListeningOrchestrator
                 }
 
                 if (! $this->matchesIntentFilters($enriched, $settings->intent_filters ?? [])) {
+                    $notActionable++;
+
                     continue;
                 }
 
@@ -331,11 +366,14 @@ class SocialListeningOrchestrator
                         'title' => $hit->title,
                         'snippet' => $hit->snippet,
                         'date_raw' => $hit->dateRaw,
-                        'date_confidence' => $dateInferred ? 'inferred' : 'parsed',
+                        'date_confidence' => 'parsed',
                         'author_name' => $hit->authorName,
                         'author_profile_url' => $hit->authorProfileUrl,
                         'relevance_score' => $relevance,
-                        'freshness_factor' => $this->freshness->factor($postedAt, $gateWindow),
+                        'freshness_factor' => $this->freshness->factor($postedAt, $appliedWindow),
+                        'evidence_quote' => $enriched['evidence_quote'] ?? null,
+                        'actionability' => $enriched['actionability'] ?? null,
+                        'listening_mode' => $profile->mode,
                     ],
                 ]);
 
@@ -361,10 +399,15 @@ class SocialListeningOrchestrator
                         'typeMismatch' => 0,
                         'belowMinScore' => $belowMinScore,
                         'duplicate' => $duplicate,
-                        'total' => $icpRejected + $groundingRejectedTotal + $belowMinScore + $duplicate,
+                        'notActionable' => $notActionable,
+                        'total' => $icpRejected + $groundingRejectedTotal + $belowMinScore + $duplicate + $notActionable,
                     ],
                     'unlabeled' => $unlabeled,
                     'budget_exhausted' => $this->budgetExhausted,
+                    'model_unavailable' => $modelUnavailable,
+                    'freshnessWindowRequested' => $requestedWindow,
+                    'freshnessWindowApplied' => $appliedWindow,
+                    'listeningProfile' => $profile->toSummary(),
                     'sources' => app(SocialSourceHealth::class)->snapshot(),
                     'enrichment' => [
                         'pending' => $created,
@@ -406,97 +449,175 @@ class SocialListeningOrchestrator
 
     /**
      * @param  Collection<int, SignalTypeDefinition>  $definitions
+     * @param  list<string>  $enabled
+     * @param  array<string, mixed>  $context
      * @return Collection<int, array{hit: RawSocialHit, signalTypeKey: ?string}>
      */
     private function collectHits(
         Organization $organization,
-        IcpProfile $icp,
         IcpBrief $brief,
+        ListeningProfile $profile,
         array $enabled,
         string $tbs,
         array $context,
         Collection $definitions,
+        int $windowDays,
     ): Collection {
-        $taggedHits = [];
-
-        foreach ($this->interestQueries($organization, $icp, $brief) as $query) {
-            foreach ($this->searchSources($brief, $query, $organization->id, $enabled, $tbs, $context) as $hit) {
-                $taggedHits[] = ['hit' => $hit, 'signalTypeKey' => null];
-            }
+        $queries = [];
+        foreach ($this->opportunityQueries->fromProfile($profile) as $query) {
+            $queries[] = ['query' => $query, 'signalTypeKey' => null];
         }
-
         foreach ($definitions as $definition) {
             foreach ($this->signalQueryBuilder->buildQueriesForType($definition, $brief) as $query) {
-                foreach ($this->searchSources($brief, $query, $organization->id, $enabled, $tbs, $context) as $hit) {
-                    $taggedHits[] = ['hit' => $hit, 'signalTypeKey' => $definition->key];
+                $queries[] = ['query' => $query, 'signalTypeKey' => $definition->key];
+            }
+        }
+
+        $byKey = [];
+        foreach ($this->sources as $source) {
+            $byKey[$source->key()] = $source;
+        }
+
+        $tagged = [];
+        $seen = [];
+        $survivors = 0;
+        $calls = 0;
+
+        $absorb = function (array $hits, ?string $signalTypeKey) use (&$tagged, &$seen, &$survivors, $profile, $windowDays): void {
+            foreach ($hits as $hit) {
+                $hash = md5(mb_strtolower($hit->postUrl ?? $hit->postText));
+                if (array_key_exists($hash, $seen)) {
+                    if ($seen[$hash] === null && $signalTypeKey !== null) {
+                        foreach ($tagged as $index => $existing) {
+                            $existingHash = md5(mb_strtolower($existing['hit']->postUrl ?? $existing['hit']->postText));
+                            if ($existingHash === $hash) {
+                                $tagged[$index]['signalTypeKey'] = $signalTypeKey;
+                                $seen[$hash] = $signalTypeKey;
+                                break;
+                            }
+                        }
+                    }
+
+                    continue;
+                }
+                $seen[$hash] = $signalTypeKey;
+                $tagged[] = ['hit' => $hit, 'signalTypeKey' => $signalTypeKey];
+                if ($this->survives($hit, $profile, $windowDays)) {
+                    $survivors++;
                 }
             }
-        }
+        };
 
-        $byHash = [];
-        foreach ($taggedHits as $entry) {
-            $hash = md5(mb_strtolower($entry['hit']->postUrl ?? $entry['hit']->postText));
-            if (! isset($byHash[$hash]) || ($byHash[$hash]['signalTypeKey'] === null && $entry['signalTypeKey'] !== null)) {
-                $byHash[$hash] = $entry;
+        $searchPhase = function (array $keys, bool $requireListed) use (
+            &$calls,
+            &$survivors,
+            $absorb,
+            $byKey,
+            $brief,
+            $organization,
+            $enabled,
+            $tbs,
+            $context,
+            $queries,
+        ): void {
+            foreach ($queries as $planned) {
+                foreach ($keys as $key) {
+                    if ($calls >= self::MAX_SEARCH_CALLS || $survivors >= self::SURVIVOR_TARGET) {
+                        return;
+                    }
+                    $source = $byKey[$key] ?? null;
+                    if (! $source instanceof SocialSourceInterface || ! $source->isConfigured()) {
+                        continue;
+                    }
+                    if ($requireListed && ! in_array($key, $enabled, true)) {
+                        continue;
+                    }
+                    if (! $requireListed && ! $source->isEnabled($brief, $enabled)) {
+                        continue;
+                    }
+                    if ($key === 'meta_graph_pages' && ($context['meta_page_ids'] ?? []) === []) {
+                        continue;
+                    }
+                    if (! $this->canSpendCall()) {
+                        return;
+                    }
+                    $this->apiCallsThisRun++;
+                    $calls++;
+                    try {
+                        $hits = $source->search($brief, $planned['query'], $organization->id, 6, $tbs, $context)->all();
+                    } catch (\Throwable $e) {
+                        app(SocialSourceHealth::class)->recordAttempt($source->key(), 0, 0);
+                        Log::warning('Social source search failed', [
+                            'source' => $source->key(),
+                            'error' => $e->getMessage(),
+                        ]);
+                        $hits = [];
+                    }
+                    $absorb($hits, $planned['signalTypeKey']);
+                }
             }
+        };
+
+        $searchPhase(self::FULL_TEXT_SOURCES, false);
+        $searchPhase(self::PRIMARY_SOURCES, true);
+        if ($survivors < self::LOW_YIELD_FLOOR && $calls < self::MAX_SEARCH_CALLS) {
+            $searchPhase(self::LOW_YIELD_SOURCES, true);
+        }
+        if ($survivors === 0 && $calls < self::MAX_SEARCH_CALLS) {
+            $searchPhase(self::LAST_RESORT_SOURCES, true);
         }
 
-        return $this->rankAndCap($byHash, $brief);
+        return collect($tagged);
+    }
+
+    private function survives(RawSocialHit $hit, ListeningProfile $profile, int $windowDays): bool
+    {
+        $postedAt = $hit->postedAt;
+        if ($postedAt === null && $hit->postUrl) {
+            $postedAt = app(LinkedInActivityDateExtractor::class)->fromUrl($hit->postUrl);
+        }
+
+        $gate = $this->groundingGate->admit($hit->postUrl, $postedAt, $windowDays, null, false);
+        if (! $gate->admitted) {
+            return false;
+        }
+
+        return $this->prefilter->accepts($hit, $profile);
     }
 
     /**
-     * @param  array<string, array{hit: RawSocialHit, signalTypeKey: ?string}>  $byHash
-     * @return Collection<int, array{hit: RawSocialHit, signalTypeKey: ?string}>
+     * @param  list<array{hit: RawSocialHit, signalTypeKey: ?string, postedAt: mixed}>  $ready
+     * @return list<array{hit: RawSocialHit, signalTypeKey: ?string, postedAt: mixed}>
      */
-    private function rankAndCap(array $byHash, IcpBrief $brief): Collection
+    private function rankReady(array $ready, ListeningProfile $profile): array
     {
-        $haystack = mb_strtolower(implode(' ', array_filter([
-            $brief->customPrompt,
-            $brief->description,
-            ...array_slice($brief->industries, 0, 3),
-            ...array_slice($brief->searchKeywords, 0, 4),
-        ])));
         $tokens = array_values(array_filter(
-            preg_split('/[^\p{L}\p{N}]+/u', $haystack) ?: [],
+            preg_split('/[^\p{L}\p{N}]+/u', mb_strtolower($profile->offer)) ?: [],
             static fn ($word) => mb_strlen((string) $word) >= 4,
         ));
-        $tokens = array_slice($tokens, 0, 12);
 
-        $scored = [];
-        foreach ($byHash as $entry) {
-            $hit = $entry['hit'];
-            $text = mb_strtolower($hit->postText.' '.$hit->title.' '.$hit->snippet);
-            $overlap = 0;
-            foreach ($tokens as $token) {
-                if (str_contains($text, $token)) {
-                    $overlap++;
-                }
-            }
-            $scored[] = [
-                'entry' => $entry,
-                'rank' => ($hit->postedAt !== null ? 3 : 0) + $overlap + ($entry['signalTypeKey'] !== null ? 1 : 0),
-                'platform' => $hit->platform,
-            ];
-        }
+        usort($ready, function (array $a, array $b) use ($tokens, $profile): int {
+            return $this->readyRank($b['hit'], $tokens, $profile) <=> $this->readyRank($a['hit'], $tokens, $profile);
+        });
 
-        usort($scored, static fn (array $a, array $b) => $b['rank'] <=> $a['rank']);
+        return $ready;
+    }
 
-        $kept = [];
-        $perSource = [];
-        foreach ($scored as $row) {
-            $platform = (string) $row['platform'];
-            $perSource[$platform] = $perSource[$platform] ?? 0;
-            if ($perSource[$platform] >= self::PER_SOURCE_CAP) {
-                continue;
-            }
-            $kept[] = $row['entry'];
-            $perSource[$platform]++;
-            if (count($kept) >= self::HIT_CAP) {
-                break;
+    /**
+     * @param  list<string>  $tokens
+     */
+    private function readyRank(RawSocialHit $hit, array $tokens, ListeningProfile $profile): int
+    {
+        $text = mb_strtolower($hit->postText.' '.$hit->title);
+        $rank = $hit->postedAt !== null ? 3 : 0;
+        $rank += $this->prefilter->hasCue($text, $profile) ? 5 : 0;
+        foreach ($tokens as $token) {
+            if (str_contains($text, $token)) {
+                $rank++;
             }
         }
 
-        return collect($kept);
+        return $rank;
     }
 
     /**
@@ -552,45 +673,6 @@ class SocialListeningOrchestrator
     }
 
     /**
-     * @return list<RawSocialHit>
-     */
-    private function searchSources(
-        IcpBrief $brief,
-        string $query,
-        int $organizationId,
-        array $enabled,
-        string $tbs,
-        array $context,
-    ): array {
-        $hits = [];
-        foreach ($this->sources as $source) {
-            if (! $source->isEnabled($brief, $enabled)) {
-                continue;
-            }
-            if ($source->key() === 'meta_graph_pages' && ($context['meta_page_ids'] ?? []) === []) {
-                continue;
-            }
-            if (! $this->canSpendCall()) {
-                break;
-            }
-            $this->apiCallsThisRun++;
-            try {
-                foreach ($source->search($brief, $query, $organizationId, 6, $tbs, $context) as $hit) {
-                    $hits[] = $hit;
-                }
-            } catch (\Throwable $e) {
-                app(SocialSourceHealth::class)->recordAttempt($source->key(), 0, 0);
-                Log::warning('Social source search failed', [
-                    'source' => $source->key(),
-                    'error' => $e->getMessage(),
-                ]);
-            }
-        }
-
-        return $hits;
-    }
-
-    /**
      * @param  array<string, mixed>  $enriched
      * @return array<string, mixed>
      */
@@ -619,66 +701,6 @@ class SocialListeningOrchestrator
         }
 
         return $enriched;
-    }
-
-    private function interestQueries(Organization $organization, IcpProfile $icp, IcpBrief $brief): array
-    {
-        $queries = $this->opportunityQueries->build($brief);
-        foreach ($this->buildQueries($organization, $icp, $brief) as $query) {
-            $queries[] = $query;
-        }
-
-        $queries = array_values(array_unique(array_filter(array_map(
-            static fn ($query) => trim((string) $query),
-            $queries,
-        ))));
-
-        return array_slice($queries, 0, 5);
-    }
-
-    /**
-     * @return list<string>
-     */
-    private function buildQueries(Organization $organization, IcpProfile $icp, IcpBrief $brief): array
-    {
-        if ($this->glm->isConfigured()) {
-            try {
-                $json = $this->glm->chatJson([
-                    [
-                        'role' => 'system',
-                        'content' => 'Generate 3-5 short Google search queries to find FRESH social/web posts that are genuine opportunities for a specific user, grounded ONLY in their stated interests (custom_prompt/description) — do not invent industry, territory, or role keywords beyond what those fields say, since a separate filtering step (not this query) is responsible for matching the user\'s firmographic criteria. '
-                            .'Prefer timely language: "past week", "this week", "latest", "just announced", "recent", current year. '
-                            .'Buying-intent phrasing ("looking for", "recommend", "alternative to", "switching from", "how much", "vendor") is ONE valid angle WHEN it matches the user\'s interests — but it is not the only one. '
-                            .'Also generate queries for funding/investment news, market moves, partnerships, competitive moves, and regulatory changes WHEN the custom_prompt/description implies the user cares about those (e.g. investing, market research, deal sourcing). '
-                            .'Do not blanket-exclude thought-leadership or news-style content — only avoid it when it is clearly irrelevant to the stated interests. '
-                            .'Weight custom_prompt heavily: it is the clearest statement of what this user actually wants. If custom_prompt and description are both empty, generate broad, timely opportunity-discovery queries without guessing at unstated criteria. '
-                            .'Prioritize opportunities that would still be actionable now — not historical roundups from months/years ago. '
-                            .'IMPORTANT: Do NOT generate recruiting/job-board queries (hiring, "we\'re hiring", job openings) unless custom_prompt explicitly asks for hiring/talent signals. '
-                            .'Return JSON: {"queries":["..."]}',
-                    ],
-                    [
-                        'role' => 'user',
-                        'content' => json_encode([
-                            'custom_prompt' => $brief->customPrompt,
-                            'description' => $brief->description,
-                        ]),
-                    ],
-                ], 'extract', $organization);
-
-                $queries = $json['queries'] ?? [];
-                if (is_array($queries) && count($queries) > 0) {
-                    return array_values(array_filter(array_map('strval', $queries)));
-                }
-            } catch (\Throwable) {
-                // fallback below
-            }
-        }
-
-        $interestPhrase = trim($brief->customPrompt) !== ''
-            ? $brief->customPrompt
-            : (trim($brief->description) !== '' ? $brief->description : 'new opportunities OR announcements OR funding');
-
-        return [trim($interestPhrase.' past week OR latest OR just announced')];
     }
 
     /**

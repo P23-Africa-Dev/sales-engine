@@ -98,6 +98,29 @@ describe("ScanRunSummaryPanel", () => {
     expect(html).toContain("1 not found");
   });
 
+  it("names posts that were not a concrete opportunity", () => {
+    const html = renderToStaticMarkup(
+      <ScanRunSummaryPanel
+        run={makeRun({
+          result_summary: {
+            totalChecked: 4,
+            qualified: 1,
+            rejected: {
+              icpMismatch: 0,
+              missingSourceUrl: 0,
+              missingSourceDate: 0,
+              stale: 0,
+              notActionable: 3,
+              total: 3,
+            },
+          },
+        })}
+      />
+    );
+
+    expect(html).toContain("3 weren&#x27;t a concrete opportunity");
+  });
+
   it("says none qualified when every checked hit was rejected", () => {
     const html = renderToStaticMarkup(
       <ScanRunSummaryPanel

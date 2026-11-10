@@ -32,6 +32,9 @@ export function ScanRunSummaryPanel({ run }: ScanRunSummaryPanelProps) {
     (rejected.typeMismatch ?? 0) > 0
       ? `${rejected.typeMismatch} weren't a real match for the event type`
       : null,
+    (rejected.notActionable ?? 0) > 0
+      ? `${rejected.notActionable} weren't a concrete opportunity`
+      : null,
   ].filter((part): part is string => part !== null);
 
   const found = enrichment?.found ?? 0;

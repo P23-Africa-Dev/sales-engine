@@ -75,6 +75,8 @@ class SocialSignalEnricher
                     .'Use other only for content with no plausible relevance to the user\'s ICP/interests, or spam. Do not force unrelated content into a sales bucket — pick the type that best matches WHY this matters to the user. '
                     .'Prefer timely angles: if the post is recent or time-sensitive, say so in why_this_matters_to_you and urgency. '
                     .'buying_intent_score answers: would the person behind this active ICP be worse off if this post slid by this week? Score under 40 and use signal_type other when it would not help them. '
+                    .'Also return evidence_quote and actionability. evidence_quote is one sentence copied verbatim from the post (at least 40 characters). '
+                    .'actionability is exactly "reply_now" or "not_an_opportunity". Use reply_now only when that quoted sentence is a concrete opening this user can act on this week. Otherwise use not_an_opportunity. '
                     .'Every field must be populated (use empty string/array rather than omitting a key).';
 
                 if ($signalType !== null) {
@@ -139,6 +141,8 @@ class SocialSignalEnricher
 
                 return array_merge($json, [
                     'signal_type' => $signalType,
+                    'evidence_quote' => trim((string) ($json['evidence_quote'] ?? '')),
+                    'actionability' => ($json['actionability'] ?? '') === 'reply_now' ? 'reply_now' : 'not_an_opportunity',
                     'intent_label' => $intentLabel,
                     'entity_type' => $entityType,
                     'score' => $score,
@@ -228,6 +232,9 @@ class SocialSignalEnricher
             'personal_recommended_action_title' => $actionTitle,
             'personal_recommended_action_detail' => $actionDetail,
             'score' => $score,
+            'evidence_quote' => '',
+            'actionability' => 'not_an_opportunity',
+            'from_heuristic' => true,
         ];
     }
 

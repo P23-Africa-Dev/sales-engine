@@ -1257,6 +1257,7 @@ export type SocialListeningRunResultSummary = {
     typeMismatch?: number;
     belowMinScore?: number;
     duplicate?: number;
+    notActionable?: number;
     total: number;
   };
   enrichment?: {

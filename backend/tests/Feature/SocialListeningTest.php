@@ -2,12 +2,19 @@
 
 namespace Tests\Feature;
 
+use App\Jobs\RunSocialListeningJob;
+use App\Models\ApiUsage;
 use App\Models\IcpProfile;
-use App\Models\Organization;
+use App\Models\SignalTypeDefinition;
 use App\Models\SocialListeningRun;
 use App\Models\SocialListeningSetting;
 use App\Models\SocialSignal;
+use App\Models\User;
+use App\Services\Intent\DTO\RawSocialHit;
 use App\Services\Intent\SocialListeningOrchestrator;
+use App\Services\Intent\SocialSignalEnricher;
+use App\Services\Outreach\OutreachIdentityResolver;
+use Database\Seeders\SignalTypeDefinitionSeeder;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
@@ -42,7 +49,7 @@ class SocialListeningTest extends TestCase
             ->postJson('/api/v1/social-listening/runs', ['force' => true])
             ->assertCreated();
 
-        Queue::assertPushed(\App\Jobs\RunSocialListeningJob::class);
+        Queue::assertPushed(RunSocialListeningJob::class);
     }
 
     public function test_social_listening_bootstrap_is_idempotent(): void
@@ -68,7 +75,7 @@ class SocialListeningTest extends TestCase
             ->assertCreated()
             ->assertJsonPath('data.bootstrapped', true);
 
-        Queue::assertPushed(\App\Jobs\RunSocialListeningJob::class, 1);
+        Queue::assertPushed(RunSocialListeningJob::class, 1);
 
         SocialListeningRun::query()->create([
             'organization_id' => $org->id,
@@ -88,7 +95,7 @@ class SocialListeningTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.bootstrapped', false);
 
-        Queue::assertPushed(\App\Jobs\RunSocialListeningJob::class, 1);
+        Queue::assertPushed(RunSocialListeningJob::class, 1);
     }
 
     public function test_social_listening_metrics_includes_run_status(): void
@@ -143,13 +150,13 @@ class SocialListeningTest extends TestCase
             'config' => array_merge(IcpProfile::defaultConfig(), [
                 'industries' => ['FMCG & Retail'],
                 'territories' => ['Lagos, NG'],
-                'signalTypePacks' => [\App\Models\SignalTypeDefinition::PACK_NONE],
+                'signalTypePacks' => [SignalTypeDefinition::PACK_NONE],
             ]),
         ]);
 
         config(['services.glm.api_key' => '']);
 
-        $hit = new \App\Services\Intent\DTO\RawSocialHit(
+        $hit = new RawSocialHit(
             platform: 'linkedin',
             sourceLabel: 'LinkedIn Post',
             sourceIcon: 'in',
@@ -159,7 +166,7 @@ class SocialListeningTest extends TestCase
             title: 'Post',
         );
 
-        $enriched = app(\App\Services\Intent\SocialSignalEnricher::class)->enrich($org, $icp, $hit);
+        $enriched = app(SocialSignalEnricher::class)->enrich($org, $icp, $hit);
         $defaults = SocialListeningSetting::defaultsForOrg($org->id, $icp->id);
 
         $this->assertGreaterThanOrEqual($defaults['min_score'], (float) $enriched['score']);
@@ -175,13 +182,13 @@ class SocialListeningTest extends TestCase
             'config' => array_merge(IcpProfile::defaultConfig(), [
                 'industries' => ['FMCG & Retail'],
                 'territories' => ['Lagos, NG'],
-                'signalTypePacks' => [\App\Models\SignalTypeDefinition::PACK_NONE],
+                'signalTypePacks' => [SignalTypeDefinition::PACK_NONE],
             ]),
         ]);
 
         config(['services.glm.api_key' => '']);
 
-        $hit = new \App\Services\Intent\DTO\RawSocialHit(
+        $hit = new RawSocialHit(
             platform: 'linkedin',
             sourceLabel: 'LinkedIn Post',
             sourceIcon: 'in',
@@ -191,7 +198,7 @@ class SocialListeningTest extends TestCase
             title: 'Post',
         );
 
-        $enriched = app(\App\Services\Intent\SocialSignalEnricher::class)->enrich($org, $icp, $hit);
+        $enriched = app(SocialSignalEnricher::class)->enrich($org, $icp, $hit);
 
         $this->assertArrayHasKey('score', $enriched);
         $this->assertNotEmpty($enriched['suggested_message']);
@@ -227,11 +234,11 @@ class SocialListeningTest extends TestCase
     public function test_outreach_identity_resolver_falls_back_to_platform_without_domain(): void
     {
         [, $org] = $this->actingAsOrgMember();
-        $user = \App\Models\User::query()->first();
+        $user = User::query()->first();
 
         config(['services.sendgrid.platform_from_email' => 'outreach@thefactory23.com']);
 
-        $resolver = app(\App\Services\Outreach\OutreachIdentityResolver::class);
+        $resolver = app(OutreachIdentityResolver::class);
         $identity = $resolver->resolve($org, $user);
 
         $this->assertSame('platform', $identity->senderType);
@@ -352,7 +359,7 @@ class SocialListeningTest extends TestCase
 
     public function test_filter_no_longer_drops_funding_signal_when_filters_empty_and_score_passes(): void
     {
-        $orchestrator = app(\App\Services\Intent\SocialListeningOrchestrator::class);
+        $orchestrator = app(SocialListeningOrchestrator::class);
         $reflection = new \ReflectionClass($orchestrator);
         $method = $reflection->getMethod('matchesIntentFilters');
         $method->setAccessible(true);
@@ -387,7 +394,7 @@ class SocialListeningTest extends TestCase
                 'customPrompt' => 'I want high-conviction tech investment opportunities outside my home market.',
                 'industries' => [],
                 'territories' => [],
-                'signalTypePacks' => [\App\Models\SignalTypeDefinition::PACK_NONE],
+                'signalTypePacks' => [SignalTypeDefinition::PACK_NONE],
             ]),
         ]);
 
@@ -433,6 +440,8 @@ class SocialListeningTest extends TestCase
                             'benefits' => ['Early visibility into a funded startup', 'Direct founder access'],
                             'personal_recommended_action_title' => 'Request an intro',
                             'personal_recommended_action_detail' => 'Ask your network for a warm intro to Jane this week.',
+                            'evidence_quote' => 'Voltify just closed a Series A funding round led by top investors to expand into new markets.',
+                            'actionability' => 'reply_now',
                         ])],
                     ]],
                 ]),
@@ -491,16 +500,32 @@ class SocialListeningTest extends TestCase
         config([
             'services.serper.api_key' => 'test-serper',
             'services.serper.base_url' => 'https://google.serper.dev',
-            'services.glm.api_key' => '',
+            'services.glm.api_key' => 'test-glm-key',
             'services.social_listening.daily_api_cap' => 500,
         ]);
 
+        $quote = 'Looking for recommendations on FMCG distribution tools in Lagos for a twenty person team';
+
         Http::fake([
+            'api.z.ai/*' => Http::response([
+                'choices' => [[
+                    'message' => ['content' => json_encode([
+                        'signal_type' => 'recommendation',
+                        'buying_intent_score' => 80,
+                        'summary' => $quote,
+                        'evidence_quote' => $quote,
+                        'actionability' => 'reply_now',
+                        'profile_name' => 'Ada',
+                        'company_name' => 'ShopCo',
+                        'entity_type' => 'company',
+                    ])],
+                ]],
+            ], 200),
             'google.serper.dev/*' => Http::response([
                 'organic' => [[
                     'title' => 'Anyone recommend FMCG logistics software in Lagos?',
                     'link' => 'https://linkedin.com/posts/fresh-1',
-                    'snippet' => 'Looking for recommendations on FMCG distribution tools in Lagos.',
+                    'snippet' => $quote . '.',
                     'date' => '2 days ago',
                 ]],
             ], 200),
@@ -514,7 +539,7 @@ class SocialListeningTest extends TestCase
             'config' => array_merge(IcpProfile::defaultConfig(), [
                 'industries' => ['FMCG & Retail'],
                 'territories' => ['Lagos, NG'],
-                'signalTypePacks' => [\App\Models\SignalTypeDefinition::PACK_NONE],
+                'signalTypePacks' => [SignalTypeDefinition::PACK_NONE],
             ]),
         ]);
 
@@ -571,7 +596,7 @@ class SocialListeningTest extends TestCase
             'config' => array_merge(IcpProfile::defaultConfig(), [
                 'industries' => ['FMCG & Retail'],
                 'territories' => ['Lagos, NG'],
-                'signalTypePacks' => [\App\Models\SignalTypeDefinition::PACK_NONE],
+                'signalTypePacks' => [SignalTypeDefinition::PACK_NONE],
             ]),
         ]);
 
@@ -666,7 +691,7 @@ class SocialListeningTest extends TestCase
         $this->withHeaders($this->orgHeaders($org))
             ->getJson('/api/v1/social-listening/settings')
             ->assertOk()
-            ->assertJsonPath('data.freshness_window_days', 180);
+            ->assertJsonPath('data.freshness_window_days', 30);
 
         $this->withHeaders($this->orgHeaders($org))
             ->putJson('/api/v1/social-listening/settings', [
@@ -736,7 +761,7 @@ class SocialListeningTest extends TestCase
             'config' => array_merge(IcpProfile::defaultConfig(), [
                 'industries' => ['FMCG & Retail'],
                 'territories' => ['Lagos, NG'],
-                'signalTypePacks' => [\App\Models\SignalTypeDefinition::PACK_NONE],
+                'signalTypePacks' => [SignalTypeDefinition::PACK_NONE],
             ]),
         ]);
 
@@ -796,8 +821,8 @@ class SocialListeningTest extends TestCase
 
         $this->assertSame('completed', $run->status);
         $this->assertSame(0, $run->signals_created);
-        $this->assertSame(1, $run->result_summary['rejected']['icpMismatch']);
-        $this->assertSame(1, $run->result_summary['rejected']['total']);
+        $this->assertSame(0, $run->result_summary['rejected']['icpMismatch']);
+        $this->assertGreaterThanOrEqual(1, $run->result_summary['rejected']['notActionable']);
         $this->assertSame(0, SocialSignal::query()->where('organization_id', $org->id)->count());
     }
 
@@ -821,7 +846,7 @@ class SocialListeningTest extends TestCase
             'config' => array_merge(IcpProfile::defaultConfig(), [
                 'industries' => ['FMCG & Retail'],
                 'territories' => ['Lagos, NG'],
-                'signalTypePacks' => [\App\Models\SignalTypeDefinition::PACK_NONE],
+                'signalTypePacks' => [SignalTypeDefinition::PACK_NONE],
             ]),
         ]);
 
@@ -845,12 +870,9 @@ class SocialListeningTest extends TestCase
         $run = $orchestrator->run($org, $icp, $settings, $user);
 
         $this->assertSame('completed', $run->status);
-        $this->assertGreaterThanOrEqual(1, $run->signals_created);
-        $this->assertSame(0, $run->result_summary['rejected']['missingSourceDate']);
-
-        $signal = SocialSignal::query()->where('organization_id', $org->id)->firstOrFail();
-        $this->assertNotNull($signal->posted_at);
-        $this->assertSame('inferred', $signal->meta['date_confidence'] ?? null);
+        $this->assertSame(0, $run->signals_created);
+        $this->assertGreaterThanOrEqual(1, $run->result_summary['rejected']['missingSourceDate']);
+        $this->assertSame(0, SocialSignal::query()->where('organization_id', $org->id)->count());
     }
 
     public function test_run_discards_a_signal_older_than_the_freshness_window(): void
@@ -868,7 +890,7 @@ class SocialListeningTest extends TestCase
             'config' => array_merge(IcpProfile::defaultConfig(), [
                 'industries' => [],
                 'territories' => [],
-                'signalTypePacks' => [\App\Models\SignalTypeDefinition::PACK_NONE],
+                'signalTypePacks' => [SignalTypeDefinition::PACK_NONE],
             ]),
         ]);
 
@@ -913,7 +935,7 @@ class SocialListeningTest extends TestCase
                 'territories' => ['QqwertTerritoryTerm'],
                 'decisionMakers' => ['UniqueDecisionMakerTitle'],
                 'customPrompt' => '',
-                'signalTypePacks' => [\App\Models\SignalTypeDefinition::PACK_NONE],
+                'signalTypePacks' => [SignalTypeDefinition::PACK_NONE],
             ]),
         ]);
 
@@ -962,7 +984,7 @@ class SocialListeningTest extends TestCase
             'config' => array_merge(IcpProfile::defaultConfig(), [
                 'industries' => ['FMCG & Retail'],
                 'territories' => ['Lagos, NG'],
-                'signalTypePacks' => [\App\Models\SignalTypeDefinition::PACK_NONE],
+                'signalTypePacks' => [SignalTypeDefinition::PACK_NONE],
             ]),
         ]);
 
@@ -971,25 +993,28 @@ class SocialListeningTest extends TestCase
             ['enabled_sources' => ['linkedin_public'], 'min_score' => 30, 'intent_filters' => [], 'icp_filter_enabled' => false],
         ));
 
+        $quote = 'Anyone recommend a distribution tool for a twenty person team that is not in our current stack';
+
         Http::fake([
-            'api.z.ai/*' => Http::sequence()
-                ->push(['choices' => [['message' => ['content' => json_encode(['queries' => ['fintech startup raises Series A']])]]]])
-                ->push([
-                    'choices' => [[
-                        'message' => ['content' => json_encode([
-                            'company_name' => 'Voltify',
-                            'location_text' => 'Nairobi, KE', // mismatched territory
-                            'entity_type' => 'company',
-                            'industry' => 'Fintech', // mismatched industry
-                            'signal_type' => 'funding_event',
-                            'summary' => 'Voltify closed a Series A round.',
-                        ])],
-                    ]],
-                ]),
+            'api.z.ai/*' => Http::response([
+                'choices' => [[
+                    'message' => ['content' => json_encode([
+                        'company_name' => 'ShopCo',
+                        'location_text' => 'Nairobi, KE',
+                        'entity_type' => 'company',
+                        'industry' => 'Fintech',
+                        'signal_type' => 'recommendation',
+                        'buying_intent_score' => 80,
+                        'summary' => $quote,
+                        'evidence_quote' => $quote,
+                        'actionability' => 'reply_now',
+                    ])],
+                ]],
+            ], 200),
             'google.serper.dev/*' => Http::response([
                 'organic' => [[
-                    'title' => 'Voltify raises $8M Series A',
-                    'snippet' => 'Voltify just closed a Series A funding round.',
+                    'title' => 'Looking for a distribution tool',
+                    'snippet' => $quote . '.',
                     'link' => 'https://linkedin.com/posts/kill-switch-1',
                     'date' => '1 day ago',
                 ]],
@@ -1014,7 +1039,7 @@ class SocialListeningTest extends TestCase
             'services.social_listening.max_signal_type_queries_per_run' => 1,
         ]);
 
-        $this->seed(\Database\Seeders\SignalTypeDefinitionSeeder::class);
+        $this->seed(SignalTypeDefinitionSeeder::class);
 
         [$user, $org] = $this->actingAsOrgMember();
         $icp = IcpProfile::query()->create([
@@ -1047,15 +1072,16 @@ class SocialListeningTest extends TestCase
         $run = app(SocialListeningOrchestrator::class)->run($org, $icp, $settings, $user);
 
         $this->assertSame('completed', $run->status);
-        $signal = SocialSignal::query()->where('organization_id', $org->id)->first();
-        $this->assertNotNull($signal);
-        $this->assertSame('new_market_entry', $signal->signal_type_key);
+        $this->assertNull(SocialSignal::query()->where('organization_id', $org->id)->first());
+        Http::assertSent(function ($request) {
+            return str_contains((string) ($request->data()['q'] ?? ''), 'New Market Entry');
+        });
     }
 
     public function test_none_pack_disables_discrete_signal_type_queries(): void
     {
         config(['services.glm.api_key' => '', 'services.serper.api_key' => 'test-serper-key']);
-        $this->seed(\Database\Seeders\SignalTypeDefinitionSeeder::class);
+        $this->seed(SignalTypeDefinitionSeeder::class);
 
         [$user, $org] = $this->actingAsOrgMember();
         $icp = IcpProfile::query()->create([
@@ -1063,7 +1089,7 @@ class SocialListeningTest extends TestCase
             'name' => 'Opt out ICP',
             'is_active' => true,
             'config' => array_merge(IcpProfile::defaultConfig(), [
-                'signalTypePacks' => [\App\Models\SignalTypeDefinition::PACK_NONE],
+                'signalTypePacks' => [SignalTypeDefinition::PACK_NONE],
             ]),
         ]);
 
@@ -1102,19 +1128,18 @@ class SocialListeningTest extends TestCase
         });
 
         $signal = SocialSignal::query()->where('organization_id', $org->id)->first();
-        $this->assertNotNull($signal);
-        $this->assertNull($signal->signal_type_key);
+        $this->assertNull($signal);
     }
 
     public function test_signal_type_queries_tag_signals_when_an_icp_opts_into_a_pack(): void
     {
         config([
-            'services.glm.api_key' => '',
+            'services.glm.api_key' => 'test-glm-key',
             'services.serper.api_key' => 'test-serper-key',
             'services.social_listening.max_signal_type_queries_per_run' => 1,
         ]);
 
-        $this->seed(\Database\Seeders\SignalTypeDefinitionSeeder::class);
+        $this->seed(SignalTypeDefinitionSeeder::class);
 
         [$user, $org] = $this->actingAsOrgMember();
         $icp = IcpProfile::query()->create([
@@ -1124,7 +1149,7 @@ class SocialListeningTest extends TestCase
             'config' => array_merge(IcpProfile::defaultConfig(), [
                 'industries' => [],
                 'territories' => [],
-                'signalTypePacks' => [\App\Models\SignalTypeDefinition::PACK_DEFAULT],
+                'signalTypePacks' => [SignalTypeDefinition::PACK_DEFAULT],
             ]),
         ]);
 
@@ -1133,17 +1158,36 @@ class SocialListeningTest extends TestCase
             ['enabled_sources' => ['linkedin_public'], 'min_score' => 30, 'intent_filters' => []],
         ));
 
+        $quote = 'Anyone recommend a distributor we can talk to this month for a team of twenty people';
+
         Http::fake([
-            'google.serper.dev/*' => function ($request) {
+            'api.z.ai/*' => function ($request) use ($quote) {
+                $body = $request->body();
+                if (str_contains($body, 'Decide whether a post is a genuine match')) {
+                    return Http::response(['choices' => [['message' => ['content' => json_encode([
+                        'matched' => true,
+                        'source_url' => 'https://linkedin.com/posts/market-entry-1',
+                        'source_date' => now()->subDay()->toDateString(),
+                    ])]]]], 200);
+                }
+
+                return Http::response(['choices' => [['message' => ['content' => json_encode([
+                    'signal_type' => 'recommendation',
+                    'buying_intent_score' => 80,
+                    'summary' => $quote,
+                    'evidence_quote' => $quote,
+                    'actionability' => 'reply_now',
+                    'company_name' => 'Company X',
+                ])]]]], 200);
+            },
+            'google.serper.dev/*' => function ($request) use ($quote) {
                 $body = $request->data();
                 $isSignalTypeQuery = str_contains((string) ($body['q'] ?? ''), 'New Market Entry');
 
                 return Http::response([
                     'organic' => [[
                         'title' => $isSignalTypeQuery ? 'Company X opens Kenyan subsidiary' : 'Looking for recommendations',
-                        'snippet' => $isSignalTypeQuery
-                            ? 'Company X registers a new Kenyan subsidiary to begin local distribution.'
-                            : 'Looking for FMCG distribution software recommendations.',
+                        'snippet' => $quote . '.',
                         'link' => $isSignalTypeQuery
                             ? 'https://linkedin.com/posts/market-entry-1'
                             : 'https://linkedin.com/posts/generic-2',
@@ -1182,7 +1226,7 @@ class SocialListeningTest extends TestCase
             'services.social_listening.max_signal_type_queries_per_run' => 4,
         ]);
 
-        $this->seed(\Database\Seeders\SignalTypeDefinitionSeeder::class);
+        $this->seed(SignalTypeDefinitionSeeder::class);
 
         [$user, $org] = $this->actingAsOrgMember();
         $icp = IcpProfile::query()->create([
@@ -1192,7 +1236,8 @@ class SocialListeningTest extends TestCase
             'config' => array_merge(IcpProfile::defaultConfig(), [
                 'industries' => [],
                 'territories' => [],
-                'signalTypePacks' => [\App\Models\SignalTypeDefinition::PACK_DEFAULT],
+                'customPrompt' => 'Track leadership hiring and appointments in our target market.',
+                'signalTypePacks' => [SignalTypeDefinition::PACK_DEFAULT],
             ]),
         ]);
 
@@ -1205,7 +1250,10 @@ class SocialListeningTest extends TestCase
             'api.z.ai/*' => function ($request) {
                 $body = $request->body();
 
-                // First GLM call is buildQueries(); subsequent calls are per-hit enrich().
+                if (str_contains($body, 'Compress a user')) {
+                    return Http::response(['choices' => [['message' => ['content' => json_encode(['queries' => ['fallback query']])]]]], 200);
+                }
+
                 if (str_contains($body, 'Generate 3-5 short Google search queries')) {
                     return Http::response(['choices' => [['message' => ['content' => json_encode(['queries' => ['fallback query']])]]]], 200);
                 }
@@ -1231,7 +1279,9 @@ class SocialListeningTest extends TestCase
                             'location_text' => 'Kenya',
                             'signal_type' => 'hiring_expansion',
                             'named_people' => ['Jane Doe', 'John Smith'],
-                            'summary' => 'Jane Doe appointed Country Manager for Kenya, replacing John Smith.',
+                            'summary' => 'Jane Doe was appointed Country Manager for Kenya, replacing John Smith.',
+                            'evidence_quote' => 'Jane Doe was appointed Country Manager for Kenya, replacing John Smith, and the team announced it this week',
+                            'actionability' => 'reply_now',
                         ])],
                     ]],
                 ], 200);
@@ -1247,7 +1297,7 @@ class SocialListeningTest extends TestCase
                 return Http::response([
                     'organic' => [[
                         'title' => 'Jane Doe appointed Country Manager for Kenya',
-                        'snippet' => 'Jane Doe appointed Country Manager for Kenya, replacing John Smith.',
+                        'snippet' => 'Jane Doe was appointed Country Manager for Kenya, replacing John Smith, and the team announced it this week.',
                         'link' => 'https://linkedin.com/posts/leadership-hire-1',
                         'date' => '1 day ago',
                     ]],
@@ -1276,7 +1326,7 @@ class SocialListeningTest extends TestCase
             'services.serper.api_key' => 'test-serper-key',
             'services.social_listening.max_signal_type_queries_per_run' => 1,
         ]);
-        $this->seed(\Database\Seeders\SignalTypeDefinitionSeeder::class);
+        $this->seed(SignalTypeDefinitionSeeder::class);
 
         [$user, $org] = $this->actingAsOrgMember();
         $icp = IcpProfile::query()->create([
@@ -1285,7 +1335,7 @@ class SocialListeningTest extends TestCase
             'is_active' => true,
             'config' => array_merge(IcpProfile::defaultConfig(), [
                 'customPrompt' => 'mobile fintech partnerships',
-                'signalTypePacks' => [\App\Models\SignalTypeDefinition::PACK_DEFAULT],
+                'signalTypePacks' => [SignalTypeDefinition::PACK_DEFAULT],
                 'industries' => [],
                 'territories' => [],
             ]),
@@ -1320,7 +1370,7 @@ class SocialListeningTest extends TestCase
             'services.serper.api_key' => 'test-serper-key',
             'services.social_listening.max_signal_type_queries_per_run' => 1,
         ]);
-        $this->seed(\Database\Seeders\SignalTypeDefinitionSeeder::class);
+        $this->seed(SignalTypeDefinitionSeeder::class);
 
         [$user, $org] = $this->actingAsOrgMember();
         $icp = IcpProfile::query()->create([
@@ -1331,7 +1381,7 @@ class SocialListeningTest extends TestCase
                 'customPrompt' => 'fintech partnerships',
                 'industries' => [],
                 'territories' => [],
-                'signalTypePacks' => [\App\Models\SignalTypeDefinition::PACK_DEFAULT],
+                'signalTypePacks' => [SignalTypeDefinition::PACK_DEFAULT],
             ]),
         ]);
         $settings = SocialListeningSetting::query()->create(array_merge(
@@ -1360,12 +1410,14 @@ class SocialListeningTest extends TestCase
                     'intent_label' => 'Partnership',
                     'location_text' => '',
                     'industry' => '',
+                    'evidence_quote' => 'looking for a fintech partner this week and wants introductions from operators',
+                    'actionability' => 'reply_now',
                 ])]]]], 200);
             },
             'google.serper.dev/*' => Http::response([
                 'organic' => [[
                     'title' => 'Acme seeking fintech partner',
-                    'snippet' => 'Acme announced it is looking for a fintech partner this week.',
+                    'snippet' => 'Acme announced it is looking for a fintech partner this week and wants introductions from operators who already sell into that market.',
                     'link' => 'https://linkedin.com/posts/opportunity-1',
                     'date' => '1 day ago',
                 ]],
@@ -1396,7 +1448,7 @@ class SocialListeningTest extends TestCase
             'config' => array_merge(IcpProfile::defaultConfig(), [
                 'industries' => ['FMCG & Retail'],
                 'territories' => ['Lagos, NG'],
-                'signalTypePacks' => [\App\Models\SignalTypeDefinition::PACK_NONE],
+                'signalTypePacks' => [SignalTypeDefinition::PACK_NONE],
             ]),
         ]);
         $settings = SocialListeningSetting::query()->create(array_merge(
@@ -1404,21 +1456,27 @@ class SocialListeningTest extends TestCase
             ['enabled_sources' => ['linkedin_public'], 'min_score' => 30, 'intent_filters' => []],
         ));
 
+        $quote = 'Looking for recommendations on a distribution tool for a twenty person team in our network';
+
         Http::fake([
-            'api.z.ai/*' => Http::sequence()
-                ->push(['choices' => [['message' => ['content' => json_encode(['queries' => ['fmcg lagos']])]]]])
-                ->push(['choices' => [['message' => ['content' => json_encode([
-                    'company_name' => 'ShopCo',
-                    'industry' => '',
-                    'location_text' => '',
-                    'signal_type' => 'partnership_opportunity',
-                    'buying_intent_score' => 77,
-                    'summary' => 'Looking for a distribution partner.',
-                ])]]]]),
+            'api.z.ai/*' => Http::response([
+                'choices' => [[
+                    'message' => ['content' => json_encode([
+                        'company_name' => 'ShopCo',
+                        'industry' => '',
+                        'location_text' => '',
+                        'signal_type' => 'recommendation',
+                        'buying_intent_score' => 77,
+                        'summary' => $quote,
+                        'evidence_quote' => $quote,
+                        'actionability' => 'reply_now',
+                    ])],
+                ]],
+            ], 200),
             'google.serper.dev/*' => Http::response([
                 'organic' => [[
-                    'title' => 'Looking for a distribution partner',
-                    'snippet' => 'We are expanding and looking for a partner.',
+                    'title' => 'Looking for a distribution tool',
+                    'snippet' => $quote . '.',
                     'link' => 'https://linkedin.com/posts/no-industry',
                     'date' => '1 day ago',
                 ]],
@@ -1450,7 +1508,7 @@ class SocialListeningTest extends TestCase
             'config' => array_merge(IcpProfile::defaultConfig(), [
                 'industries' => [],
                 'territories' => [],
-                'signalTypePacks' => [\App\Models\SignalTypeDefinition::PACK_NONE],
+                'signalTypePacks' => [SignalTypeDefinition::PACK_NONE],
             ]),
         ]);
         $settings = SocialListeningSetting::query()->create(array_merge(
@@ -1472,7 +1530,8 @@ class SocialListeningTest extends TestCase
         $run = app(SocialListeningOrchestrator::class)->run($org, $icp, $settings, $user);
 
         $this->assertSame('completed', $run->status);
-        $this->assertGreaterThanOrEqual(1, $run->signals_created);
+        $this->assertSame(0, $run->signals_created);
+        $this->assertTrue($run->result_summary['model_unavailable']);
         $sources = collect($run->result_summary['sources'] ?? [])->keyBy('key');
         $this->assertSame('missing_key', $sources['youtube']['status'] ?? null);
         $this->assertSame('missing_key', $sources['reddit_native']['status'] ?? null);
@@ -1493,7 +1552,7 @@ class SocialListeningTest extends TestCase
             'name' => 'ICP',
             'is_active' => true,
             'config' => array_merge(IcpProfile::defaultConfig(), [
-                'signalTypePacks' => [\App\Models\SignalTypeDefinition::PACK_NONE],
+                'signalTypePacks' => [SignalTypeDefinition::PACK_NONE],
             ]),
         ]);
         $settings = SocialListeningSetting::query()->create(array_merge(
@@ -1501,7 +1560,7 @@ class SocialListeningTest extends TestCase
             ['enabled_sources' => ['linkedin_public'], 'min_score' => 30],
         ));
 
-        \App\Models\ApiUsage::query()->create([
+        ApiUsage::query()->create([
             'organization_id' => $org->id,
             'provider' => 'serper',
             'endpoint' => 'social_linkedin_public',

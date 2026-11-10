@@ -3,10 +3,11 @@
 namespace App\Services\SignalDetection;
 
 use App\Services\Discovery\DTO\IcpBrief;
+use App\Services\Intent\DTO\ListeningProfile;
 
 /**
- * Short, benefit-oriented queries from the active ICP. These always run,
- * even when a signal-type pack is selected.
+ * A few buying-intent queries from the listening profile. Funding, hiring,
+ * and partnership language are added only when the profile asks for them.
  */
 class IcpOpportunityQueryBuilder
 {
@@ -15,60 +16,49 @@ class IcpOpportunityQueryBuilder
      */
     public function build(IcpBrief $brief): array
     {
-        $interest = $this->interest($brief);
-        $place = $this->place($brief);
-        $angles = [
-            'partnership OR launched OR funding',
-            'hiring OR expanding OR "looking for"',
-            'RFP OR outage OR complaint',
-        ];
+        return $this->fromProfile(ListeningProfile::fromBrief($brief));
+    }
 
+    /**
+     * @return list<string>
+     */
+    public function fromProfile(ListeningProfile $profile): array
+    {
+        $offer = $profile->offer;
+        $place = $this->place($profile->territories);
         $queries = [];
-        foreach ($angles as $angle) {
-            $queries[] = $this->clip(trim(implode(' ', array_filter([$interest, $place, $angle, 'recent']))));
-        }
 
-        foreach (array_slice($brief->searchKeywords, 0, 2) as $keyword) {
-            $keyword = $this->clip(trim((string) $keyword), 8);
-            if ($keyword === '') {
-                continue;
+        if ($profile->mode === 'invest') {
+            $queries[] = $this->clip(trim("raising OR \"seed round\" OR \"series A\" {$offer} {$place}"));
+        } elseif ($profile->mode === 'partner') {
+            $queries[] = $this->clip(trim("\"looking for\" partner OR partnership {$offer} {$place}"));
+        } else {
+            $queries[] = $this->clip(trim("\"recommend\" OR \"anyone use\" OR \"what do you use\" {$offer} {$place}"));
+            $queries[] = $this->clip(trim("\"looking for\" OR \"alternative to\" {$offer} -job -hiring -vacancy {$place}"));
+            $competitor = $profile->competitors[0] ?? '';
+            if ($competitor !== '') {
+                $queries[] = $this->clip(trim("switching OR \"frustrated with\" {$competitor} {$offer}"));
             }
-            $queries[] = $this->clip(trim(implode(' ', array_filter([$keyword, $place, 'recent']))));
         }
 
-        $queries = array_values(array_unique(array_filter($queries, static fn (string $q) => $q !== '')));
+        if ($profile->includeHiring) {
+            $queries[] = $this->clip(trim("appointed OR hiring {$offer} {$place}"));
+        }
+
+        $queries = array_values(array_unique(array_filter($queries, static fn (string $query) => $query !== '')));
 
         return array_slice($queries, 0, 4);
     }
 
-    private function interest(IcpBrief $brief): string
+    /**
+     * @param  list<string>  $territories
+     */
+    private function place(array $territories): string
     {
-        $raw = trim($brief->customPrompt) !== ''
-            ? trim($brief->customPrompt)
-            : trim($brief->description);
-
-        if ($raw === '') {
-            $raw = trim((string) ($brief->industries[0] ?? ''));
-        }
-
-        if ($raw === '') {
-            return 'business opportunity';
-        }
-
-        return $this->clip($raw, 10);
-    }
-
-    private function place(IcpBrief $brief): string
-    {
-        $places = [];
-        foreach (array_slice($brief->territories, 0, 3) as $territory) {
-            $head = trim(explode(',', (string) $territory)[0] ?? '');
-            if ($head !== '') {
-                $places[] = $head;
-            }
-        }
-
-        $places = array_values(array_unique($places));
+        $places = array_values(array_unique(array_filter(array_map(
+            static fn (string $territory) => trim($territory),
+            $territories,
+        ))));
         if ($places === []) {
             return '';
         }
@@ -76,7 +66,7 @@ class IcpOpportunityQueryBuilder
         return count($places) === 1 ? $places[0] : '('.implode(' OR ', $places).')';
     }
 
-    private function clip(string $text, int $words = 12): string
+    private function clip(string $text, int $words = 18): string
     {
         $text = preg_replace('/\s+/u', ' ', trim($text)) ?? trim($text);
         $parts = preg_split('/\s+/u', $text) ?: [];

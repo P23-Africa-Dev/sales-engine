@@ -108,6 +108,7 @@ class XNativeSocialAdapter implements SocialSourceInterface
                     authorProfileUrl: null,
                     postedAt: $postedAt,
                     dateRaw: $created !== '' ? $created : null,
+                    fullText: true,
                 );
             })->filter(fn (RawSocialHit $hit) => $hit->postText !== '' && $hit->postUrl !== null)->values();
 

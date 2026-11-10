@@ -135,6 +135,7 @@ class RedditNativeSocialAdapter implements SocialSourceInterface
                     authorProfileUrl: $author !== '' ? 'https://www.reddit.com/user/'.$author : null,
                     postedAt: $postedAt,
                     dateRaw: $postedAt?->toIso8601String(),
+                    fullText: true,
                 );
             })->filter(fn (?RawSocialHit $hit) => $hit !== null && $hit->postText !== '' && $hit->postUrl !== null)->values();
 

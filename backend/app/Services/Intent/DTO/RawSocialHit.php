@@ -18,5 +18,6 @@ readonly class RawSocialHit
         public ?string $authorProfileUrl = null,
         public ?CarbonInterface $postedAt = null,
         public ?string $dateRaw = null,
+        public bool $fullText = false,
     ) {}
 }

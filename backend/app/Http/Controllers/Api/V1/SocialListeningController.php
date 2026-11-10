@@ -215,7 +215,7 @@ class SocialListeningController extends Controller
                 'added_to_crm_change_percent' => $this->signedPercent($crmThis, $crmPrior),
                 'last_run_at' => $settings->last_run_at?->toIso8601String(),
                 'cadence_days' => $settings->cadence_days,
-                'freshness_window_days' => (int) ($settings->freshness_window_days ?? 180),
+                'freshness_window_days' => (int) ($settings->freshness_window_days ?? 30),
                 'source_health' => SocialSourceHealth::describe(
                     $settings,
                     is_array($latestRun?->result_summary) ? ($latestRun->result_summary['sources'] ?? null) : null,
