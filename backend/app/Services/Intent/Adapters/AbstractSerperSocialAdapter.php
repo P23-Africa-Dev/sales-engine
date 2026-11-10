@@ -58,8 +58,14 @@ abstract class AbstractSerperSocialAdapter implements SocialSourceInterface
         string $tbs = 'qdr:w',
         array $context = [],
     ): Collection {
-        $siteClause = implode(' OR ', array_map(fn(string $s) => "site:{$s}", $this->siteFilters()));
-        $fullQuery = trim("({$siteClause}) {$query}");
+        // A planned query may already pin a narrower site (e.g. one subreddit);
+        // adding the adapter's broad site clause on top would undo that.
+        if (preg_match('/(^|\s)site:\S+/i', $query)) {
+            $fullQuery = trim($query);
+        } else {
+            $siteClause = implode(' OR ', array_map(fn(string $s) => "site:{$s}", $this->siteFilters()));
+            $fullQuery = trim("({$siteClause}) {$query}");
+        }
 
         $baseUrl = rtrim((string) config('services.serper.base_url'), '/');
         $tbs = trim($tbs) !== '' ? $tbs : 'qdr:w';

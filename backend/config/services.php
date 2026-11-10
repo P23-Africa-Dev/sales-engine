@@ -150,6 +150,13 @@ return [
         // switch (Stage 1 hard filter). Per-org/per-ICP override lives on the setting
         // row itself; this only controls what NEW settings rows default to.
         'icp_filter_enabled_default' => (bool) env('SOCIAL_LISTENING_ICP_FILTER_ENABLED_DEFAULT', true),
+        // Per-run budgets. Search calls are spread across query families and
+        // sources; the survivor target stops searching early once enough
+        // plausible posts are in hand; the enrich cap bounds model calls.
+        'max_search_calls_per_run' => (int) env('SOCIAL_LISTENING_MAX_SEARCH_CALLS', 30),
+        'survivor_target' => (int) env('SOCIAL_LISTENING_SURVIVOR_TARGET', 45),
+        'max_enrich_per_run' => (int) env('SOCIAL_LISTENING_MAX_ENRICH', 25),
+        'max_reddit_hydrations_per_run' => (int) env('SOCIAL_LISTENING_MAX_REDDIT_HYDRATIONS', 20),
     ],
 
     'chat' => [

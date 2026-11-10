@@ -5,11 +5,28 @@ namespace App\Services\Intent;
 use App\Services\Intent\DTO\ListeningProfile;
 
 /**
- * A post is saved only when the model quotes a sentence that is actually in
- * the text and that sentence is a concrete opening for this listening profile.
+ * Final keep/drop decision after the model has read a post. A post is saved
+ * only when:
+ *   - the model judged it a concrete opening this week (reply_now),
+ *   - the author is a would-be buyer/partner/founder, not a vendor, recruiter
+ *     or news outlet (unless the profile tracks deals, where news counts),
+ *   - the opportunity type fits the profile's mode, and
+ *   - the model's evidence quote is really in the post and reads as an ask,
+ *     a complaint, or a stated need.
+ *
+ * Quotes are matched after normalising case, punctuation and whitespace, with
+ * a word-overlap fallback, because models routinely drop a comma or swap a
+ * quote mark — an exact byte match was rejecting real openings.
  */
 class OpportunityGate
 {
+    private const MIN_QUOTE_CHARS = 25;
+
+    private const MIN_TOKEN_OVERLAP = 0.85;
+
+    /** Author roles that are never a buyer-side opening. */
+    private const NON_BUYER_ROLES = ['vendor', 'self_promotion', 'recruiter', 'spam', 'bot'];
+
     public function __construct(
         private readonly OpportunityPrefilter $prefilter = new OpportunityPrefilter,
     ) {}
@@ -25,6 +42,14 @@ class OpportunityGate
 
         if (($enriched['actionability'] ?? '') !== 'reply_now') {
             return 'not_an_opportunity';
+        }
+
+        $role = mb_strtolower(trim((string) ($enriched['author_role'] ?? '')));
+        if (in_array($role, self::NON_BUYER_ROLES, true)) {
+            return 'not_a_buyer';
+        }
+        if (in_array($role, ['news', 'media'], true) && $profile->mode === 'sell') {
+            return 'not_a_buyer';
         }
 
         $type = mb_strtolower(trim((string) ($enriched['signal_type'] ?? 'other')));
@@ -43,6 +68,38 @@ class OpportunityGate
         return null;
     }
 
+    /**
+     * True when the quote appears in the text, tolerating punctuation,
+     * casing, ellipses, and a few dropped words.
+     */
+    public function quoteIsInText(string $quote, string $text): bool
+    {
+        $needle = $this->normalize($quote);
+        $haystack = $this->normalize($text);
+        if (mb_strlen($needle) < self::MIN_QUOTE_CHARS || $haystack === '') {
+            return false;
+        }
+
+        if (str_contains($haystack, $needle)) {
+            return true;
+        }
+
+        $quoteTokens = array_values(array_filter(explode(' ', $needle), static fn ($t) => mb_strlen($t) >= 3));
+        if (count($quoteTokens) < 5) {
+            return false;
+        }
+
+        $textTokens = array_flip(explode(' ', $haystack));
+        $present = 0;
+        foreach ($quoteTokens as $token) {
+            if (isset($textTokens[$token])) {
+                $present++;
+            }
+        }
+
+        return ($present / count($quoteTokens)) >= self::MIN_TOKEN_OVERLAP;
+    }
+
     private function typeAllowed(string $type, ListeningProfile $profile): bool
     {
         if ($type === 'hiring_expansion') {
@@ -58,11 +115,11 @@ class OpportunityGate
 
     private function quoteProvesAsk(string $quote, string $text, ListeningProfile $profile, string $type): bool
     {
-        $quote = $this->normalize($quote);
-        $haystack = $this->normalize($text);
-        if (mb_strlen($quote) < 40 || $haystack === '' || ! str_contains($haystack, $quote)) {
+        if (! $this->quoteIsInText($quote, $text)) {
             return false;
         }
+
+        $quote = mb_strtolower(trim($quote));
 
         if (preg_match(OpportunityPrefilter::LISTICLE_BLOCK, $quote)) {
             return false;
@@ -72,7 +129,7 @@ class OpportunityGate
             return true;
         }
 
-        if (preg_match('/\b(i|we|our|anyone)\b/u', $quote)) {
+        if (preg_match('/\b(i|i\'m|i\'ve|we|we\'re|we\'ve|our|my|us|anyone)\b/u', $quote)) {
             return true;
         }
 
@@ -86,8 +143,9 @@ class OpportunityGate
     private function normalize(string $value): string
     {
         $value = mb_strtolower($value);
-        $value = preg_replace('/\s+/u', ' ', $value) ?? $value;
+        $value = str_replace(["\u{2019}", "\u{2018}"], "'", $value);
+        $value = preg_replace('/[^\p{L}\p{N}\']+/u', ' ', $value) ?? $value;
 
-        return trim($value);
+        return trim(preg_replace('/\s+/u', ' ', $value) ?? $value);
     }
 }

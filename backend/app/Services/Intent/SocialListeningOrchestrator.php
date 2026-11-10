@@ -25,34 +25,38 @@ use App\Services\SignalDetection\SignalGroundingGate;
 use App\Services\SignalDetection\SignalQueryBuilder;
 use App\Services\SignalDetection\SignalTypeRegistry;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
 class SocialListeningOrchestrator
 {
-    /**
-     * Social Listening extraction only reliably produces industry/location.
-     * Size/revenue are evaluated per-candidate when the extractor actually
-     * populated them — never fail-closed on fields the pipeline cannot fill.
+    /*
+     * Run budgets. Each is overridable via config('services.social_listening.*')
+     * so cost/yield can be tuned per environment without a deploy.
      */
-    private const MAX_SEARCH_CALLS = 12;
+    private const DEFAULT_MAX_SEARCH_CALLS = 30;
 
-    private const SURVIVOR_TARGET = 20;
+    private const DEFAULT_SURVIVOR_TARGET = 45;
+
+    private const DEFAULT_ENRICH_CAP = 25;
+
+    private const DEFAULT_HYDRATE_CAP = 20;
+
+    private const RESULTS_PER_QUERY = 10;
 
     private const LOW_YIELD_FLOOR = 8;
 
-    private const ENRICH_CAP = 12;
-
-    /** @var list<string> */
+    /** Native APIs return full text and exact dates, so they are asked first. */
     private const FULL_TEXT_SOURCES = ['reddit_native', 'x_native'];
 
-    /** @var list<string> */
-    private const PRIMARY_SOURCES = ['reddit', 'x_mentions'];
+    /** Search-engine sources, in rough order of buyer-intent yield. */
+    private const PRIMARY_SOURCES = ['reddit', 'x_mentions', 'linkedin_public'];
 
-    /** @var list<string> */
-    private const LOW_YIELD_SOURCES = ['linkedin_public', 'meta_pages'];
+    private const LOW_YIELD_SOURCES = ['meta_pages'];
 
-    /** @var list<string> */
     private const LAST_RESORT_SOURCES = ['youtube', 'meta_graph_pages'];
+
+    private const ROTATION_TTL_DAYS = 30;
 
     private bool $budgetExhausted = false;
 
@@ -61,6 +65,9 @@ class SocialListeningOrchestrator
     private int $usageAtStart = 0;
 
     private int $dailyCap = 0;
+
+    /** @var list<array{source: string, family: string, query: string, hits: int}> */
+    private array $queryLog = [];
 
     /** @param  list<SocialSourceInterface>  $sources */
     public function __construct(
@@ -91,6 +98,7 @@ class SocialListeningOrchestrator
         $health->reset();
         $this->budgetExhausted = false;
         $this->apiCallsThisRun = 0;
+        $this->queryLog = [];
         $this->dailyCap = (int) config('services.social_listening.daily_api_cap', 200);
         $this->usageAtStart = 0;
         if ($this->dailyCap > 0) {
@@ -147,6 +155,7 @@ class SocialListeningOrchestrator
 
             $taggedHits = $this->collectHits(
                 $organization,
+                $icp,
                 $brief,
                 $profile,
                 $enabled,
@@ -166,16 +175,28 @@ class SocialListeningOrchestrator
             $notActionable = 0;
             $modelUnavailable = ! $this->glm->isConfigured();
             $groundingRejected = ['missing_source_url' => 0, 'missing_source_date' => 0, 'stale' => 0];
+            /** @var array<string, int> $rejectedDetail */
+            $rejectedDetail = [];
             $ready = [];
-            $hydrations = 0;
 
+            // Drop posts already surfaced for this ICP before any hydration or
+            // model call is spent on them — one query, not one per hit.
+            $seenHashes = $this->knownHashes($organization->id, $icp->id, $taggedHits);
+            $candidates = [];
             foreach ($taggedHits as $entry) {
+                if (isset($seenHashes[$this->hashFor($entry['hit'])])) {
+                    $duplicate++;
+
+                    continue;
+                }
+                $candidates[] = $entry;
+            }
+
+            $candidates = $this->hydrateReddit($candidates);
+
+            foreach ($candidates as $entry) {
                 /** @var RawSocialHit $hit */
                 $hit = $entry['hit'];
-                if ($hydrations < 8 && preg_match('#reddit\.com#i', (string) $hit->postUrl)) {
-                    $hit = $this->redditHydrator->hydrate($hit);
-                    $hydrations++;
-                }
 
                 $postedAt = $hit->postedAt;
                 if ($postedAt === null && $hit->postUrl) {
@@ -195,8 +216,10 @@ class SocialListeningOrchestrator
                     continue;
                 }
 
-                if ($this->prefilter->rejection($hit, $profile) !== null) {
+                $reason = $this->prefilter->rejection($hit, $profile);
+                if ($reason !== null) {
                     $notActionable++;
+                    $rejectedDetail[$reason] = ($rejectedDetail[$reason] ?? 0) + 1;
 
                     continue;
                 }
@@ -204,16 +227,26 @@ class SocialListeningOrchestrator
                 $ready[] = [
                     'hit' => $hit,
                     'signalTypeKey' => $entry['signalTypeKey'],
+                    'family' => $entry['family'] ?? null,
                     'postedAt' => $postedAt,
                 ];
             }
 
             $ready = $this->rankReady($ready, $profile);
-            if (count($ready) > self::ENRICH_CAP) {
-                $notActionable += count($ready) - self::ENRICH_CAP;
-                $ready = array_slice($ready, 0, self::ENRICH_CAP);
+            $enrichCap = $this->budget('max_enrich_per_run', self::DEFAULT_ENRICH_CAP);
+            if (count($ready) > $enrichCap) {
+                $overflow = count($ready) - $enrichCap;
+                $notActionable += $overflow;
+                $rejectedDetail['over_enrich_cap'] = $overflow;
+                $ready = array_slice($ready, 0, $enrichCap);
             }
 
+            if ($modelUnavailable) {
+                $notActionable += count($ready);
+                $ready = [];
+            }
+
+            $prepared = [];
             foreach ($ready as $entry) {
                 /** @var RawSocialHit $hit */
                 $hit = $entry['hit'];
@@ -222,12 +255,6 @@ class SocialListeningOrchestrator
                 $signalTypeDefinition = $signalTypeKey !== null
                     ? $this->signalTypeRegistry->find($organization->id, $signalTypeKey)
                     : null;
-
-                if ($modelUnavailable) {
-                    $notActionable++;
-
-                    continue;
-                }
 
                 $detected = null;
                 if ($signalTypeDefinition !== null) {
@@ -256,8 +283,33 @@ class SocialListeningOrchestrator
                     }
                 }
 
-                $hash = md5(mb_strtolower($hit->postUrl ?? $hit->postText));
-                if (SocialSignal::query()
+                $prepared[] = [
+                    'hit' => $hit,
+                    'postedAt' => $postedAt,
+                    'signalTypeKey' => $signalTypeKey,
+                    'definition' => $signalTypeDefinition,
+                    'detected' => $detected,
+                    'family' => $entry['family'],
+                ];
+            }
+
+            $enrichedAll = $prepared === [] ? [] : $this->enricher->enrichMany(
+                $organization,
+                $icp,
+                array_map(static fn (array $item) => ['hit' => $item['hit'], 'signalType' => $item['definition']], $prepared),
+                $profile,
+            );
+
+            foreach ($prepared as $index => $item) {
+                /** @var RawSocialHit $hit */
+                $hit = $item['hit'];
+                $postedAt = $item['postedAt'];
+                $signalTypeKey = $item['signalTypeKey'];
+                $signalTypeDefinition = $item['definition'];
+                $detected = $item['detected'];
+
+                $hash = $this->hashFor($hit);
+                if (isset($seenHashes[$hash]) || SocialSignal::query()
                     ->where('organization_id', $organization->id)
                     ->where('icp_profile_id', $icp->id)
                     ->where('content_hash', $hash)
@@ -268,7 +320,7 @@ class SocialListeningOrchestrator
                     continue;
                 }
 
-                $enriched = $this->enricher->enrich($organization, $icp, $hit, $signalTypeDefinition);
+                $enriched = $enrichedAll[$index] ?? [];
                 $relevance = (float) ($enriched['score'] ?? 0);
                 $score = $this->freshness->apply($relevance, $postedAt, $appliedWindow);
                 $enriched['score'] = $score;
@@ -282,8 +334,10 @@ class SocialListeningOrchestrator
                 }
 
                 $quoteHaystack = trim($hit->postText."\n".($hit->title ?? '')."\n".($hit->snippet ?? ''));
-                if ($this->opportunityGate->rejection($enriched, $quoteHaystack, $profile) !== null) {
+                $gateReason = $this->opportunityGate->rejection($enriched, $quoteHaystack, $profile);
+                if ($gateReason !== null) {
                     $notActionable++;
+                    $rejectedDetail[$gateReason] = ($rejectedDetail[$gateReason] ?? 0) + 1;
 
                     continue;
                 }
@@ -373,10 +427,14 @@ class SocialListeningOrchestrator
                         'freshness_factor' => $this->freshness->factor($postedAt, $appliedWindow),
                         'evidence_quote' => $enriched['evidence_quote'] ?? null,
                         'actionability' => $enriched['actionability'] ?? null,
+                        'author_role' => $enriched['author_role'] ?? null,
+                        'opportunity_kind' => $enriched['opportunity_kind'] ?? null,
+                        'query_family' => $item['family'],
                         'listening_mode' => $profile->mode,
                     ],
                 ]);
 
+                $seenHashes[$hash] = true;
                 EnrichSocialSignalJob::dispatch($signal->id);
                 $created++;
             }
@@ -402,12 +460,14 @@ class SocialListeningOrchestrator
                         'notActionable' => $notActionable,
                         'total' => $icpRejected + $groundingRejectedTotal + $belowMinScore + $duplicate + $notActionable,
                     ],
+                    'rejectedDetail' => $rejectedDetail,
                     'unlabeled' => $unlabeled,
                     'budget_exhausted' => $this->budgetExhausted,
                     'model_unavailable' => $modelUnavailable,
                     'freshnessWindowRequested' => $requestedWindow,
                     'freshnessWindowApplied' => $appliedWindow,
                     'listeningProfile' => $profile->toSummary(),
+                    'queries' => $this->queryLog,
                     'sources' => app(SocialSourceHealth::class)->snapshot(),
                     'enrichment' => [
                         'pending' => $created,
@@ -448,13 +508,23 @@ class SocialListeningOrchestrator
     }
 
     /**
+     * Plans the run's queries and searches them across sources until the call
+     * budget or the survivor target is hit.
+     *
+     * Queries are searched query-major (every source for query 1, then query
+     * 2, ...) so a capped run still samples every query family on every
+     * source. The plan's start offset rotates between runs, so a scheduled
+     * ICP works through its whole plan over successive scans instead of
+     * re-running the same first few queries and finding only duplicates.
+     *
      * @param  Collection<int, SignalTypeDefinition>  $definitions
      * @param  list<string>  $enabled
      * @param  array<string, mixed>  $context
-     * @return Collection<int, array{hit: RawSocialHit, signalTypeKey: ?string}>
+     * @return Collection<int, array{hit: RawSocialHit, signalTypeKey: ?string, family: ?string}>
      */
     private function collectHits(
         Organization $organization,
+        IcpProfile $icp,
         IcpBrief $brief,
         ListeningProfile $profile,
         array $enabled,
@@ -463,45 +533,50 @@ class SocialListeningOrchestrator
         Collection $definitions,
         int $windowDays,
     ): Collection {
-        $queries = [];
-        foreach ($this->opportunityQueries->fromProfile($profile) as $query) {
-            $queries[] = ['query' => $query, 'signalTypeKey' => null];
-        }
+        $general = $this->rotate($this->opportunityQueries->plan($profile), $icp->id);
+
+        $typed = [];
         foreach ($definitions as $definition) {
             foreach ($this->signalQueryBuilder->buildQueriesForType($definition, $brief) as $query) {
-                $queries[] = ['query' => $query, 'signalTypeKey' => $definition->key];
+                $typed[] = [
+                    'query' => $query,
+                    'native' => $query,
+                    'family' => 'signal_type',
+                    'only_sources' => null,
+                    'signalTypeKey' => $definition->key,
+                ];
             }
         }
+
+        $queries = $this->mergeQueryLists($general, $typed);
 
         $byKey = [];
         foreach ($this->sources as $source) {
             $byKey[$source->key()] = $source;
         }
 
+        $maxCalls = $this->budget('max_search_calls_per_run', self::DEFAULT_MAX_SEARCH_CALLS);
+        $survivorTarget = $this->budget('survivor_target', self::DEFAULT_SURVIVOR_TARGET);
+
         $tagged = [];
         $seen = [];
         $survivors = 0;
         $calls = 0;
+        $generalUsed = [];
 
-        $absorb = function (array $hits, ?string $signalTypeKey) use (&$tagged, &$seen, &$survivors, $profile, $windowDays): void {
+        $absorb = function (array $hits, ?string $signalTypeKey, string $family) use (&$tagged, &$seen, &$survivors, $profile, $windowDays): void {
             foreach ($hits as $hit) {
-                $hash = md5(mb_strtolower($hit->postUrl ?? $hit->postText));
+                $hash = $this->hashFor($hit);
                 if (array_key_exists($hash, $seen)) {
-                    if ($seen[$hash] === null && $signalTypeKey !== null) {
-                        foreach ($tagged as $index => $existing) {
-                            $existingHash = md5(mb_strtolower($existing['hit']->postUrl ?? $existing['hit']->postText));
-                            if ($existingHash === $hash) {
-                                $tagged[$index]['signalTypeKey'] = $signalTypeKey;
-                                $seen[$hash] = $signalTypeKey;
-                                break;
-                            }
-                        }
+                    $index = $seen[$hash];
+                    if ($tagged[$index]['signalTypeKey'] === null && $signalTypeKey !== null) {
+                        $tagged[$index]['signalTypeKey'] = $signalTypeKey;
                     }
 
                     continue;
                 }
-                $seen[$hash] = $signalTypeKey;
-                $tagged[] = ['hit' => $hit, 'signalTypeKey' => $signalTypeKey];
+                $seen[$hash] = count($tagged);
+                $tagged[] = ['hit' => $hit, 'signalTypeKey' => $signalTypeKey, 'family' => $family];
                 if ($this->survives($hit, $profile, $windowDays)) {
                     $survivors++;
                 }
@@ -511,6 +586,7 @@ class SocialListeningOrchestrator
         $searchPhase = function (array $keys, bool $requireListed) use (
             &$calls,
             &$survivors,
+            &$generalUsed,
             $absorb,
             $byKey,
             $brief,
@@ -519,11 +595,16 @@ class SocialListeningOrchestrator
             $tbs,
             $context,
             $queries,
+            $maxCalls,
+            $survivorTarget,
         ): void {
             foreach ($queries as $planned) {
                 foreach ($keys as $key) {
-                    if ($calls >= self::MAX_SEARCH_CALLS || $survivors >= self::SURVIVOR_TARGET) {
+                    if ($calls >= $maxCalls || $survivors >= $survivorTarget) {
                         return;
+                    }
+                    if ($planned['only_sources'] !== null && ! in_array($key, $planned['only_sources'], true)) {
+                        continue;
                     }
                     $source = $byKey[$key] ?? null;
                     if (! $source instanceof SocialSourceInterface || ! $source->isConfigured()) {
@@ -543,8 +624,9 @@ class SocialListeningOrchestrator
                     }
                     $this->apiCallsThisRun++;
                     $calls++;
+                    $query = in_array($key, self::FULL_TEXT_SOURCES, true) ? $planned['native'] : $planned['query'];
                     try {
-                        $hits = $source->search($brief, $planned['query'], $organization->id, 6, $tbs, $context)->all();
+                        $hits = $source->search($brief, $query, $organization->id, self::RESULTS_PER_QUERY, $tbs, $context)->all();
                     } catch (\Throwable $e) {
                         app(SocialSourceHealth::class)->recordAttempt($source->key(), 0, 0);
                         Log::warning('Social source search failed', [
@@ -553,21 +635,175 @@ class SocialListeningOrchestrator
                         ]);
                         $hits = [];
                     }
-                    $absorb($hits, $planned['signalTypeKey']);
+                    $this->logQuery($key, $planned['family'], $query, count($hits));
+                    if ($planned['family'] !== 'signal_type') {
+                        $generalUsed[$planned['query']] = true;
+                    }
+                    $absorb($hits, $planned['signalTypeKey'] ?? null, $planned['family']);
                 }
             }
         };
 
         $searchPhase(self::FULL_TEXT_SOURCES, false);
         $searchPhase(self::PRIMARY_SOURCES, true);
-        if ($survivors < self::LOW_YIELD_FLOOR && $calls < self::MAX_SEARCH_CALLS) {
+        if ($survivors < self::LOW_YIELD_FLOOR && $calls < $maxCalls) {
             $searchPhase(self::LOW_YIELD_SOURCES, true);
         }
-        if ($survivors === 0 && $calls < self::MAX_SEARCH_CALLS) {
+        if ($survivors === 0 && $calls < $maxCalls) {
             $searchPhase(self::LAST_RESORT_SOURCES, true);
         }
 
+        $this->advanceRotation($icp->id, count($generalUsed), count($general));
+
         return collect($tagged);
+    }
+
+    /**
+     * General queries first, with a signal-type query slotted in after every
+     * two general ones so typed packs still get searched under a tight budget.
+     *
+     * @param  list<array<string, mixed>>  $general
+     * @param  list<array<string, mixed>>  $typed
+     * @return list<array<string, mixed>>
+     */
+    private function mergeQueryLists(array $general, array $typed): array
+    {
+        if ($typed === []) {
+            return $general;
+        }
+        if ($general === []) {
+            return $typed;
+        }
+
+        $merged = [];
+        $t = 0;
+        foreach ($general as $i => $entry) {
+            $merged[] = $entry;
+            if ($i % 2 === 1 && isset($typed[$t])) {
+                $merged[] = $typed[$t++];
+            }
+        }
+        while (isset($typed[$t])) {
+            $merged[] = $typed[$t++];
+        }
+
+        return $merged;
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $planned
+     * @return list<array<string, mixed>>
+     */
+    private function rotate(array $planned, int $icpId): array
+    {
+        $count = count($planned);
+        if ($count < 2) {
+            return $planned;
+        }
+
+        $offset = ((int) Cache::get($this->rotationKey($icpId), 0)) % $count;
+
+        return array_merge(array_slice($planned, $offset), array_slice($planned, 0, $offset));
+    }
+
+    private function advanceRotation(int $icpId, int $used, int $planSize): void
+    {
+        if ($used <= 0 || $planSize < 2 || $used >= $planSize) {
+            Cache::forget($this->rotationKey($icpId));
+
+            return;
+        }
+
+        $current = (int) Cache::get($this->rotationKey($icpId), 0);
+        Cache::put($this->rotationKey($icpId), ($current + $used) % $planSize, now()->addDays(self::ROTATION_TTL_DAYS));
+    }
+
+    private function rotationKey(int $icpId): string
+    {
+        return "social_listening:rotation:{$icpId}";
+    }
+
+    private function logQuery(string $source, string $family, string $query, int $hits): void
+    {
+        if (count($this->queryLog) >= 60) {
+            return;
+        }
+
+        $this->queryLog[] = [
+            'source' => $source,
+            'family' => $family,
+            'query' => mb_substr($query, 0, 300),
+            'hits' => $hits,
+        ];
+    }
+
+    private function budget(string $key, int $default): int
+    {
+        return max(1, (int) config("services.social_listening.{$key}", $default));
+    }
+
+    private function hashFor(RawSocialHit $hit): string
+    {
+        return md5(mb_strtolower($hit->postUrl ?? $hit->postText));
+    }
+
+    /**
+     * @param  Collection<int, array{hit: RawSocialHit, signalTypeKey: ?string, family: ?string}>  $tagged
+     * @return array<string, true>
+     */
+    private function knownHashes(int $organizationId, int $icpId, Collection $tagged): array
+    {
+        $hashes = $tagged->map(fn (array $entry) => $this->hashFor($entry['hit']))->unique()->values()->all();
+        if ($hashes === []) {
+            return [];
+        }
+
+        $known = [];
+        foreach (array_chunk($hashes, 500) as $chunk) {
+            SocialSignal::query()
+                ->where('organization_id', $organizationId)
+                ->where('icp_profile_id', $icpId)
+                ->whereIn('content_hash', $chunk)
+                ->pluck('content_hash')
+                ->each(function ($hash) use (&$known) {
+                    $known[(string) $hash] = true;
+                });
+        }
+
+        return $known;
+    }
+
+    /**
+     * Reddit search hits usually arrive as a one-line snippet with no date.
+     * Fetch the post JSON (concurrently) for those so the date gate and the
+     * qualifier see the real post.
+     *
+     * @param  list<array{hit: RawSocialHit, signalTypeKey: ?string, family: ?string}>  $candidates
+     * @return list<array{hit: RawSocialHit, signalTypeKey: ?string, family: ?string}>
+     */
+    private function hydrateReddit(array $candidates): array
+    {
+        $cap = $this->budget('max_reddit_hydrations_per_run', self::DEFAULT_HYDRATE_CAP);
+        $targets = [];
+        foreach ($candidates as $index => $entry) {
+            $hit = $entry['hit'];
+            if (count($targets) >= $cap) {
+                break;
+            }
+            if (! $hit->fullText && preg_match('#reddit\.com#i', (string) $hit->postUrl)) {
+                $targets[$index] = $hit;
+            }
+        }
+
+        if ($targets === []) {
+            return $candidates;
+        }
+
+        foreach ($this->redditHydrator->hydrateMany($targets) as $index => $hydrated) {
+            $candidates[$index]['hit'] = $hydrated;
+        }
+
+        return $candidates;
     }
 
     private function survives(RawSocialHit $hit, ListeningProfile $profile, int $windowDays): bool
@@ -577,40 +813,64 @@ class SocialListeningOrchestrator
             $postedAt = app(LinkedInActivityDateExtractor::class)->fromUrl($hit->postUrl);
         }
 
-        $gate = $this->groundingGate->admit($hit->postUrl, $postedAt, $windowDays, null, false);
-        if (! $gate->admitted) {
-            return false;
+        // Undated Reddit hits are still worth counting: hydration recovers
+        // their date before the real grounding gate runs.
+        $isHydratableReddit = $postedAt === null && ! $hit->fullText && preg_match('#reddit\.com/r/[^/]+/comments/#i', (string) $hit->postUrl);
+        if (! $isHydratableReddit) {
+            $gate = $this->groundingGate->admit($hit->postUrl, $postedAt, $windowDays, null, false);
+            if (! $gate->admitted) {
+                return false;
+            }
         }
 
         return $this->prefilter->accepts($hit, $profile);
     }
 
     /**
-     * @param  list<array{hit: RawSocialHit, signalTypeKey: ?string, postedAt: mixed}>  $ready
-     * @return list<array{hit: RawSocialHit, signalTypeKey: ?string, postedAt: mixed}>
+     * Order candidates so the enrich cap keeps the most promising ones:
+     * explicit asks and competitor complaints first, full text over
+     * snippets, dated over undated, and posts that use the plan's own terms.
+     *
+     * @param  list<array{hit: RawSocialHit, signalTypeKey: ?string, family: ?string, postedAt: mixed}>  $ready
+     * @return list<array{hit: RawSocialHit, signalTypeKey: ?string, family: ?string, postedAt: mixed}>
      */
     private function rankReady(array $ready, ListeningProfile $profile): array
     {
-        $tokens = array_values(array_filter(
-            preg_split('/[^\p{L}\p{N}]+/u', mb_strtolower($profile->offer)) ?: [],
-            static fn ($word) => mb_strlen((string) $word) >= 4,
-        ));
+        $tokens = [];
+        foreach ([...$profile->searchTerms(), ...$profile->competitors] as $term) {
+            foreach (preg_split('/[^\p{L}\p{N}]+/u', mb_strtolower($term)) ?: [] as $word) {
+                if (mb_strlen((string) $word) >= 4) {
+                    $tokens[$word] = true;
+                }
+            }
+        }
+        $tokens = array_keys($tokens);
 
-        usort($ready, function (array $a, array $b) use ($tokens, $profile): int {
-            return $this->readyRank($b['hit'], $tokens, $profile) <=> $this->readyRank($a['hit'], $tokens, $profile);
-        });
+        $ranked = array_map(fn (array $entry) => [$this->readyRank($entry, $tokens, $profile), $entry], $ready);
+        usort($ranked, static fn (array $a, array $b): int => $b[0] <=> $a[0]);
 
-        return $ready;
+        return array_map(static fn (array $pair) => $pair[1], $ranked);
     }
 
     /**
+     * @param  array{hit: RawSocialHit, signalTypeKey: ?string, family: ?string, postedAt: mixed}  $entry
      * @param  list<string>  $tokens
      */
-    private function readyRank(RawSocialHit $hit, array $tokens, ListeningProfile $profile): int
+    private function readyRank(array $entry, array $tokens, ListeningProfile $profile): int
     {
+        $hit = $entry['hit'];
         $text = mb_strtolower($hit->postText.' '.$hit->title);
-        $rank = $hit->postedAt !== null ? 3 : 0;
+        $rank = $entry['postedAt'] !== null ? 3 : 0;
+        $rank += $hit->fullText ? 2 : 0;
         $rank += $this->prefilter->hasCue($text, $profile) ? 5 : 0;
+        $rank += match ($entry['family'] ?? null) {
+            'competitor', 'ask' => 3,
+            'community', 'evaluate', 'pain' => 2,
+            default => 0,
+        };
+        if (preg_match('/[?？]/u', $text)) {
+            $rank += 2;
+        }
         foreach ($tokens as $token) {
             if (str_contains($text, $token)) {
                 $rank++;

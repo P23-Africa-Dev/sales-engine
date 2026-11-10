@@ -22,6 +22,11 @@ class SocialPostDateParser
     ): ?CarbonInterface {
         $now = $now ? Carbon::instance($now->toDateTime()) : now();
 
+        $exact = $this->fromXStatusUrl($postUrl);
+        if ($exact !== null) {
+            return $exact;
+        }
+
         foreach ([$dateRaw, $snippet] as $candidate) {
             if ($candidate === null || trim($candidate) === '') {
                 continue;
@@ -33,7 +38,33 @@ class SocialPostDateParser
             }
         }
 
-        return $this->linkedInIds->fromUrl($postUrl);
+        return $this->linkedInIds->fromUrl($postUrl) ?? $this->fromXStatusUrl($postUrl);
+    }
+
+    /**
+     * X status IDs are snowflakes: the top 42 bits are milliseconds since the
+     * Twitter epoch. Search results for X rarely carry a date, but the URL
+     * always carries the ID, so the post time is recoverable exactly.
+     */
+    public function fromXStatusUrl(?string $postUrl): ?CarbonInterface
+    {
+        if ($postUrl === null || ! preg_match('#(?:twitter\.com|x\.com)/(?:[^/]+|i)/status(?:es)?/(\d{15,20})#i', $postUrl, $m)) {
+            return null;
+        }
+
+        $id = (int) $m[1];
+        if ($id <= 0) {
+            return null;
+        }
+
+        $ms = ($id >> 22) + 1288834974657;
+        $posted = Carbon::createFromTimestampMs($ms);
+        $now = now();
+        if ($posted->greaterThan($now->copy()->addDay()) || $posted->lessThan($now->copy()->subYears(8))) {
+            return null;
+        }
+
+        return $posted;
     }
 
     private function parseOne(string $value, CarbonInterface $now): ?CarbonInterface

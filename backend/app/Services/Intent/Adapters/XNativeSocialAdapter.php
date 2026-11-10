@@ -63,7 +63,9 @@ class XNativeSocialAdapter implements SocialSourceInterface
                 ->get('https://api.twitter.com/2/tweets/search/recent', [
                     'query' => $q,
                     'max_results' => max(10, min(20, $limit)),
-                    'tweet.fields' => 'created_at,author_id',
+                    'tweet.fields' => 'created_at,author_id,lang',
+                    'expansions' => 'author_id',
+                    'user.fields' => 'username,name',
                 ]);
 
             ApiUsage::query()->create([
@@ -82,7 +84,13 @@ class XNativeSocialAdapter implements SocialSourceInterface
             }
 
             $tweets = $response->json('data') ?? [];
-            $hits = collect(is_array($tweets) ? $tweets : [])->map(function (array $tweet) {
+            $users = [];
+            foreach ((array) ($response->json('includes.users') ?? []) as $user) {
+                if (is_array($user) && isset($user['id'], $user['username'])) {
+                    $users[(string) $user['id']] = (string) $user['username'];
+                }
+            }
+            $hits = collect(is_array($tweets) ? $tweets : [])->map(function (array $tweet) use ($users) {
                 $id = (string) ($tweet['id'] ?? '');
                 $text = trim((string) ($tweet['text'] ?? ''));
                 $created = (string) ($tweet['created_at'] ?? '');
@@ -95,17 +103,18 @@ class XNativeSocialAdapter implements SocialSourceInterface
                     }
                 }
                 $authorId = trim((string) ($tweet['author_id'] ?? ''));
+                $username = $users[$authorId] ?? null;
 
                 return new RawSocialHit(
                     platform: 'x',
                     sourceLabel: 'X/Twitter Post',
                     sourceIcon: 'x',
                     postText: $text,
-                    postUrl: $id !== '' ? 'https://x.com/i/status/'.$id : null,
+                    postUrl: $id !== '' ? 'https://x.com/'.($username ?? 'i').'/status/'.$id : null,
                     snippet: $text !== '' ? mb_substr($text, 0, 280) : null,
                     title: $text !== '' ? mb_substr($text, 0, 80) : null,
-                    authorName: $authorId !== '' ? $authorId : null,
-                    authorProfileUrl: null,
+                    authorName: $username !== null ? '@'.$username : ($authorId !== '' ? $authorId : null),
+                    authorProfileUrl: $username !== null ? 'https://x.com/'.$username : null,
                     postedAt: $postedAt,
                     dateRaw: $created !== '' ? $created : null,
                     fullText: true,

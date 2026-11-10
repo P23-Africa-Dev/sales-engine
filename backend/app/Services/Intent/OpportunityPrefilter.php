@@ -6,22 +6,32 @@ use App\Services\Intent\DTO\ListeningProfile;
 use App\Services\Intent\DTO\RawSocialHit;
 
 /**
- * Cheap reject pass before a model call. Keeps posts that read like an ask
- * and drops jobs, listicles, and snippets too short to prove anything.
+ * Cheap reject pass before a model call. Drops what is never an opening:
+ * job ads, listicles, vendor self-promotion, the plan's noise words, and
+ * snippets too short to prove anything.
+ *
+ * It deliberately does NOT require ask-words like "recommend". A buyer who
+ * writes "our drivers keep faking fuel receipts, it's killing margins" is the
+ * best lead in the feed and contains none of them; judging intent is the
+ * qualifier model's job. Here a post only has to be on-topic: it carries an
+ * intent cue or one of the plan's own terms.
  */
 class OpportunityPrefilter
 {
-    public const SELL_CUES = '/\b(recommend(?:ation|ations)?|looking for|anyone (?:use|using|know)|what (?:do you|are you) us(?:e|ing)|alternative to|switch(?:ing)?(?: from| off)?|frustrated with|how much|pricing)\b/iu';
+    public const SELL_CUES = '/\b(recommend(?:ation|ations|ed)?|suggestions?|looking for|anyone (?:use|using|know|tried|recommend)|what (?:do you|are you|does everyone) us(?:e|ing)|alternative(?:s)? to|switch(?:ing)?(?: from| off| away)?|moving (?:away )?from|frustrated with|fed up with|tired of|struggling (?:with|to)|need (?:a|an|help|advice)|any (?:advice|tips|suggestions)|what(?:\'s| is) the best|which (?:tool|software|app|platform|provider|company|vendor|service)|how do (?:you|i|we) (?:manage|handle|track|deal with)|too expensive|how much|pricing|quote for)\b/iu';
 
     public const INVEST_CUES = '/\b(rais(?:e|es|ed|ing)|seed round|series\s+[a-e]\b|funding round|pre-seed|invest(?:or|ors|ment)?)\b/iu';
 
-    public const PARTNER_CUES = '/\b(looking for(?:\s+\w+){0,4}\s+partners?|seeking(?:\s+\w+){0,4}\s+partners?|partnership|collaborat(?:e|ion|ing))\b/iu';
+    public const PARTNER_CUES = '/\b(looking for(?:\s+\w+){0,4}\s+partners?|seeking(?:\s+\w+){0,4}\s+partners?|partnership|collaborat(?:e|ion|ing)|distributors?|resellers?)\b/iu';
 
     public const HIRING_CUES = '/\b(appointed|appoints|hiring|we.?re hiring|joining as|named as)\b/iu';
 
-    public const JOB_BLOCK = '/\b(we.?re hiring|now hiring|job opening|job openings|vacancy|vacancies|apply now|headcount)\b/iu';
+    public const JOB_BLOCK = '/\b(we.?re hiring|now hiring|job opening|job openings|vacancy|vacancies|apply now|headcount|send (?:your )?cv|job description)\b/iu';
 
     public const LISTICLE_BLOCK = '/\b(top\s+\d+|\d+\s+best|best\s+\d+|best tools|ultimate guide)\b/iu';
+
+    /** A vendor talking about its own product is not a buyer. */
+    public const PROMO_BLOCK = '/\b(dm (?:me|us) (?:for|to)|book a (?:free )?demo|sign up (?:now|today|free)|start (?:your )?free trial|use (?:my |our )?code|link in (?:bio|comments)|limited (?:time )?offer|we help (?:companies|businesses|brands|teams|startups)|our (?:platform|solution|software|tool) (?:helps|lets|allows))\b/iu';
 
     public function accepts(RawSocialHit $hit, ListeningProfile $profile): bool
     {
@@ -48,13 +58,21 @@ class OpportunityPrefilter
             return 'not_an_opportunity';
         }
 
+        if ($profile->mode === 'sell' && preg_match(self::PROMO_BLOCK, $text)) {
+            return 'self_promotion';
+        }
+
+        if ($this->hasExcludedTerm($text, $profile)) {
+            return 'excluded_term';
+        }
+
         $length = mb_strlen(trim($hit->postText));
-        $floor = $hit->fullText ? 40 : 80;
+        $floor = $hit->fullText ? 40 : 60;
         if ($length < $floor) {
             return 'not_an_opportunity';
         }
 
-        if (! $this->hasCue($text, $profile)) {
+        if (! $this->hasCue($text, $profile) && ! $this->mentionsPlanTerm($text, $profile)) {
             return 'not_an_opportunity';
         }
 
@@ -74,5 +92,53 @@ class OpportunityPrefilter
         }
 
         return $profile->includeHiring && preg_match(self::HIRING_CUES, $text) === 1;
+    }
+
+    /**
+     * True when the text mentions the offer, a synonym, a competitor, or a
+     * distinctive word from a pain phrase.
+     */
+    public function mentionsPlanTerm(string $text, ListeningProfile $profile): bool
+    {
+        $haystack = mb_strtolower($text);
+        foreach ([...$profile->searchTerms(), ...$profile->competitors] as $term) {
+            $term = mb_strtolower(trim($term));
+            if ($term !== '' && mb_strlen($term) >= 3 && str_contains($haystack, $term)) {
+                return true;
+            }
+        }
+
+        foreach ($profile->painPhrases as $phrase) {
+            $words = array_filter(
+                preg_split('/[^\p{L}\p{N}]+/u', mb_strtolower($phrase)) ?: [],
+                static fn ($word) => mb_strlen((string) $word) >= 5,
+            );
+            $hits = 0;
+            foreach ($words as $word) {
+                if (str_contains($haystack, $word)) {
+                    $hits++;
+                }
+            }
+            if ($hits >= 2) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function hasExcludedTerm(string $text, ListeningProfile $profile): bool
+    {
+        foreach ($profile->excludeTerms as $term) {
+            $term = trim($term);
+            if ($term === '') {
+                continue;
+            }
+            if (preg_match('/\b'.preg_quote($term, '/').'\b/iu', $text)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

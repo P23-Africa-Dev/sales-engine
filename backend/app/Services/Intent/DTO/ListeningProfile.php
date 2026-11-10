@@ -7,12 +7,20 @@ use App\Services\Discovery\DTO\IcpBrief;
 /**
  * Short description of what a scan should hunt for. Built from the ICP's
  * own words, not from firmographic fields.
+ *
+ * The expansion fields (synonyms, pain phrases, communities, exclusions)
+ * come from the listening planner. They are what turn one vague offer into
+ * the many short phrasings real buyers actually type.
  */
 readonly class ListeningProfile
 {
     /**
      * @param  list<string>  $competitors
      * @param  list<string>  $territories
+     * @param  list<string>  $synonyms  Category phrases buyers use for the offer.
+     * @param  list<string>  $painPhrases  First-person problem phrasings the offer solves.
+     * @param  list<string>  $communities  Subreddit names (no r/ prefix).
+     * @param  list<string>  $excludeTerms  Words that mark a post as noise for this profile.
      */
     public function __construct(
         public string $mode,
@@ -20,6 +28,11 @@ readonly class ListeningProfile
         public array $competitors,
         public bool $includeHiring,
         public array $territories,
+        public array $synonyms = [],
+        public array $painPhrases = [],
+        public array $communities = [],
+        public array $excludeTerms = [],
+        public string $buyer = '',
     ) {}
 
     public static function fromBrief(IcpBrief $brief): self
@@ -36,19 +49,28 @@ readonly class ListeningProfile
 
         $includeHiring = (bool) preg_match('/\b(hiring|recruit|talent|appoint(?:ed|ment)?|leadership hire)/u', $lower);
 
+        $offer = self::offerFrom($brief, $text);
+
         return new self(
             mode: $mode,
-            offer: self::offerFrom($brief, $text),
+            offer: $offer,
             competitors: self::competitorsFrom($text),
             includeHiring: $includeHiring,
             territories: array_values(array_filter(array_map(
                 static fn ($territory) => trim(explode(',', (string) $territory)[0] ?? ''),
                 array_slice($brief->territories, 0, 3),
             ))),
+            synonyms: array_values(array_filter(
+                self::phraseList($brief->searchKeywords, 5, 4),
+                static fn (string $keyword) => mb_strtolower($keyword) !== mb_strtolower($offer),
+            )),
         );
     }
 
-    public function withOverrides(?string $mode, ?string $offer, ?array $competitors, ?bool $includeHiring): self
+    /**
+     * @param  array{synonyms?: mixed, pain_phrases?: mixed, communities?: mixed, exclude_terms?: mixed, buyer?: mixed}  $expansion
+     */
+    public function withOverrides(?string $mode, ?string $offer, ?array $competitors, ?bool $includeHiring, array $expansion = []): self
     {
         $nextMode = in_array($mode, ['sell', 'invest', 'partner'], true) ? $mode : $this->mode;
         $nextOffer = trim((string) $offer);
@@ -74,11 +96,34 @@ readonly class ListeningProfile
             competitors: $nextCompetitors,
             includeHiring: $includeHiring === null ? $this->includeHiring : ($this->includeHiring || $includeHiring),
             territories: $this->territories,
+            synonyms: self::phraseList($expansion['synonyms'] ?? null, 6, 4) ?: $this->synonyms,
+            painPhrases: self::phraseList($expansion['pain_phrases'] ?? null, 6, 7) ?: $this->painPhrases,
+            communities: self::communityList($expansion['communities'] ?? null) ?: $this->communities,
+            excludeTerms: self::phraseList($expansion['exclude_terms'] ?? null, 10, 3) ?: $this->excludeTerms,
+            buyer: self::clipWords(trim((string) ($expansion['buyer'] ?? '')), 20) ?: $this->buyer,
         );
     }
 
     /**
-     * @return array{mode: string, offer: string, competitors: list<string>, include_hiring: bool}
+     * The offer plus its synonyms, de-duplicated, offer first.
+     *
+     * @return list<string>
+     */
+    public function searchTerms(): array
+    {
+        $terms = [];
+        foreach ([$this->offer, ...$this->synonyms] as $term) {
+            $term = trim($term);
+            if ($term !== '' && ! in_array(mb_strtolower($term), array_map('mb_strtolower', $terms), true)) {
+                $terms[] = $term;
+            }
+        }
+
+        return $terms;
+    }
+
+    /**
+     * @return array<string, mixed>
      */
     public function toSummary(): array
     {
@@ -87,7 +132,63 @@ readonly class ListeningProfile
             'offer' => $this->offer,
             'competitors' => $this->competitors,
             'include_hiring' => $this->includeHiring,
+            'synonyms' => $this->synonyms,
+            'pain_phrases' => $this->painPhrases,
+            'communities' => $this->communities,
+            'exclude_terms' => $this->excludeTerms,
+            'buyer' => $this->buyer,
         ];
+    }
+
+    /**
+     * @return list<string>
+     */
+    private static function phraseList(mixed $value, int $maxItems, int $maxWords): array
+    {
+        if (! is_array($value)) {
+            return [];
+        }
+
+        $out = [];
+        foreach ($value as $item) {
+            $item = trim((string) preg_replace('/[\"()]+/u', ' ', (string) $item));
+            $item = self::clipWords($item, $maxWords);
+            if ($item === '' || mb_strlen($item) > 60) {
+                continue;
+            }
+            if (! in_array(mb_strtolower($item), array_map('mb_strtolower', $out), true)) {
+                $out[] = $item;
+            }
+            if (count($out) >= $maxItems) {
+                break;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * @return list<string>
+     */
+    private static function communityList(mixed $value): array
+    {
+        if (! is_array($value)) {
+            return [];
+        }
+
+        $out = [];
+        foreach ($value as $item) {
+            $name = preg_replace('#^(?:https?://(?:www\.)?reddit\.com)?/?r/#i', '', trim((string) $item)) ?? '';
+            $name = trim($name, '/ ');
+            if (preg_match('/^[A-Za-z0-9_]{2,21}$/', $name) && ! in_array(mb_strtolower($name), array_map('mb_strtolower', $out), true)) {
+                $out[] = $name;
+            }
+            if (count($out) >= 5) {
+                break;
+            }
+        }
+
+        return $out;
     }
 
     private static function offerFrom(IcpBrief $brief, string $text): string
