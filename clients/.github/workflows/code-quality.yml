@@ -1,0 +1,111 @@
+# name: Code Quality
+
+# on:
+#   # Validate every PR targeting main before merge.
+#   pull_request:
+#     branches:
+#       - main
+#   # Re-run the same quality gate on direct pushes to main.
+#   push:
+#     branches:
+#       - main
+
+# # Cancel older in-progress runs for the same branch or PR to reduce CI noise.
+# concurrency:
+#   group: code-quality-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+#   cancel-in-progress: true
+
+# # Restrict default token permissions to the minimum required for checkout.
+# permissions:
+#   contents: read
+
+# env:
+#   CI: true
+
+# jobs:
+#   lint-and-typecheck:
+#     name: Lint and Type Check
+#     runs-on: ubuntu-latest
+#     timeout-minutes: 15
+
+#     steps:
+#       - name: Checkout repository
+#         uses: actions/checkout@v4
+
+#       - name: Set up Node.js
+#         uses: actions/setup-node@v4
+#         with:
+#           node-version: '22'
+#           cache: npm
+
+#       - name: Install dependencies
+#         run: npm ci
+
+#       # - name: Run ESLint
+#       #   run: npm run lint -- .
+
+#       - name: Check formatting with Prettier if configured
+#         shell: bash
+#         run: |
+#           if ! node -e "const pkg = require('./package.json'); process.exit(pkg.devDependencies?.prettier || pkg.dependencies?.prettier ? 0 : 1)"; then
+#             echo "Prettier is not installed. Skipping formatting check."
+#             exit 0
+#           fi
+
+#           if node -e "const pkg = require('./package.json'); process.exit(pkg.scripts?.['format:check'] ? 0 : 1)"; then
+#             npm run format:check
+#             exit 0
+#           fi
+
+#           npx prettier --check .
+
+#       - name: Run TypeScript type check
+#         run: npx tsc --noEmit
+
+#   test:
+#     name: Test
+#     runs-on: ubuntu-latest
+#     timeout-minutes: 15
+
+#     steps:
+#       - name: Checkout repository
+#         uses: actions/checkout@v4
+
+#       - name: Set up Node.js
+#         uses: actions/setup-node@v4
+#         with:
+#           node-version: '22'
+#           cache: npm
+
+#       - name: Install dependencies
+#         run: npm ci
+
+#       - name: Run tests if a test script exists
+#         shell: bash
+#         run: |
+#           if node -e "const pkg = require('./package.json'); process.exit(pkg.scripts?.test ? 0 : 1)"; then
+#             npm test
+#           else
+#             echo "No test script found. Skipping tests."
+#           fi
+
+#   build:
+#     name: Production Build
+#     runs-on: ubuntu-latest
+#     timeout-minutes: 15
+
+#     steps:
+#       - name: Checkout repository
+#         uses: actions/checkout@v4
+
+#       - name: Set up Node.js
+#         uses: actions/setup-node@v4
+#         with:
+#           node-version: '22'
+#           cache: npm
+
+#       - name: Install dependencies
+#         run: npm ci
+
+#       - name: Build Next.js application
+#         run: npm run build

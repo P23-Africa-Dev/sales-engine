@@ -1,0 +1,54 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Sales Engine Frontend — CI & Deploy Verification Workflow
+#
+# Triggers:
+#   push to `main`    → lint, test, build
+#   pull_request      → lint, test, build
+#   workflow_dispatch → manual trigger
+# ─────────────────────────────────────────────────────────────────────────────
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CI: true
+
+jobs:
+  build-and-verify:
+    name: Build & Verify Frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run ESLint
+        run: npm run lint
+
+      - name: Run unit & integration tests
+        run: npm test
+
+      - name: Build Next.js application
+        run: npm run build
