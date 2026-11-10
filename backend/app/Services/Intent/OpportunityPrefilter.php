@@ -106,6 +106,24 @@ class OpportunityPrefilter
             if ($term !== '' && mb_strlen($term) >= 3 && str_contains($haystack, $term)) {
                 return true;
             }
+
+            // Multi-word offers rarely appear verbatim ("gps fleet tracking
+            // haulage"); two of their distinctive words is enough to be on topic.
+            $words = array_values(array_filter(
+                preg_split('/[^\p{L}\p{N}]+/u', $term) ?: [],
+                static fn ($word) => mb_strlen((string) $word) >= 4,
+            ));
+            if (count($words) >= 2) {
+                $found = 0;
+                foreach ($words as $word) {
+                    if (preg_match('/\b'.preg_quote($word, '/').'/u', $haystack)) {
+                        $found++;
+                    }
+                }
+                if ($found >= 2) {
+                    return true;
+                }
+            }
         }
 
         foreach ($profile->painPhrases as $phrase) {

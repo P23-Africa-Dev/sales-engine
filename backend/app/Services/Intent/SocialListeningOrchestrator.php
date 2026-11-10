@@ -58,6 +58,8 @@ class SocialListeningOrchestrator
 
     private const ROTATION_TTL_DAYS = 30;
 
+    private const MAX_FRESHNESS_WINDOW_DAYS = 30;
+
     private bool $budgetExhausted = false;
 
     private int $apiCallsThisRun = 0;
@@ -134,8 +136,11 @@ class SocialListeningOrchestrator
             $brief = IcpBrief::fromIcpProfile($icp);
             $profile = $this->profiles->make($organization, $brief);
             $enabled = $settings->enabled_sources ?? SocialListeningSetting::DEFAULT_SOURCES;
+            // Listen Settings offers 7, 14 or 30 days: an opening older than a
+            // month is rarely one to reply to. Older rows saved with 90/180 are
+            // treated as 30, matching what the settings screen now shows.
             $requestedWindow = max(1, (int) ($settings->freshness_window_days ?? 30));
-            $appliedWindow = min($requestedWindow, 30);
+            $appliedWindow = min($requestedWindow, self::MAX_FRESHNESS_WINDOW_DAYS);
             $definitions = $brief->signalTypeDetectionEnabled()
                 ? $this->activeDefinitions($organization->id, $brief)
                 : collect();
@@ -182,10 +187,18 @@ class SocialListeningOrchestrator
             // Drop posts already surfaced for this ICP before any hydration or
             // model call is spent on them — one query, not one per hit.
             $seenHashes = $this->knownHashes($organization->id, $icp->id, $taggedHits);
+            $feedback = SocialListeningFeedback::forIcp($organization->id, $icp->id);
             $candidates = [];
             foreach ($taggedHits as $entry) {
                 if (isset($seenHashes[$this->hashFor($entry['hit'])])) {
                     $duplicate++;
+
+                    continue;
+                }
+                $muted = $feedback->muteReason($entry['hit']);
+                if ($muted !== null) {
+                    $notActionable++;
+                    $rejectedDetail[$muted] = ($rejectedDetail[$muted] ?? 0) + 1;
 
                     continue;
                 }
@@ -323,6 +336,8 @@ class SocialListeningOrchestrator
                 $enriched = $enrichedAll[$index] ?? [];
                 $relevance = (float) ($enriched['score'] ?? 0);
                 $score = $this->freshness->apply($relevance, $postedAt, $appliedWindow);
+                // Learn from the user's own dismissals and saves for this ICP.
+                $score = $feedback->adjustScore($score, isset($enriched['intent_label']) ? (string) $enriched['intent_label'] : null);
                 $enriched['score'] = $score;
                 $enriched['urgency'] = $this->freshness->nudgeUrgency(
                     isset($enriched['urgency']) ? (string) $enriched['urgency'] : null,
@@ -468,6 +483,7 @@ class SocialListeningOrchestrator
                     'freshnessWindowApplied' => $appliedWindow,
                     'listeningProfile' => $profile->toSummary(),
                     'queries' => $this->queryLog,
+                    'feedback' => $feedback->summary(),
                     'sources' => app(SocialSourceHealth::class)->snapshot(),
                     'enrichment' => [
                         'pending' => $created,

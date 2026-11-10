@@ -215,7 +215,7 @@ class SocialListeningController extends Controller
                 'added_to_crm_change_percent' => $this->signedPercent($crmThis, $crmPrior),
                 'last_run_at' => $settings->last_run_at?->toIso8601String(),
                 'cadence_days' => $settings->cadence_days,
-                'freshness_window_days' => (int) ($settings->freshness_window_days ?? 30),
+                'freshness_window_days' => min(30, (int) ($settings->freshness_window_days ?? 30)),
                 'source_health' => SocialSourceHealth::describe(
                     $settings,
                     is_array($latestRun?->result_summary) ? ($latestRun->result_summary['sources'] ?? null) : null,
@@ -248,12 +248,14 @@ class SocialListeningController extends Controller
 
         $data = $request->validate([
             'enabled_sources' => ['nullable', 'array'],
+            'enabled_sources.*' => ['string', 'in:linkedin_public,x_mentions,reddit,meta_pages,meta_graph_pages,youtube'],
             'meta_page_ids' => ['nullable', 'array'],
             'meta_page_ids.*' => ['nullable', 'string', 'max:255'],
             'cadence_days' => ['nullable', 'integer', 'in:14,30'],
             'min_score' => ['nullable', 'integer', 'min:40', 'max:90'],
-            'freshness_window_days' => ['nullable', 'integer', 'in:7,14,30,90,180'],
+            'freshness_window_days' => ['nullable', 'integer', 'in:7,14,30'],
             'intent_filters' => ['nullable', 'array'],
+            'intent_filters.*' => ['string', 'max:64'],
             'crm_destination' => ['nullable', 'string', 'in:qualified_pipeline,human_review'],
             'outreach_channel_default' => ['nullable', 'string', 'in:email,human_follow_up'],
             'sender_mode' => ['nullable', 'string', 'in:platform,organization'],
@@ -485,7 +487,8 @@ class SocialListeningController extends Controller
             'meta_page_ids' => $setting->meta_page_ids ?? [],
             'cadence_days' => $setting->cadence_days,
             'min_score' => $setting->min_score,
-            'freshness_window_days' => (int) ($setting->freshness_window_days ?? 14),
+            // Older settings may hold 90/180; the window now tops out at 30 days.
+            'freshness_window_days' => min(30, (int) ($setting->freshness_window_days ?? 30)),
             'intent_filters' => $setting->intent_filters ?? SocialListeningSetting::DEFAULT_INTENT_FILTERS,
             'crm_destination' => $setting->crm_destination,
             'outreach_channel_default' => $setting->outreach_channel_default,

@@ -40,10 +40,12 @@ data:
   BROADCAST_CONNECTION: "log"
   FILESYSTEM_DISK: "local"
 
-  # Redis must not release reserved jobs before ProcessChatIntentJob can finish
-  # (job timeout 300s, discovery hard deadline ~150s). Default 90s caused
-  # MaxAttemptsExceeded races and false "timed out" chat messages.
-  REDIS_QUEUE_RETRY_AFTER: "360"
+  # Redis must not release a reserved job while a worker is still running it,
+  # or the job starts a second time. Must exceed the longest worker --timeout:
+  # queue-worker runs RunSocialListeningJob with --timeout=600 (discovery
+  # worker: 320). Default 90s caused MaxAttemptsExceeded races and false
+  # "timed out" chat messages; 360 still let a long social scan run twice.
+  REDIS_QUEUE_RETRY_AFTER: "660"
 
   # ── Redis (non-sensitive) ─────────────────────────────────────────────────────
   REDIS_CLIENT: "predis"

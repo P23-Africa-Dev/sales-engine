@@ -81,6 +81,7 @@ class DiscoveryOrchestrator
         'unknown_geo_kept' => 0,
         'wrong_country_dropped' => 0,
         'dropped_unverified_country' => 0,
+        'dropped_icp_exclusion' => 0,
     ];
 
     /** Compact raw hits from this run, used to persist leftover URLs for Generate more. */
@@ -193,6 +194,7 @@ class DiscoveryOrchestrator
                 'unknown_geo_kept' => 0,
                 'wrong_country_dropped' => 0,
                 'dropped_unverified_country' => 0,
+                'dropped_icp_exclusion' => 0,
             ];
             $this->providerHealth->reset();
             $this->enrichment->setDeferContactWaterfall($deferContactEnrichment);
@@ -1392,6 +1394,16 @@ class DiscoveryOrchestrator
                 }
             }
 
+            // ICP-brief mode: a lead that is what the user said to exclude
+            // ("brokers", "consultants") is dropped outright, never kept as advisory.
+            // A typed user query wins over the ICP, so it is not applied there.
+            if (! $hasUserQuery && ($gateResult->reasons['exclusions'] ?? true) === false) {
+                $this->gateStats['dropped_hard_gate']++;
+                $this->gateStats['dropped_icp_exclusion']++;
+
+                continue;
+            }
+
             // ICP-brief mode: hard-gate remaining firmographics. Trusted LinkedIn URLs
             // may stay as advisory when industry fails or geo is unconfirmed.
             if (! $hasUserQuery && ! $gateResult->passed) {
@@ -1715,6 +1727,18 @@ class DiscoveryOrchestrator
             $available[] = 'revenue';
         }
 
+        // What the lead says it is, for the ICP's "exclude …" list. Name,
+        // industry, role and a short summary — not page body text, which
+        // often mentions the excluded thing in passing.
+        $profileText = trim(implode(' ', array_filter([
+            (string) ($extracted['name'] ?? ''),
+            (string) ($extracted['company'] ?? ''),
+            (string) ($extracted['industry'] ?? ''),
+            (string) ($extracted['sector'] ?? ''),
+            (string) ($extracted['title'] ?? $extracted['role'] ?? ''),
+            mb_substr((string) ($extracted['summary'] ?? ''), 0, 200),
+        ], static fn (string $part) => trim($part) !== '')));
+
         return $this->icpFilter->passes(
             $brief,
             new CandidateCompany(
@@ -1722,6 +1746,7 @@ class DiscoveryOrchestrator
                 companySize: $companySize,
                 revenue: $revenue,
                 territory: $territory,
+                profileText: $profileText !== '' ? $profileText : null,
             ),
             $available,
         );

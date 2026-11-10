@@ -93,9 +93,12 @@ class IcpSearchBriefSuggester
         }
 
         try {
+            // 'extract' runs without model reasoning. Under 'chat' the reasoning
+            // pass ate the 280-token budget, the completion came back empty, and
+            // Strengthen silently fell back to the heuristic almost every time.
             $json = $this->glm->chatJson(
                 $this->messages($mode, $input, $heuristic['brief']),
-                'chat',
+                'extract',
                 $organization,
                 [
                     'max_tokens' => 280,
@@ -209,8 +212,19 @@ class IcpSearchBriefSuggester
     }
 
     /**
-     * Fill empty ICP fields from catalogs so Strengthen upgrades the whole profile,
-     * not just the search box. Geography is never invented.
+     * Propose the rest of the profile alongside the brief.
+     *
+     * Strengthen must never overwrite what the user chose or invent filters:
+     *   - the user's own industries, buyers and sizes are returned untouched,
+     *     including custom values that are not in the catalog;
+     *   - an empty industry list is filled only from industries the text
+     *     actually names (never a default guess — a wrong industry makes the
+     *     Stage 1 filter reject real matches);
+     *   - buyer roles are suggested only when industries are known;
+     *   - company size is never invented, because a guessed size silently
+     *     drops every lead outside it;
+     *   - exclusions are the user's plus any the brief states.
+     * Geography is never invented.
      *
      * @param  array{brief: string, keywords: list<string>, source?: string}  $draft
      * @param  array<string, mixed>  $input
@@ -218,26 +232,30 @@ class IcpSearchBriefSuggester
      */
     public function withProposal(array $draft, array $input): array
     {
-        $industries = $this->intersectCatalog($this->stringList($input['industries'] ?? []), self::CATALOG_INDUSTRIES);
+        $industries = $this->stringList($input['industries'] ?? []);
         if ($industries === []) {
             $industries = $this->inferCatalogIndustries(
                 trim(($draft['brief'] ?? '').' '.($input['description'] ?? '').' '.($input['profileName'] ?? ''))
             );
         }
 
-        $decisionMakers = $this->intersectCatalog($this->stringList($input['decisionMakers'] ?? []), self::CATALOG_DECISION_MAKERS);
-        if ($decisionMakers === []) {
+        $decisionMakers = $this->stringList($input['decisionMakers'] ?? []);
+        if ($decisionMakers === [] && $industries !== []) {
             $decisionMakers = $this->defaultDecisionMakers($industries);
         }
 
         $companySizes = $this->intersectCatalog($this->stringList($input['companySizes'] ?? []), self::CATALOG_COMPANY_SIZES);
-        if ($companySizes === []) {
-            $companySizes = ['51-200'];
-        }
 
         $minMatchScore = (int) ($input['minMatchScore'] ?? 60);
         if ($minMatchScore < 40 || $minMatchScore > 95) {
             $minMatchScore = 60;
+        }
+
+        $exclusions = $this->stringList($input['exclusions'] ?? []);
+        foreach ($this->exclusionsFromBrief((string) ($draft['brief'] ?? '')) as $exclusion) {
+            if (! in_array(mb_strtolower($exclusion), array_map('mb_strtolower', $exclusions), true)) {
+                $exclusions[] = $exclusion;
+            }
         }
 
         return [
@@ -247,7 +265,7 @@ class IcpSearchBriefSuggester
             'industries' => $industries,
             'decisionMakers' => $decisionMakers,
             'companySizes' => $companySizes,
-            'exclusions' => $this->exclusionsFromBrief((string) ($draft['brief'] ?? '')),
+            'exclusions' => array_slice($exclusions, 0, 12),
             'minMatchScore' => $minMatchScore,
         ];
     }
@@ -327,7 +345,7 @@ class IcpSearchBriefSuggester
             }
         }
 
-        return $out === [] ? ['Fintech & Payments'] : array_values(array_unique($out));
+        return array_values(array_unique($out));
     }
 
     /**
@@ -474,6 +492,16 @@ class IcpSearchBriefSuggester
             return '';
         }
 
+        // Strip whole job titles ("Head of Sales") as phrases. Splitting them
+        // into stop words used to delete "sales", "supply", "chain", "growth"…
+        // from the brief itself — gutting e.g. "supply chain software".
+        foreach ($this->stringList($input['decisionMakers'] ?? []) as $title) {
+            if (mb_strlen($title) >= 3) {
+                $text = preg_replace('/\b'.preg_quote($title, '/').'s?\b/iu', ' ', $text) ?? $text;
+            }
+        }
+        $text = trim(preg_replace('/\s+/u', ' ', $text) ?? $text);
+
         $stop = $this->stopTokens($input);
         $words = preg_split('/\s+/u', $text) ?: [];
         $kept = [];
@@ -552,10 +580,7 @@ class IcpSearchBriefSuggester
         foreach (['industries', 'specialize', 'industry', 'persona', 'personas'] as $token) {
             $stop[$token] = true;
         }
-        foreach (array_merge(
-            $this->stringList($input['territories'] ?? []),
-            $this->stringList($input['decisionMakers'] ?? []),
-        ) as $value) {
+        foreach ($this->stringList($input['territories'] ?? []) as $value) {
             foreach (preg_split('/[^\p{L}\p{N}\-&]+/u', mb_strtolower($value)) ?: [] as $part) {
                 if (mb_strlen($part) >= 3) {
                     $stop[$part] = true;
@@ -658,6 +683,7 @@ class IcpSearchBriefSuggester
             'current_brief' => trim((string) ($input['customPrompt'] ?? '')),
             'description' => trim((string) ($input['description'] ?? '')),
             'industries' => $this->stringList($input['industries'] ?? []),
+            'exclusions' => $this->stringList($input['exclusions'] ?? []),
             'heuristic_fallback' => $fallbackBrief,
         ];
 
@@ -679,6 +705,9 @@ class IcpSearchBriefSuggester
                     'NEVER write “industries specialize”, profile blurbs, or marketing slogans.',
                     'Territory is applied separately — leave geography out.',
                     'Your job is to refine so web search returns real companies/people, not essays.',
+                    'The same brief drives social listening, so keep what the user is after: if they want investment deals or partners rather than buyers, keep that intent in the brief (e.g. "seed-stage fintech startups raising", "distribution partners for solar kits").',
+                    'Keep every exclusion the user gave; write them as "not X" or "exclude X".',
+                    'keywords should include the plain words buyers use for the offer (synonyms, category names), not just industry jargon.',
                 ]),
             ],
             [

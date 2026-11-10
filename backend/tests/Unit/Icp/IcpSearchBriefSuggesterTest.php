@@ -27,7 +27,8 @@ class IcpSearchBriefSuggesterTest extends TestCase
         $this->assertNotEmpty($result['keywords']);
         $this->assertContains('Logistics & Fleet', $result['industries']);
         $this->assertNotEmpty($result['decisionMakers']);
-        $this->assertContains('51-200', $result['companySizes']);
+        // Company size is a hard filter; Strengthen must not invent one.
+        $this->assertSame([], $result['companySizes']);
         $this->assertSame(60, $result['minMatchScore']);
     }
 
@@ -122,5 +123,44 @@ class IcpSearchBriefSuggesterTest extends TestCase
             'Improve should keep user niche nouns'
         );
         $this->assertStringNotContainsStringIgnoringCase('germany', $result['brief']);
+    }
+
+    public function test_strengthen_keeps_user_choices_and_invents_no_filters(): void
+    {
+        $result = app(IcpSearchBriefSuggester::class)->deterministic([
+            'mode' => 'improve',
+            'customPrompt' => 'payroll software for growing teams',
+            'industries' => ['Payroll & HR Tech'],
+            'decisionMakers' => ['People Ops Lead'],
+            'exclusions' => ['staffing agencies'],
+        ]);
+
+        $this->assertSame(['Payroll & HR Tech'], $result['industries']);
+        $this->assertSame(['People Ops Lead'], $result['decisionMakers']);
+        $this->assertSame([], $result['companySizes']);
+        $this->assertContains('staffing agencies', $result['exclusions']);
+    }
+
+    public function test_unknown_niche_gets_no_guessed_industry(): void
+    {
+        $result = app(IcpSearchBriefSuggester::class)->deterministic([
+            'mode' => 'generate',
+            'customPrompt' => 'wedding photographers booking tools',
+        ]);
+
+        $this->assertSame([], $result['industries']);
+        $this->assertSame([], $result['decisionMakers']);
+    }
+
+    public function test_job_titles_do_not_strip_offer_words_from_the_brief(): void
+    {
+        $result = app(IcpSearchBriefSuggester::class)->sanitize([
+            'brief' => 'supply chain visibility software for FMCG distributors',
+            'keywords' => [],
+        ], [
+            'decisionMakers' => ['Supply Chain Director', 'Head of Sales'],
+        ]);
+
+        $this->assertStringContainsString('supply chain visibility software', $result['brief']);
     }
 }

@@ -145,6 +145,7 @@ class SocialSignalEnricher
             .'Map opportunity_kind to signal_type: asking_for_recommendation and pain_point -> recommendation, competitor_dissatisfaction -> switching, pricing_question -> pricing, funding -> funding_event, partnership -> partnership_opportunity, hiring -> hiring_expansion, none -> other. '
             .'buying_intent_score (0-100 integer) answers: how likely is it that the user wins business or a deal by replying this week? '
             .'90+ = explicitly asking for exactly what the user offers, in their market; 70-89 = clear need the offer solves; 50-69 = plausible but indirect; under 40 = not worth their time (use signal_type other). '
+            .'If interest.not_a_fit is present, a post whose author or target is one of those is not an opening for this user. '
             .'Score lower when the location or segment clearly contradicts the user\'s interest, when the post is old news, or when the author is not the one with the need. '
             .'reasons is an array of short strings citing what in the post matches the user\'s interest. summary is a concise neutral summary. '
             .'why_this_matters_to_you is 2nd person and cites the user\'s stated interest explicitly. benefits is an array of concrete gains for the user. '
@@ -177,6 +178,11 @@ class SocialSignalEnricher
             $interest['competitors'] = $profile->competitors;
             if ($profile->buyer !== '') {
                 $interest['ideal_opening'] = $profile->buyer;
+            }
+            if ($profile->avoid !== []) {
+                // Who the user said is NOT a fit. A post whose author or subject
+                // is one of these is not an opening (actionability not_an_opportunity).
+                $interest['not_a_fit'] = $profile->avoid;
             }
         }
 

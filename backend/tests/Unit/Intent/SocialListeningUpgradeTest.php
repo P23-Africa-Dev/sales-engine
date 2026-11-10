@@ -6,6 +6,7 @@ use App\Models\IcpProfile;
 use App\Models\SignalTypeDefinition;
 use App\Models\SocialListeningSetting;
 use App\Models\SocialSignal;
+use App\Services\Discovery\DTO\IcpBrief;
 use App\Services\Intent\DTO\ListeningProfile;
 use App\Services\Intent\DTO\RawSocialHit;
 use App\Services\Intent\OpportunityGate;
@@ -323,5 +324,30 @@ class SocialListeningUpgradeTest extends TestCase
             postedAt: $postedAt ?? ($fullText ? Carbon::now()->subDay() : null),
             fullText: $fullText,
         );
+    }
+
+    public function test_icp_exclusions_reach_the_qualifier_not_the_text_filter(): void
+    {
+        $brief = new IcpBrief(
+            name: 'Fleet',
+            description: '',
+            industries: [],
+            territories: [],
+            companySizes: [],
+            decisionMakers: [],
+            customPrompt: 'We sell GPS fleet tracking to haulage companies',
+            minMatchScore: 60,
+            autoSyncCrm: false,
+            query: '',
+            exclusions: ['freight brokers'],
+        );
+        $profile = ListeningProfile::fromBrief($brief);
+
+        $this->assertSame(['freight brokers'], $profile->avoid);
+        $this->assertSame([], $profile->excludeTerms);
+
+        // A buyer complaining about brokers is still a lead.
+        $hit = $this->hit('We are done with freight brokers and want our own fleet tracking setup for 30 trucks, where do we start?');
+        $this->assertTrue((new OpportunityPrefilter)->accepts($hit, $profile));
     }
 }

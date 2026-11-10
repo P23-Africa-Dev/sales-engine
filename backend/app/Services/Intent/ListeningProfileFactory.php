@@ -66,7 +66,7 @@ class ListeningProfileFactory
             return null;
         }
 
-        $cacheKey = 'social_listening:plan:v2:'.$organization->id.':'.md5(json_encode([$prompt, $description, $keywords]));
+        $cacheKey = 'social_listening:plan:v2:'.$organization->id.':'.md5((string) json_encode([$prompt, $description, $keywords, $brief->exclusions]));
         $cached = Cache::get($cacheKey);
         if (is_array($cached)) {
             return $cached;
@@ -84,6 +84,7 @@ class ListeningProfileFactory
                         'custom_prompt' => $prompt,
                         'description' => $description,
                         'keywords' => $keywords,
+                        'not_a_fit' => array_slice($brief->exclusions, 0, 10),
                     ]),
                 ],
             ], 'extract', $organization);
@@ -111,7 +112,7 @@ class ListeningProfileFactory
             .'competitors is an array of real product or company names in this space (named by the user first, then the best-known alternatives), max 5, else []. '
             .'communities is up to 5 subreddit names (no r/ prefix) where these buyers ask for help. Only name subreddits you are confident exist. '
             .'exclude_terms is up to 8 single words or short phrases that mark noise for this search (e.g. job ads, courses, unrelated meanings of the offer words). '
-            .'buyer is one sentence describing who counts as a real opening (role, situation). '
+            .'buyer is one sentence describing who counts as a real opening (role, situation). not_a_fit lists who the user excludes; never target them. '
             .'include_hiring is true only when they explicitly want hiring or appointment news. '
             .'Return JSON only: {"mode":"sell|invest|partner","offer":"...","synonyms":[],"pain_phrases":[],"competitors":[],"communities":[],"exclude_terms":[],"buyer":"...","include_hiring":false}';
     }

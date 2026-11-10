@@ -113,4 +113,34 @@ describe("ScanRunSummaryPanel", () => {
 
     expect(html).toContain("None qualified");
   });
+  it("explains AI rejections and duplicates so the parts add up to the total", () => {
+    const html = renderToStaticMarkup(<ScanRunSummaryPanel run={{
+      id: 9,
+      status: "completed",
+      signals_created: 1,
+      result_summary: {
+        totalChecked: 10,
+        qualified: 1,
+        rejected: {
+          icpMismatch: 0,
+          missingSourceUrl: 0,
+          missingSourceDate: 1,
+          stale: 0,
+          belowMinScore: 1,
+          duplicate: 2,
+          notActionable: 5,
+          total: 9,
+        },
+        rejectedDetail: { not_a_buyer: 2, muted_author: 1, over_enrich_cap: 1 },
+      },
+    }} />);
+
+    expect(html).toContain("9 rejected");
+    expect(html).toContain("1 scored below your minimum score");
+    expect(html).toContain("2 were already in your feed");
+    expect(html).toContain("2 were vendors, recruiters or news, not buyers");
+    expect(html).toContain("1 came from authors you keep dismissing");
+    expect(html).toContain("1 lower-priority post was left for the next scan");
+    expect(html).toContain("1 weren&#x27;t a concrete opening");
+  });
 });

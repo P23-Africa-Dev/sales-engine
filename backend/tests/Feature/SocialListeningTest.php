@@ -702,10 +702,24 @@ class SocialListeningTest extends TestCase
 
         $this->withHeaders($this->orgHeaders($org))
             ->putJson('/api/v1/social-listening/settings', [
-                'freshness_window_days' => 90,
+                'freshness_window_days' => 30,
             ])
             ->assertOk()
-            ->assertJsonPath('data.freshness_window_days', 90);
+            ->assertJsonPath('data.freshness_window_days', 30);
+
+        // The window tops out at 30 days.
+        $this->withHeaders($this->orgHeaders($org))
+            ->putJson('/api/v1/social-listening/settings', [
+                'freshness_window_days' => 90,
+            ])
+            ->assertStatus(422);
+
+        // A row saved before the trim is shown, and used, as 30.
+        SocialListeningSetting::query()->where('organization_id', $org->id)->update(['freshness_window_days' => 180]);
+        $this->withHeaders($this->orgHeaders($org))
+            ->getJson('/api/v1/social-listening/settings')
+            ->assertOk()
+            ->assertJsonPath('data.freshness_window_days', 30);
     }
 
     public function test_settings_persist_meta_page_ids(): void

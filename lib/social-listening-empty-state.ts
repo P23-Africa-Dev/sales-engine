@@ -1,4 +1,8 @@
-import type { SocialListeningRunStatus } from "@/lib/api/sales-engine";
+import {
+  isStructuredRunSummary,
+  type SocialListeningRunStatus,
+} from "@/lib/api/sales-engine";
+import { describeScanRejections } from "@/lib/social-listening-run-summary";
 import { SOCIAL_LISTENING_TIPS } from "@/lib/social-listening-processing-labels";
 
 export type SocialListeningEmptyVariant =
@@ -84,11 +88,31 @@ export function getSocialListeningEmptyState(
   }
 
   if (latestRun?.status === "completed" && (latestRun.signals_created ?? 0) === 0) {
+    const summary = isStructuredRunSummary(latestRun.result_summary)
+      ? latestRun.result_summary
+      : null;
+    const checked = summary?.totalChecked ?? 0;
+    const parts = summary ? describeScanRejections(summary) : [];
+    if (summary?.budget_exhausted) parts.push("the daily search budget was used up");
+
+    let description: string;
+    if (summary?.model_unavailable) {
+      description =
+        "The scan found posts but the AI that qualifies them isn't available right now, so none could be checked. Try Scan now again shortly.";
+    } else if (!summary) {
+      description = "Your scan finished, but no high-intent posts met your score threshold yet.";
+    } else if (checked === 0) {
+      description = "The scan searched your active ICP and the live sources returned no recent posts.";
+    } else {
+      description = `The scan checked ${checked} recent posts for this ICP and kept 0.${
+        parts.length ? ` Dropped: ${parts.join(", ")}.` : ""
+      }`;
+    }
+
     return {
       variant: "no_match_after_scan",
-      title: "No signals matched your ICP",
-      description:
-        "Your scan finished → no high-intent posts met your score threshold yet.",
+      title: summary && checked === 0 ? "No recent posts found" : "No opportunities kept",
+      description,
       tip,
       showActions: true,
     };

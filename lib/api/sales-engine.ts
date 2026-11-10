@@ -540,6 +540,7 @@ export function suggestIcpSearchBrief(payload: {
   decisionMakers?: string[];
   companySizes?: string[];
   minMatchScore?: number;
+  exclusions?: string[];
 }): Promise<IcpSearchBriefSuggestResult> {
   return withSessionRetry(async () => {
     const data = await seRequest<IcpSearchBriefSuggestResult>({
@@ -1363,7 +1364,21 @@ export type SocialListeningRunResultSummary = {
     typeMismatch?: number;
     belowMinScore?: number;
     duplicate?: number;
+    /** Read by the AI (or pre-filtered) and judged not to be a concrete opening. */
+    notActionable?: number;
     total: number;
+  };
+  /**
+   * Why posts were dropped, by reason key. Keys from the backend include:
+   * not_a_buyer, self_promotion, excluded_term, not_an_opportunity, over_enrich_cap,
+   * muted_author, muted_community.
+   */
+  rejectedDetail?: Record<string, number>;
+  /** What the scan learned from earlier dismissals and saves for this ICP. */
+  feedback?: {
+    mutedAuthors?: number;
+    mutedCommunities?: number;
+    labelAdjustments?: Record<string, number>;
   };
   enrichment?: {
     pending?: number;
@@ -1372,7 +1387,28 @@ export type SocialListeningRunResultSummary = {
   };
   unlabeled?: number;
   budget_exhausted?: boolean;
+  /** True when the AI model was not configured, so nothing could be qualified. */
+  model_unavailable?: boolean;
+  freshnessWindowRequested?: number;
+  freshnessWindowApplied?: number;
+  /** The listening plan the scan used (offer, synonyms, pain phrases, competitors, communities). */
+  listeningProfile?: SocialListeningProfileSummary;
+  /** The exact searches the scan ran, per source, with hit counts. */
+  queries?: Array<{ source: string; family: string; query: string; hits: number }>;
   sources?: SocialSourceHealthItem[];
+};
+
+export type SocialListeningProfileSummary = {
+  mode?: "sell" | "invest" | "partner" | string;
+  offer?: string;
+  competitors?: string[];
+  include_hiring?: boolean;
+  synonyms?: string[];
+  pain_phrases?: string[];
+  communities?: string[];
+  exclude_terms?: string[];
+  buyer?: string;
+  avoid?: string[];
 };
 
 export type SocialSourceHealthItem = {
@@ -1419,7 +1455,7 @@ export type SocialListeningMetrics = {
   latest_run?: SocialListeningRunStatus | null;
 };
 
-export type FreshnessWindowDays = 7 | 14 | 30 | 90 | 180;
+export type FreshnessWindowDays = 7 | 14 | 30;
 
 export type SocialListeningSettings = {
   enabled_sources: string[];

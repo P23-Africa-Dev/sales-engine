@@ -53,10 +53,55 @@ class IcpFilterService
                 || $this->matchesTerritory($brief->territories, $candidate->territory),
         ];
 
+        // The user's own exclusions ("brokers", "staffing agencies"). Only
+        // evaluated when the caller supplies the candidate's profile text, so
+        // pipelines without it keep the original four-field audit trail.
+        if ($candidate->profileText !== null && $this->usableExclusions($brief) !== []) {
+            $reasons['exclusions'] = $this->matchedExclusion($brief, $candidate->profileText) === null;
+        }
+
         return new IcpFilterResult(
             passed: ! in_array(false, $reasons, true),
             reasons: $reasons,
         );
+    }
+
+    /**
+     * The first ICP exclusion the text matches, or null. Plurals and simple
+     * derivations match the same stem ("brokers" also catches "brokerage").
+     */
+    public function matchedExclusion(IcpBrief $brief, string $text): ?string
+    {
+        $haystack = mb_strtolower($text);
+        if (trim($haystack) === '') {
+            return null;
+        }
+
+        foreach ($this->usableExclusions($brief) as $exclusion) {
+            $words = preg_split('/\s+/u', mb_strtolower($exclusion)) ?: [];
+            $last = (string) array_pop($words);
+            $stem = preg_replace('/(ies|es|s|y)$/u', '', $last) ?? $last;
+            if (mb_strlen($stem) < 4) {
+                $stem = $last;
+            }
+            $pattern = '/\b'.implode('\s+', array_map(static fn ($w) => preg_quote($w, '/'), [...$words, $stem])).'\w*/u';
+            if (preg_match($pattern, $haystack)) {
+                return $exclusion;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function usableExclusions(IcpBrief $brief): array
+    {
+        return array_values(array_filter(
+            array_map(static fn ($e) => trim((string) $e), $brief->exclusions),
+            static fn (string $e) => mb_strlen($e) >= 3,
+        ));
     }
 
     /**

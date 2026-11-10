@@ -1,5 +1,6 @@
 import { CheckCircle2 } from "lucide-react";
 import { isStructuredRunSummary, type SocialListeningRunStatus } from "@/lib/api/sales-engine";
+import { describeScanRejections } from "@/lib/social-listening-run-summary";
 
 export type ScanRunSummaryPanelProps = {
   run?: SocialListeningRunStatus | null;
@@ -24,15 +25,7 @@ export function ScanRunSummaryPanel({ run }: ScanRunSummaryPanelProps) {
     return null;
   }
 
-  const rejectionParts = [
-    rejected.icpMismatch > 0 ? `${rejected.icpMismatch} didn't match your ICP filters` : null,
-    rejected.missingSourceUrl > 0 ? `${rejected.missingSourceUrl} had no source link` : null,
-    rejected.missingSourceDate > 0 ? `${rejected.missingSourceDate} had no publish date` : null,
-    rejected.stale > 0 ? `${rejected.stale} were too old` : null,
-    (rejected.typeMismatch ?? 0) > 0
-      ? `${rejected.typeMismatch} weren't a real match for the event type`
-      : null,
-  ].filter((part): part is string => part !== null);
+  const rejectionParts = describeScanRejections(run.result_summary);
 
   const found = enrichment?.found ?? 0;
   const notFound = enrichment?.notFound ?? 0;

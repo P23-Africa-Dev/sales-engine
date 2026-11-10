@@ -361,15 +361,17 @@ const sourceFilterOptions: SelectOption[] = [
   { value: "LinkedIn Post", label: "LinkedIn Post" },
   { value: "X/Twitter Post", label: "X/Twitter Post" },
   { value: "Reddit Post", label: "Reddit Post" },
-  { value: "Google Search", label: "Google Search" },
   { value: "Meta Page Post", label: "Meta Page Post" },
+  { value: "YouTube", label: "YouTube" },
 ];
 
 const legacySignalTypeFilterOptions: SelectOption[] = [
   { value: "all", label: "All Signal Type" },
   { value: "Recommendation", label: "Recommendation" },
   { value: "Switching", label: "Switching" },
+  { value: "Pain Point", label: "Pain Point" },
   { value: "Price", label: "Price" },
+  { value: "Hiring / Expansion", label: "Hiring / Expansion" },
   { value: "Investment Opportunity", label: "Investment Opportunity" },
   { value: "Funding Event", label: "Funding Event" },
   { value: "Market Signal", label: "Market Signal" },
@@ -380,9 +382,10 @@ const legacySignalTypeFilterOptions: SelectOption[] = [
 
 const intentFilterOptions: SelectOption[] = [
   { value: "all", label: "All Intent" },
+  { value: "Awareness", label: "Awareness" },
   { value: "Consideration", label: "Consideration" },
   { value: "Vendor Evaluation", label: "Vendor Evaluation" },
-  { value: "Research", label: "Research" },
+  { value: "Decision", label: "Decision" },
 ];
 
 const initialMessages: ChatMessage[] = [
@@ -3944,7 +3947,7 @@ function ListeningSettingsModal({
   const [metaPageIdsText, setMetaPageIdsText] = useState("");
   const [cadenceDays, setCadenceDays] = useState<14 | 30>(14);
   const [minScore, setMinScore] = useState(70);
-  const [freshnessWindowDays, setFreshnessWindowDays] = useState<FreshnessWindowDays>(180);
+  const [freshnessWindowDays, setFreshnessWindowDays] = useState<FreshnessWindowDays>(30);
   const [intentFilters, setIntentFilters] = useState<string[]>([]);
   const [crmDestination, setCrmDestination] = useState<SocialListeningSettings["crm_destination"]>("qualified_pipeline");
   const [outreachChannel, setOutreachChannel] = useState<SocialListeningSettings["outreach_channel_default"]>("email");
@@ -3957,7 +3960,7 @@ function ListeningSettingsModal({
     setMetaPageIdsText((settings.meta_page_ids ?? []).join("\n"));
     setCadenceDays(settings.cadence_days ?? 14);
     setMinScore(settings.min_score ?? 70);
-    setFreshnessWindowDays((settings.freshness_window_days ?? 180) as FreshnessWindowDays);
+    setFreshnessWindowDays(Math.min(settings.freshness_window_days ?? 30, 30) as FreshnessWindowDays);
     setIntentFilters(settings.intent_filters ?? []);
     setCrmDestination(settings.crm_destination ?? "qualified_pipeline");
     setOutreachChannel(settings.outreach_channel_default ?? "email");
@@ -4145,8 +4148,6 @@ function ListeningSettingsModal({
                     { label: "Last 7 days", value: 7 as const },
                     { label: "Last 14 days", value: 14 as const },
                     { label: "Last 30 days", value: 30 as const },
-                    { label: "Last 3 months", value: 90 as const },
-                    { label: "Last 6 months", value: 180 as const },
                   ].map((option) => (
                     <label
                       key={option.value}
@@ -4345,7 +4346,13 @@ function SocialListeningTab({
       label: type.label,
     }));
     if (discrete.length === 0) return legacySignalTypeFilterOptions;
-    return [{ value: "all", label: "All Signal Type" }, ...discrete];
+    // Most signals come from the general opportunity search and carry no
+    // discrete type key, so their labels must stay filterable alongside packs.
+    const discreteLabels = new Set(discrete.map((option) => option.label.toLowerCase()));
+    const general = legacySignalTypeFilterOptions.filter(
+      (option) => option.value !== "all" && !discreteLabels.has(option.label.toLowerCase())
+    );
+    return [{ value: "all", label: "All Signal Type" }, ...general, ...discrete];
   }, [discreteSignalTypes]);
 
   const visibleSelectedIds = useMemo(
@@ -4397,7 +4404,7 @@ function SocialListeningTab({
         signalType !== "all"
           ? signalTypeOptions.find((option) => option.value === signalType)?.label ?? signalType
           : null,
-      freshnessWindowDays: listenSettings?.freshness_window_days ?? 180,
+      freshnessWindowDays: listenSettings?.freshness_window_days ?? 30,
     }
   );
 

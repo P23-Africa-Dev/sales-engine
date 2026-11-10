@@ -20,7 +20,10 @@ readonly class ListeningProfile
      * @param  list<string>  $synonyms  Category phrases buyers use for the offer.
      * @param  list<string>  $painPhrases  First-person problem phrasings the offer solves.
      * @param  list<string>  $communities  Subreddit names (no r/ prefix).
-     * @param  list<string>  $excludeTerms  Words that mark a post as noise for this profile.
+     * @param  list<string>  $excludeTerms  Words that mark a post as noise for this profile (hard text filter).
+     * @param  list<string>  $avoid  The user's own ICP exclusions ("brokers", "consultants"). These describe
+     *                               who is NOT a fit, so the qualifier judges them; they are not a text
+     *                               filter, because "we're done with freight brokers" is a great lead.
      */
     public function __construct(
         public string $mode,
@@ -33,6 +36,7 @@ readonly class ListeningProfile
         public array $communities = [],
         public array $excludeTerms = [],
         public string $buyer = '',
+        public array $avoid = [],
     ) {}
 
     public static function fromBrief(IcpBrief $brief): self
@@ -64,6 +68,7 @@ readonly class ListeningProfile
                 self::phraseList($brief->searchKeywords, 5, 4),
                 static fn (string $keyword) => mb_strtolower($keyword) !== mb_strtolower($offer),
             )),
+            avoid: self::phraseList($brief->exclusions, 10, 6),
         );
     }
 
@@ -101,6 +106,7 @@ readonly class ListeningProfile
             communities: self::communityList($expansion['communities'] ?? null) ?: $this->communities,
             excludeTerms: self::phraseList($expansion['exclude_terms'] ?? null, 10, 3) ?: $this->excludeTerms,
             buyer: self::clipWords(trim((string) ($expansion['buyer'] ?? '')), 20) ?: $this->buyer,
+            avoid: $this->avoid,
         );
     }
 
@@ -137,6 +143,7 @@ readonly class ListeningProfile
             'communities' => $this->communities,
             'exclude_terms' => $this->excludeTerms,
             'buyer' => $this->buyer,
+            'avoid' => $this->avoid,
         ];
     }
 

@@ -14,5 +14,7 @@ readonly class CandidateCompany
         public ?string $companySize = null,
         public ?string $revenue = null,
         public ?string $territory = null,
+        /** Name, industry, title and summary text, checked against the ICP's exclusions. Null = not evaluated. */
+        public ?string $profileText = null,
     ) {}
 }

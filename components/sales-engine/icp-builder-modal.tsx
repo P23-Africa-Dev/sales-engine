@@ -118,6 +118,23 @@ export function normalizeIcpConfig(config?: Partial<IcpConfig> | null): IcpConfi
   };
 }
 
+/**
+ * Strengthen adds to what the user chose; it never replaces it. User values
+ * come first and keep their order; suggestions only fill in what is missing.
+ */
+function mergeUniqueValues(primary: string[] = [], suggested: string[] = []): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const value of [...primary, ...suggested]) {
+    const trimmed = typeof value === "string" ? value.trim() : "";
+    const key = trimmed.toLowerCase();
+    if (!trimmed || seen.has(key)) continue;
+    seen.add(key);
+    out.push(trimmed);
+  }
+  return out;
+}
+
 const AVAILABLE_INDUSTRIES = [
   "FMCG & Retail",
   "Logistics & Fleet",
@@ -400,7 +417,7 @@ export function IcpBuilderModal({
         });
         setKeywordPool(expanded);
         setBriefKeywords(nextVisibleKeywords(expanded, brief));
-        setFormConfig((prev) => ({ ...prev, customPrompt: brief }));
+        setFormConfig((prev) => ({ ...prev, customPrompt: brief, searchKeywords: expanded }));
         toast.success("ICP strengthened. Review the brief, then save.");
       } catch (error) {
         if (!cancelled) {
@@ -605,11 +622,13 @@ export function IcpBuilderModal({
       ...prev,
       customPrompt: clamped,
       searchKeywords: pool,
-      industries: preview.industries.length > 0 ? preview.industries : prev.industries,
-      decisionMakers: preview.decisionMakers.length > 0 ? preview.decisionMakers : prev.decisionMakers,
-      companySizes: preview.companySizes.length > 0 ? preview.companySizes : prev.companySizes,
-      exclusions: preview.exclusions,
-      minMatchScore: preview.minMatchScore || prev.minMatchScore,
+      // Merge, never replace: a strengthened ICP must keep every industry,
+      // buyer role, exclusion and score bar the user already set.
+      industries: mergeUniqueValues(prev.industries, preview.industries),
+      decisionMakers: mergeUniqueValues(prev.decisionMakers, preview.decisionMakers),
+      companySizes: prev.companySizes.length > 0 ? prev.companySizes : preview.companySizes,
+      exclusions: mergeUniqueValues(prev.exclusions ?? [], preview.exclusions),
+      minMatchScore: prev.minMatchScore || preview.minMatchScore,
     }));
     setStrengthenPreview(null);
   }
@@ -744,25 +763,31 @@ export function IcpBuilderModal({
         decisionMakers: formConfig.decisionMakers,
         companySizes: formConfig.companySizes,
         minMatchScore: formConfig.minMatchScore,
+        exclusions: formConfig.exclusions ?? [],
       };
       const mode = (formConfig.customPrompt ?? "").trim() ? "improve" : "generate";
-      let result = await suggestBrief.mutateAsync({ mode, ...payload });
-      const afterScore = (brief: string, keywords: string[], industries: string[], buyers: string[]) =>
+      // Score a suggestion the way it will look once merged into the form.
+      const afterScore = (candidate: Awaited<ReturnType<typeof suggestBrief.mutateAsync>>) =>
         scoreIcpStrength({
           profileName: formConfig.profileName,
           description: formConfig.description,
-          customPrompt: brief,
-          industries,
+          customPrompt: clampToMaxWords(candidate.brief.trim(), ICP_BRIEF_MAX_WORDS).trim(),
+          industries: mergeUniqueValues(formConfig.industries, candidate.industries ?? []),
           territories: formConfig.territories,
-          decisionMakers: buyers,
-          keywords,
+          decisionMakers: mergeUniqueValues(formConfig.decisionMakers, candidate.decisionMakers ?? []),
+          keywords: candidate.keywords,
         }).score;
 
-      let brief = clampToMaxWords(result.brief.trim(), ICP_BRIEF_MAX_WORDS).trim();
-      if (afterScore(brief, result.keywords, result.industries ?? [], result.decisionMakers ?? []) <= before) {
-        result = await suggestBrief.mutateAsync({ mode: "regenerate", ...payload });
-        brief = clampToMaxWords(result.brief.trim(), ICP_BRIEF_MAX_WORDS).trim();
+      let result = await suggestBrief.mutateAsync({ mode, ...payload });
+      if (afterScore(result) <= before) {
+        // Keep whichever draft is actually stronger, not simply the last one.
+        const retry = await suggestBrief.mutateAsync({ mode: "regenerate", ...payload });
+        if (afterScore(retry) > afterScore(result)) {
+          result = retry;
+        }
       }
+      const brief = clampToMaxWords(result.brief.trim(), ICP_BRIEF_MAX_WORDS).trim();
+      const improved = afterScore(result) > before;
 
       if (
         !brief ||
@@ -785,7 +810,11 @@ export function IcpBuilderModal({
         exclusions: result.exclusions ?? [],
         minMatchScore: result.minMatchScore ?? formConfig.minMatchScore,
       });
-      toast.success("Review the strengthened ICP, then accept to apply it.");
+      toast.success(
+        improved
+          ? "Review the strengthened ICP, then accept to apply it."
+          : "Your ICP is already in good shape. Review the suggested wording, then accept or dismiss it."
+      );
     } catch (error) {
       toast.error(getApiErrorMessage(error, "Couldn’t strengthen this ICP."));
     } finally {

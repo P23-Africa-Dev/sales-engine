@@ -33,6 +33,8 @@ readonly class IcpBrief
         public array $signalTypePacks = [],
         /** @var list<string> extra Serper clauses persisted from Strengthen ICP */
         public array $searchKeywords = [],
+        /** @var list<string> things the user said to leave out (brokers, consultants…) */
+        public array $exclusions = [],
     ) {}
 
     public static function fromIcpProfile(\App\Models\IcpProfile $profile, string $query = ''): self
@@ -66,6 +68,10 @@ readonly class IcpBrief
                 static fn($keyword) => is_string($keyword) ? trim($keyword) : '',
                 $config['searchKeywords'] ?? [],
             ))),
+            exclusions: array_values(array_filter(array_map(
+                static fn($exclusion) => is_string($exclusion) ? trim($exclusion) : '',
+                $config['exclusions'] ?? [],
+            ))),
         );
     }
 
@@ -91,6 +97,7 @@ readonly class IcpBrief
             revenueRanges: $this->revenueRanges,
             signalTypePacks: $this->signalTypePacks,
             searchKeywords: $this->searchKeywords,
+            exclusions: $this->exclusions,
         );
     }
 
@@ -118,6 +125,7 @@ readonly class IcpBrief
             revenueRanges: $this->revenueRanges,
             signalTypePacks: $this->signalTypePacks,
             searchKeywords: $this->searchKeywords,
+            exclusions: $this->exclusions,
         );
     }
 
@@ -143,6 +151,7 @@ readonly class IcpBrief
             revenueRanges: $this->revenueRanges,
             signalTypePacks: $this->signalTypePacks,
             searchKeywords: $this->searchKeywords,
+            exclusions: $this->exclusions,
         );
     }
 

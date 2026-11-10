@@ -98,4 +98,52 @@ describe("social-listening-empty-state", () => {
       "We monitor public posts for buying signals that fit your active ICP."
     );
   });
+  it("breaks down posts the AI judged not to be openings", () => {
+    const latestRun: SocialListeningRunStatus = {
+      id: 4,
+      status: "completed",
+      signals_created: 0,
+      result_summary: {
+        totalChecked: 12,
+        qualified: 0,
+        rejected: {
+          icpMismatch: 0,
+          missingSourceUrl: 0,
+          missingSourceDate: 0,
+          stale: 0,
+          notActionable: 9,
+          duplicate: 3,
+          total: 12,
+        },
+        rejectedDetail: { not_a_buyer: 4, self_promotion: 2 },
+      },
+    };
+
+    const state = getSocialListeningEmptyState(latestRun, "2026-01-01T00:00:00Z", false);
+
+    expect(state?.title).toBe("No opportunities kept");
+    expect(state?.description).toContain("checked 12 recent posts");
+    expect(state?.description).toContain("4 were vendors, recruiters or news, not buyers");
+    expect(state?.description).toContain("2 were vendor promotions");
+    expect(state?.description).toContain("3 weren't a concrete opening");
+    expect(state?.description).toContain("3 were already in your feed");
+  });
+
+  it("says when the qualifying model was unavailable", () => {
+    const latestRun: SocialListeningRunStatus = {
+      id: 5,
+      status: "completed",
+      signals_created: 0,
+      result_summary: {
+        totalChecked: 6,
+        qualified: 0,
+        rejected: { icpMismatch: 0, missingSourceUrl: 0, missingSourceDate: 0, stale: 0, notActionable: 6, total: 6 },
+        model_unavailable: true,
+      },
+    };
+
+    const state = getSocialListeningEmptyState(latestRun, "2026-01-01T00:00:00Z", false);
+
+    expect(state?.description).toContain("isn't available right now");
+  });
 });
