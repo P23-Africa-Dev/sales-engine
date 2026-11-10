@@ -1140,6 +1140,70 @@ class SocialListeningTest extends TestCase
         $this->assertSame(1, $xRow['attempts']);
     }
 
+    public function test_confirmed_signal_type_event_is_saved_though_it_is_not_a_buyer_ask(): void
+    {
+        config([
+            'services.glm.api_key' => 'test-glm-key',
+            'services.serper.api_key' => 'test-serper-key',
+            'services.social_listening.max_signal_type_queries_per_run' => 1,
+        ]);
+        $this->seed(SignalTypeDefinitionSeeder::class);
+
+        [$user, $org] = $this->actingAsOrgMember();
+        $icp = IcpProfile::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'Equipment manufacturers',
+            'is_active' => true,
+            'config' => array_merge(IcpProfile::defaultConfig(), [
+                'signalTypePacks' => [SignalTypeDefinition::PACK_DEFAULT],
+                'customPrompt' => 'Equipment manufacturers selling construction machinery',
+            ]),
+        ]);
+
+        $settings = SocialListeningSetting::query()->create(array_merge(
+            SocialListeningSetting::defaultsForOrg($org->id, $icp->id),
+            ['enabled_sources' => ['linkedin_public'], 'min_score' => 30, 'intent_filters' => []],
+        ));
+
+        $glm = fn (array $json) => Http::response(['choices' => [['message' => ['content' => json_encode($json)]]]], 200);
+        Http::fake([
+            'api.z.ai/*' => function ($request) use ($glm) {
+                $body = $request->body();
+                if (str_contains($body, 'Decide whether a post is a genuine match')) {
+                    return $glm(['matched' => true, 'company' => 'Atlas Machinery', 'description' => 'Atlas Machinery opened a Kenyan subsidiary.', 'source_url' => '', 'source_date' => '']);
+                }
+                if (str_contains($body, 'You qualify one public social post')) {
+                    return $glm([
+                        'author_role' => 'news',
+                        'opportunity_kind' => 'none',
+                        'signal_type' => 'market_signal',
+                        'buying_intent_score' => 80,
+                        'evidence_quote' => '',
+                        'actionability' => 'not_an_opportunity',
+                        'summary' => 'Atlas Machinery opened a Kenyan subsidiary.',
+                    ]);
+                }
+
+                return $glm(['mode' => 'sell', 'offer' => 'construction machinery']);
+            },
+            'google.serper.dev/*' => Http::response([
+                'organic' => [[
+                    'title' => 'Atlas Machinery registers Kenyan subsidiary to begin local distribution',
+                    'snippet' => 'Atlas Machinery registers a new Kenyan subsidiary in Nairobi to distribute its excavators across East Africa.',
+                    'link' => 'https://linkedin.com/posts/atlas-kenya-subsidiary',
+                    'date' => '1 day ago',
+                ]],
+            ], 200),
+        ]);
+
+        $run = app(SocialListeningOrchestrator::class)->run($org, $icp, $settings, $user);
+
+        $this->assertSame('completed', $run->status);
+        $signal = SocialSignal::query()->where('organization_id', $org->id)->first();
+        $this->assertNotNull($signal);
+        $this->assertSame('New Market Entry', $signal->intent_label);
+    }
+
     public function test_none_pack_disables_discrete_signal_type_queries(): void
     {
         config(['services.glm.api_key' => '', 'services.serper.api_key' => 'test-serper-key']);

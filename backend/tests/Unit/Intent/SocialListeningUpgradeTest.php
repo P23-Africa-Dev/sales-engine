@@ -121,6 +121,45 @@ class SocialListeningUpgradeTest extends TestCase
         ], $funding, $invest));
     }
 
+    public function test_confirmed_signal_type_event_passes_without_a_buyer_ask(): void
+    {
+        $gate = new OpportunityGate;
+        $text = 'Atlas Compressors opens a Nairobi subsidiary to serve East African construction firms.';
+        $event = [
+            'actionability' => 'not_an_opportunity',
+            'signal_type' => 'market_signal',
+            'evidence_quote' => '',
+            'author_role' => 'news',
+        ];
+
+        $this->assertSame('not_an_opportunity', $gate->rejection($event, $text, $this->fleetProfile()));
+        $this->assertNull($gate->rejection($event, $text, $this->fleetProfile(), confirmedSignalType: true));
+        $this->assertSame('not_a_buyer', $gate->rejection(
+            ['author_role' => 'recruiter'] + $event,
+            $text,
+            $this->fleetProfile(),
+            confirmedSignalType: true,
+        ));
+        $this->assertSame('not_an_opportunity', $gate->rejection(
+            ['from_heuristic' => true] + $event,
+            $text,
+            $this->fleetProfile(),
+            confirmedSignalType: true,
+        ));
+    }
+
+    public function test_signal_type_hit_skips_only_the_topic_cue_check(): void
+    {
+        $prefilter = new OpportunityPrefilter;
+        $event = $this->hit('Atlas Compressors opens a Nairobi subsidiary to serve East African construction firms this quarter.');
+
+        $this->assertSame('not_an_opportunity', $prefilter->rejection($event, $this->fleetProfile()));
+        $this->assertNull($prefilter->rejection($event, $this->fleetProfile(), requireTopicCue: false));
+
+        $job = $this->hit('Atlas Compressors is now hiring a country manager for its new Nairobi subsidiary, apply now.');
+        $this->assertSame('not_an_opportunity', $prefilter->rejection($job, $this->fleetProfile(), requireTopicCue: false));
+    }
+
     public function test_reddit_posts_are_hydrated_concurrently(): void
     {
         Http::fake([

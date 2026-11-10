@@ -31,13 +31,26 @@ class OpportunityGate
         private readonly OpportunityPrefilter $prefilter = new OpportunityPrefilter,
     ) {}
 
+    /** Roles dropped even for a confirmed signal-type event: job ads and noise. */
+    private const NON_EVENT_ROLES = ['recruiter', 'spam', 'bot'];
+
     /**
      * @param  array<string, mixed>  $enriched
+     * @param  bool  $confirmedSignalType  The signal extractor already matched this post
+     *                                     to one of the ICP's enabled signal types (new market entry, leadership
+     *                                     hire, ...). Those are company events, usually reported by news or the
+     *                                     company itself, so the buyer-opening checks below do not apply.
      */
-    public function rejection(array $enriched, string $text, ListeningProfile $profile): ?string
+    public function rejection(array $enriched, string $text, ListeningProfile $profile, bool $confirmedSignalType = false): ?string
     {
         if (($enriched['from_heuristic'] ?? false) === true) {
             return 'not_an_opportunity';
+        }
+
+        if ($confirmedSignalType) {
+            $role = mb_strtolower(trim((string) ($enriched['author_role'] ?? '')));
+
+            return in_array($role, self::NON_EVENT_ROLES, true) ? 'not_a_buyer' : null;
         }
 
         if (($enriched['actionability'] ?? '') !== 'reply_now') {

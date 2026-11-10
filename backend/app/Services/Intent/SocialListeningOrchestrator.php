@@ -229,7 +229,7 @@ class SocialListeningOrchestrator
                     continue;
                 }
 
-                $reason = $this->prefilter->rejection($hit, $profile);
+                $reason = $this->prefilter->rejection($hit, $profile, requireTopicCue: $entry['signalTypeKey'] === null);
                 if ($reason !== null) {
                     $notActionable++;
                     $rejectedDetail[$reason] = ($rejectedDetail[$reason] ?? 0) + 1;
@@ -349,7 +349,12 @@ class SocialListeningOrchestrator
                 }
 
                 $quoteHaystack = trim($hit->postText."\n".($hit->title ?? '')."\n".($hit->snippet ?? ''));
-                $gateReason = $this->opportunityGate->rejection($enriched, $quoteHaystack, $profile);
+                $gateReason = $this->opportunityGate->rejection(
+                    $enriched,
+                    $quoteHaystack,
+                    $profile,
+                    confirmedSignalType: $signalTypeDefinition !== null,
+                );
                 if ($gateReason !== null) {
                     $notActionable++;
                     $rejectedDetail[$gateReason] = ($rejectedDetail[$gateReason] ?? 0) + 1;

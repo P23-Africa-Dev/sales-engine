@@ -38,7 +38,12 @@ class OpportunityPrefilter
         return $this->rejection($hit, $profile) === null;
     }
 
-    public function rejection(RawSocialHit $hit, ListeningProfile $profile): ?string
+    /**
+     * @param  bool  $requireTopicCue  False for hits from a signal-type query: a
+     *                                 company event ("opens a Nairobi office") carries no buyer cue,
+     *                                 and the signal extractor judges whether it matches the type.
+     */
+    public function rejection(RawSocialHit $hit, ListeningProfile $profile, bool $requireTopicCue = true): ?string
     {
         $url = mb_strtolower((string) $hit->postUrl);
         if (str_contains($url, '/jobs') || str_contains($url, '/careers')) {
@@ -72,7 +77,7 @@ class OpportunityPrefilter
             return 'not_an_opportunity';
         }
 
-        if (! $this->hasCue($text, $profile) && ! $this->mentionsPlanTerm($text, $profile)) {
+        if ($requireTopicCue && ! $this->hasCue($text, $profile) && ! $this->mentionsPlanTerm($text, $profile)) {
             return 'not_an_opportunity';
         }
 
