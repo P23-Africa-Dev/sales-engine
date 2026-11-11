@@ -45,7 +45,23 @@ class DeveloperInfoStaysServerSideTest extends TestCase
             'enrichment' => ['found' => 0],
         ]);
 
-        $this->assertSame(['totalChecked' => 100, 'qualified' => 0, 'enrichment' => ['found' => 0]], $public);
+        $this->assertSame(['totalChecked' => 100, 'qualified' => 0, 'enrichment' => ['found' => 0], 'sources_unavailable' => false], $public);
+    }
+
+    public function test_a_scan_whose_sources_all_failed_is_not_reported_as_quiet(): void
+    {
+        $public = SocialListeningRunService::publicSummary([
+            'totalChecked' => 0,
+            'qualified' => 0,
+            'sources' => [
+                ['key' => 'reddit', 'status' => 'error', 'attempts' => 9],
+                ['key' => 'x_native', 'status' => 'credits', 'attempts' => 1],
+                ['key' => 'reddit_native', 'status' => 'missing_key', 'attempts' => 0],
+            ],
+        ]);
+
+        $this->assertTrue($public['sources_unavailable']);
+        $this->assertArrayNotHasKey('sources', $public);
     }
 
     public function test_discovery_summary_sent_to_the_browser_has_no_diagnostics(): void

@@ -157,6 +157,9 @@ class ExtractionServiceTest extends TestCase
             'honorific and post-nominals' => ['Dr. Stanley Jacob FCIB - Zest Payments | LinkedIn', 'https://ng.linkedin.com/in/drstanleyjacob', 'Experience · Group Chief Innovation Officer · Founding CEO, Zest Payments Limited', 'Stanley Jacob', 'CEO', 'Zest Payments Limited'],
             'tagline is not a title' => ['Ope Adeoye - To grow, connect to the pipe | LinkedIn', 'https://ng.linkedin.com/in/opeadeoye', '20+ years in the technology & payments ecosystem.', 'Ope Adeoye', null, null],
             'handle slug with digits' => ['Luis Hidalgo - Head of Sales | Player-Coach Sales Leader | LinkedIn', 'https://uk.linkedin.com/in/hidalgo1', 'London · Head of Sales at Ethos', 'Luis Hidalgo', 'Head of Sales', null],
+            'title at company with experience' => ['Gloria Adjei - Olam | LinkedIn', 'https://gh.linkedin.com/in/gloria-adjei-1a2b3c', 'Import Export Manager at Olam · Experience: Olam · Location: Accra.', 'Gloria Adjei', 'Import Export Manager', 'Olam'],
+            'full company name kept' => ['Fuseini Nadi - Bomarts Farms | LinkedIn', 'https://gh.linkedin.com/in/fuseini-nadi', 'Export Manager at Bomarts Farms Limited · Experience: Bomarts Farms Limited · Location: Ghana', 'Fuseini Nadi', 'Export Manager', 'Bomarts Farms Limited'],
+            'at-sign title with former name' => ['Eugene Gikonyo - Prosper Global Ventures | LinkedIn', 'https://ke.linkedin.com/in/eugene-gikonyo', 'Eugene Gikonyo · Principal @ Prosper Global Ventures (formerly Mercy Corps Ventures) | Impact', 'Eugene Gikonyo', 'Principal', 'Prosper Global Ventures'],
             'second role is not a company' => ['Olayemi Toye - CIO | LinkedIn', 'https://ng.linkedin.com/in/olayemi-toye', 'CIO | CTO | Payments', 'Olayemi Toye', 'CIO', null],
         ];
     }
@@ -175,5 +178,17 @@ class ExtractionServiceTest extends TestCase
         $this->assertSame($name, $row['person_name']);
         $this->assertSame($role, $row['title'] ?? null);
         $this->assertSame($company, $row['company'] ?? null);
+    }
+
+    public function test_initials_only_names_are_dropped(): void
+    {
+        config(['services.glm.api_key' => '']);
+        $brief = IcpBrief::fromIcpProfile(new IcpProfile(['name' => 'X', 'config' => IcpProfile::defaultConfig()]), 'fintech in Lagos', 'people');
+        $hit = new RawDiscoveryHit(name: 'D P', source: 'web', provider: 'serper', snippet: 'CTO for Cede, B2B payments', url: 'https://ng.linkedin.com/in/d-p-7781a', meta: ['title' => 'D P - CTO - Cede | LinkedIn']);
+        $org = Organization::query()->create(['name' => 'O', 'slug' => 'o-'.uniqid()]);
+
+        $rows = app(ExtractionService::class)->extractManyBatch([$hit], $brief, $org)[0];
+
+        $this->assertSame([], $rows);
     }
 }

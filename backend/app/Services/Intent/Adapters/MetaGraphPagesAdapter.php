@@ -95,7 +95,7 @@ class MetaGraphPagesAdapter implements SocialSourceInterface
 
         try {
             $response = Http::timeout(30)
-                ->get(self::GRAPH_BASE . '/' . rawurlencode($pageId) . '/posts', [
+                ->get(self::GRAPH_BASE.'/'.rawurlencode($pageId).'/posts', [
                     'fields' => 'id,message,story,created_time,permalink_url,from{name,id},likes.summary(true).limit(0),comments.summary(true).limit(0),shares',
                     'limit' => min(10, max(1, $limit)),
                     'access_token' => $token,
@@ -132,8 +132,8 @@ class MetaGraphPagesAdapter implements SocialSourceInterface
             }
 
             $hits = collect($data)
-                ->map(fn(array $post) => $this->mapPost($post, $pageId))
-                ->filter(fn(?RawSocialHit $h) => $h !== null && $h->postText !== '')
+                ->map(fn (array $post) => $this->mapPost($post, $pageId))
+                ->filter(fn (?RawSocialHit $h) => $h !== null && $h->postText !== '')
                 ->values();
 
             app(SocialSourceHealth::class)->recordAttempt($this->key(), $response->status(), $hits->count());
@@ -171,7 +171,7 @@ class MetaGraphPagesAdapter implements SocialSourceInterface
         }
         $permalink = isset($post['permalink_url']) ? (string) $post['permalink_url'] : null;
         if ($permalink === null && isset($post['id'])) {
-            $permalink = 'https://www.facebook.com/' . (string) $post['id'];
+            $permalink = 'https://www.facebook.com/'.(string) $post['id'];
         }
 
         $createdRaw = isset($post['created_time']) ? (string) $post['created_time'] : null;
@@ -198,10 +198,10 @@ class MetaGraphPagesAdapter implements SocialSourceInterface
             $engagementParts[] = "{$shares} shares";
         }
         $engagementHint = $engagementParts !== []
-            ? ' (' . implode(' · ', $engagementParts) . ')'
+            ? ' ('.implode(' · ', $engagementParts).')'
             : '';
 
-        $snippet = mb_substr($postText, 0, 400) . $engagementHint;
+        $snippet = mb_substr($postText, 0, 400).$engagementHint;
         $title = $authorName
             ? "{$authorName} on Meta"
             : "Meta Page {$pageId}";

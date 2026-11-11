@@ -17,15 +17,34 @@ class LinkedInActivityDateExtractor
             return null;
         }
 
+        // X / Twitter status IDs are snowflakes too (Twitter epoch 2010-11-04).
+        if (preg_match('#(?:x|twitter)\.com/[^/]+/status(?:es)?/(\d{15,20})#i', $url, $x)) {
+            return $this->fromTweetId($x[1]);
+        }
+
         if (
             ! preg_match('/activity[_-](\d{15,22})/i', $url, $m)
-            && ! preg_match('/urn:li:activity:(\d{15,22})/i', $url, $m)
+            && ! preg_match('/urn:li:(?:activity|ugcPost|share):(\d{15,22})/i', $url, $m)
+            && ! preg_match('/(?:ugcPost|share)[_-](\d{15,22})/i', $url, $m)
             && ! preg_match('/\/posts\/[^\/]*-(\d{15,22})-/i', $url, $m)
         ) {
             return null;
         }
 
         return $this->fromActivityId($m[1]);
+    }
+
+    public function fromTweetId(string|int $tweetId): ?CarbonInterface
+    {
+        if (! is_numeric($tweetId) || (int) $tweetId <= 0) {
+            return null;
+        }
+
+        $ms = ((int) $tweetId >> 22) + 1288834974657;
+        $carbon = Carbon::createFromTimestampMs($ms);
+        $now = now();
+
+        return $carbon->greaterThan($now->copy()->addDay()) || $carbon->lessThan($now->copy()->subYears(8)) ? null : $carbon;
     }
 
     public function fromActivityId(string|int $activityId): ?CarbonInterface

@@ -37,7 +37,10 @@ class DiscoveryOrchestrator
 
     public const QUALITY_VOLUME = 'volume';
 
-    public const MAX_BACKFILL_PASSES = 2;
+    public const MAX_BACKFILL_PASSES = 3;
+
+    /** Leads below this evidence score are never shown, even to fill a short batch. */
+    public const MIN_SHOWN_SCORE = 40;
 
     /** Soft target for returning a first batch (seconds). */
     public const FIRST_BATCH_SOFT_SECONDS = 90;
@@ -617,6 +620,14 @@ class DiscoveryOrchestrator
                 static fn (array $lead): int => (int) ($lead['id'] ?? 0),
                 $leadsPayload,
             )));
+            // A 29% "partial match" padding a short ICP batch costs the user's trust more than a
+            // shorter list. Typed searches are exempt: there the user asked for exactly these results.
+            if (! $brief->hasUserQuery()) {
+                $leadsPayload = array_values(array_filter(
+                    $leadsPayload,
+                    static fn (array $lead): bool => (float) ($lead['score'] ?? 0) >= self::MIN_SHOWN_SCORE,
+                ));
+            }
             $leadsPayload = $this->sortLeadsPayload($this->applyAdvisoryCap($leadsPayload, $effectiveLimit));
             if ($brief->isBothSearch()) {
                 $leadsPayload = $this->interleaveEntityTypes($leadsPayload);

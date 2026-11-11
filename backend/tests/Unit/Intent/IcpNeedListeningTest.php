@@ -6,6 +6,7 @@ use App\Models\IcpProfile;
 use App\Services\Discovery\DTO\IcpBrief;
 use App\Services\Intent\DTO\ListeningProfile;
 use App\Services\Intent\DTO\RawSocialHit;
+use App\Services\Intent\LinkedInActivityDateExtractor;
 use App\Services\Intent\OpportunityGate;
 use App\Services\Intent\OpportunityPrefilter;
 use App\Services\SignalDetection\IcpOpportunityQueryBuilder;
@@ -109,5 +110,27 @@ class IcpNeedListeningTest extends TestCase
             'signal_type' => 'market_signal',
             'evidence_quote' => 'we are expanding our payments operations to Abuja and Port Harcourt next quarter',
         ], $text, $profile));
+    }
+
+    public function test_need_phrases_lead_the_plan_as_exact_phrases(): void
+    {
+        $profile = new ListeningProfile('source', 'cocoa beans', [], false, ['Ghana'], painPhrases: ['we supply bulk cocoa beans'], target: 'cocoa suppliers');
+
+        $plan = app(IcpOpportunityQueryBuilder::class)->plan($profile);
+
+        $this->assertSame('pain', $plan[0]['family']);
+        $this->assertStringContainsString('"we supply bulk cocoa beans"', $plan[0]['query']);
+    }
+
+    public function test_post_dates_are_recovered_from_x_and_linkedin_ids(): void
+    {
+        $dates = app(LinkedInActivityDateExtractor::class);
+
+        // Tweet 1862000000000000000 was posted in late Nov 2024.
+        $tweet = $dates->fromUrl('https://x.com/someone/status/1862000000000000000');
+        $this->assertNotNull($tweet);
+        $this->assertSame('2024-11', $tweet->format('Y-m'));
+
+        $this->assertNotNull($dates->fromUrl('https://www.linkedin.com/feed/update/urn:li:ugcPost:7330955130554466307/'));
     }
 }

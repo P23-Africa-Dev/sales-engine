@@ -38,7 +38,7 @@ class SocialListeningOrchestrator
 
     private const DEFAULT_SURVIVOR_TARGET = 45;
 
-    private const DEFAULT_ENRICH_CAP = 25;
+    private const DEFAULT_ENRICH_CAP = 40;
 
     private const DEFAULT_HYDRATE_CAP = 20;
 
@@ -356,6 +356,19 @@ class SocialListeningOrchestrator
                     confirmedSignalType: $signalTypeDefinition !== null,
                 );
                 if ($gateReason !== null) {
+                    // Developer trail for tuning the qualifier; never shown to users.
+                    Log::debug('Social post rejected by opportunity gate', [
+                        'run_id' => $run->id,
+                        'reason' => $gateReason,
+                        'mode' => $profile->mode,
+                        'author_role' => $enriched['author_role'] ?? null,
+                        'signal_type' => $enriched['signal_type'] ?? null,
+                        'actionability' => $enriched['actionability'] ?? null,
+                        'score' => $enriched['score'] ?? null,
+                        'quote' => mb_substr((string) ($enriched['evidence_quote'] ?? ''), 0, 160),
+                        'post' => mb_substr($hit->postText, 0, 200),
+                        'url' => $hit->postUrl,
+                    ]);
                     $notActionable++;
                     $rejectedDetail[$gateReason] = ($rejectedDetail[$gateReason] ?? 0) + 1;
 
@@ -888,8 +901,10 @@ class SocialListeningOrchestrator
         $rank += $hit->fullText ? 2 : 0;
         $rank += $this->prefilter->hasCue($text, $profile) ? 5 : 0;
         $rank += match ($entry['family'] ?? null) {
-            'competitor', 'ask' => 3,
-            'community', 'evaluate', 'pain' => 2,
+            // The planner's own first-person need phrases and need-specific lanes find openings,
+            // not commentary, so they win the qualification budget.
+            'pain', 'competitor', 'ask', 'supply', 'funding', 'moment' => 3,
+            'community', 'evaluate', 'partnership' => 2,
             default => 0,
         };
         if (preg_match('/[?？]/u', $text)) {

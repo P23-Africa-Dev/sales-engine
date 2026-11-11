@@ -196,6 +196,8 @@ export function leadContactSourceChip(lead: ChatLead, field: "email" | "phone"):
   const label =
     source.type === "company_line"
       ? "Company line"
+      : source.type === "hq_line"
+        ? "Head-office line"
       : source.confidence
         ? CONTACT_CONFIDENCE_LABELS[String(source.confidence)]
         : undefined;

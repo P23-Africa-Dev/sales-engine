@@ -94,6 +94,15 @@ export function getSocialListeningEmptyState(
     const checked = summary?.totalChecked ?? 0;
 
     let description: string;
+    if (summary?.sources_unavailable) {
+      return {
+        variant: "scan_failed",
+        title: "We couldn't reach the social networks this time",
+        description: "This scan couldn't search its sources, so it tells us nothing about new posts. Try Scan now again in a few minutes.",
+        tip,
+        showActions: true,
+      };
+    }
     if (summary?.model_unavailable) {
       description = "We couldn't review new posts just now. Try Scan now again shortly.";
     } else if (summary?.budget_exhausted) {

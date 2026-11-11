@@ -10,7 +10,7 @@ use Tests\TestCase;
 
 class DiscoveryBackfillAndOrderingTest extends TestCase
 {
-    public function test_low_yield_triggers_backfill_passes_capped_at_two(): void
+    public function test_low_yield_triggers_backfill_passes_capped_at_three(): void
     {
         config([
             'services.serper.api_key' => 'test-serper',
@@ -87,7 +87,7 @@ class DiscoveryBackfillAndOrderingTest extends TestCase
         $leads = $response->json('data.leads') ?? [];
 
         $this->assertGreaterThanOrEqual(1, (int) ($summary['backfill_passes'] ?? 0));
-        $this->assertLessThanOrEqual(2, (int) ($summary['backfill_passes'] ?? 0));
+        $this->assertLessThanOrEqual(DiscoveryOrchestrator::MAX_BACKFILL_PASSES, (int) ($summary['backfill_passes'] ?? 0));
         $this->assertGreaterThan(2, count($leads), 'Backfill should increase yield beyond the first-pass 2 leads');
         $this->assertGreaterThan(4, $serperCalls, 'Backfill should issue additional Serper queries');
     }

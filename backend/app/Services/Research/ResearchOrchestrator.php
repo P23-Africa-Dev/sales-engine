@@ -15,6 +15,7 @@ use App\Services\Discovery\DTO\SearchContext;
 use App\Services\Discovery\QueryIntentService;
 use App\Services\Llm\GlmClient;
 use App\Support\IcpMeaning;
+use Illuminate\Support\Facades\Log;
 
 class ResearchOrchestrator
 {
@@ -26,7 +27,8 @@ class ResearchOrchestrator
 
     public const DECOMPOSE_TIMEOUT_SECONDS = 15;
 
-    public const SYNTHESIZE_TIMEOUT_SECONDS = 30;
+    /** Upper bound for the write-up; the real timeout is whatever is left of the run's deadline. */
+    public const SYNTHESIZE_TIMEOUT_SECONDS = 65;
 
     private float $startedAt = 0;
 
@@ -391,8 +393,10 @@ class ResearchOrchestrator
             ];
 
             $result = $this->glm->chatJson($messages, 'research', $organization, [
-                'timeout' => self::SYNTHESIZE_TIMEOUT_SECONDS,
-                'max_tokens' => 3500,
+                // A 30s cap cut most write-ups off mid-generation and users got a raw source
+                // list instead of a brief. Spend what is left of the run's deadline instead.
+                'timeout' => $this->synthesizeTimeout(),
+                'max_tokens' => 2600,
             ]);
 
             $narrative = trim((string) ($result['narrative'] ?? ''));
@@ -421,12 +425,24 @@ class ResearchOrchestrator
             }
 
             return ['narrative' => $narrative, 'sources' => $sources];
-        } catch (\Throwable) {
+        } catch (\Throwable $e) {
+            Log::warning('Quick research write-up failed; showing the source list instead', [
+                'error' => $e->getMessage(),
+                'elapsed_seconds' => round(microtime(true) - $this->startedAt, 1),
+            ]);
+
             return [
                 'narrative' => $this->deterministicNarrative($query, $icp, $sources),
                 'sources' => $sources,
             ];
         }
+    }
+
+    private function synthesizeTimeout(): int
+    {
+        $remaining = (int) floor($this->deadlineAt - microtime(true)) - 3;
+
+        return max(20, min(self::SYNTHESIZE_TIMEOUT_SECONDS, $remaining));
     }
 
     /**

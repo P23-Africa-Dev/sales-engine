@@ -65,6 +65,13 @@ class IcpOpportunityQueryBuilder
             'raise' => $this->raiseLanes($terms, $place),
             default => [...$this->sellLanes($profile, $terms, $place), $this->targetMomentLane($profile, $place)],
         };
+        // The planner writes how the other side of this need actually posts ("we supply bulk
+        // cocoa beans", "now accepting pitches for agritech"). Searched as exact phrases, these
+        // find openings instead of commentary, so they lead every plan.
+        $lanes = [$this->needPhraseLane($profile), ...array_values(array_filter(
+            $lanes,
+            static fn (array $lane): bool => ! ($lane !== [] && ($lane[0]['family'] ?? null) === 'pain'),
+        ))];
 
         if ($profile->includeHiring) {
             $lanes[] = [$this->entry("appointed OR hiring {$this->phrase($terms[0])} {$place}", 'hiring')];
@@ -151,6 +158,22 @@ class IcpOpportunityQueryBuilder
         }
 
         return [$raising, $seeking];
+    }
+
+    /**
+     * @return list<array{query: string, native: string, family: string, only_sources: ?list<string>}>
+     */
+    private function needPhraseLane(ListeningProfile $profile): array
+    {
+        $lane = [];
+        foreach (array_slice($profile->painPhrases, 0, 5) as $phrase) {
+            $phrase = trim(str_replace('"', '', $phrase));
+            if ($phrase !== '') {
+                $lane[] = $this->entry('"'.$phrase.'"', 'pain');
+            }
+        }
+
+        return $lane;
     }
 
     /**

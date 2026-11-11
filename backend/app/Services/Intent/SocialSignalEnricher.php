@@ -132,9 +132,44 @@ class SocialSignalEnricher
     /**
      * @return list<array{role: string, content: string}>
      */
+    /**
+     * The first thing the qualifier reads: in plain words, what an opening is for THIS user's
+     * need. A buyer-centric default ("vendors advertising are not openings") silently rejected
+     * every supplier post for an account that needs a supplier.
+     */
+    private function openingDefinition(?ListeningProfile $profile): string
+    {
+        if ($profile === null) {
+            return '';
+        }
+
+        $target = trim($profile->target) !== '' ? $profile->target : $profile->offer;
+        $offer = $profile->offer;
+
+        return match ($profile->mode) {
+            'source' => "WHAT COUNTS AS AN OPENING FOR THIS USER: they need to OBTAIN \"{$offer}\" (they are looking for {$target}). "
+                ."A post is an opening when a supplier, exporter, producer, manufacturer, distributor or provider of {$offer} presents what they offer, "
+                .'announces stock, capacity, prices or new supply, invites buyers, or when someone recommends a specific supplier. '
+                .'A vendor advertising this IS the opening: set author_role "vendor", actionability "reply_now", signal_type "market_signal" (or "pricing" / "recommendation"), '
+                .'and score 70+ when they are in the user\'s territory. Generic market news with no supplier to contact is not an opening.',
+            'raise' => "WHAT COUNTS AS AN OPENING FOR THIS USER: they need FUNDING (they are looking for {$target}). "
+                ."A post is an opening when an investor, fund, angel network, grant, competition or accelerator announces it invests in, funds, or is accepting applications or pitches for {$offer} or this sector/region. "
+                .'Set author_role "founder" for the investor/programme posting it (or "news" for a report of an open fund), signal_type "investment_opportunity" or "funding_event", actionability "reply_now", and score 70+ when deadlines or eligibility fit. '
+                .'A startup announcing its own raise is NOT an opening for this user.',
+            'invest' => "WHAT COUNTS AS AN OPENING FOR THIS USER: they want to INVEST in {$target}. "
+                .'A post is an opening when a startup or company in that space is raising, opening a round, or seeking investors. Investors announcing their own funds are not openings.',
+            'partner' => "WHAT COUNTS AS AN OPENING FOR THIS USER: they need PARTNERS ({$target}). "
+                .'A post is an opening when an organisation is seeking partners, distributors, resellers or collaborators in this space.',
+            default => "WHAT COUNTS AS AN OPENING FOR THIS USER: they need CUSTOMERS ({$target}). "
+                ."A post is an opening when someone in that target group asks for, evaluates, or complains about a need that \"{$offer}\" solves, "
+                .'or a target company is at a buying moment (expanding, launching, raising, tendering). Vendors advertising their own products are not openings.',
+        };
+    }
+
     private function messages(IcpBrief $brief, RawSocialHit $hit, ?SignalTypeDefinition $signalType, ?ListeningProfile $profile): array
     {
         $systemPrompt = 'You qualify one public social post for a specific user and, when it is a real opening, write the dossier they will act on. '
+            .$this->openingDefinition($profile).' '
             .IcpMeaning::RULE.' '
             .'interest.looking_for is the kind of need: sell = they need customers (an opening is a target customer with a need, or a target company at a moment such as expanding, launching or raising); '
             .'source = they need to obtain interest.offer (an opening is a vendor, supplier or provider offering it, or someone recommending one — vendor posts COUNT here); '

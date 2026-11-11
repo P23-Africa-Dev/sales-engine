@@ -63,7 +63,7 @@ abstract class AbstractSerperSocialAdapter implements SocialSourceInterface
         if (preg_match('/(^|\s)site:\S+/i', $query)) {
             $fullQuery = trim($query);
         } else {
-            $siteClause = implode(' OR ', array_map(fn(string $s) => "site:{$s}", $this->siteFilters()));
+            $siteClause = implode(' OR ', array_map(fn (string $s) => "site:{$s}", $this->siteFilters()));
             $fullQuery = trim("({$siteClause}) {$query}");
         }
 
@@ -82,12 +82,12 @@ abstract class AbstractSerperSocialAdapter implements SocialSourceInterface
                     'X-API-KEY' => (string) config('services.serper.api_key'),
                     'Content-Type' => 'application/json',
                 ])
-                ->post($baseUrl . '/search', $payload);
+                ->post($baseUrl.'/search', $payload);
 
             ApiUsage::query()->create([
                 'organization_id' => $organizationId,
                 'provider' => 'serper',
-                'endpoint' => 'social_' . $this->sourceKey(),
+                'endpoint' => 'social_'.$this->sourceKey(),
                 'units' => 1,
                 'estimated_cost' => 0.005,
                 'meta' => [
@@ -131,7 +131,7 @@ abstract class AbstractSerperSocialAdapter implements SocialSourceInterface
                     postedAt: $postedAt,
                     dateRaw: $dateRaw,
                 );
-            })->filter(fn(RawSocialHit $h) => $h->postText !== '')->values();
+            })->filter(fn (RawSocialHit $h) => $h->postText !== '')->values();
 
             app(SocialSourceHealth::class)->recordAttempt($this->sourceKey(), $response->status(), $hits->count());
 
@@ -187,7 +187,7 @@ abstract class AbstractSerperSocialAdapter implements SocialSourceInterface
 
             return [
                 'name' => $name,
-                'profile_url' => 'https://www.linkedin.com/in/' . $slug,
+                'profile_url' => 'https://www.linkedin.com/in/'.$slug,
             ];
         }
 
@@ -198,7 +198,7 @@ abstract class AbstractSerperSocialAdapter implements SocialSourceInterface
 
             return [
                 'name' => $name !== '' ? $name : null,
-                'profile_url' => 'https://www.linkedin.com/in/' . $slug,
+                'profile_url' => 'https://www.linkedin.com/in/'.$slug,
             ];
         }
 
@@ -221,8 +221,8 @@ abstract class AbstractSerperSocialAdapter implements SocialSourceInterface
             $handle = ltrim($m[1], '@');
             if (! in_array(mb_strtolower($handle), ['i', 'home', 'search', 'explore', 'intent'], true)) {
                 return [
-                    'name' => '@' . $handle,
-                    'profile_url' => 'https://x.com/' . $handle,
+                    'name' => '@'.$handle,
+                    'profile_url' => 'https://x.com/'.$handle,
                 ];
             }
         }
@@ -231,8 +231,8 @@ abstract class AbstractSerperSocialAdapter implements SocialSourceInterface
             $handle = $m[1];
 
             return [
-                'name' => '@' . $handle,
-                'profile_url' => 'https://x.com/' . $handle,
+                'name' => '@'.$handle,
+                'profile_url' => 'https://x.com/'.$handle,
             ];
         }
 
@@ -244,13 +244,13 @@ abstract class AbstractSerperSocialAdapter implements SocialSourceInterface
      */
     private function extractRedditAuthor(string $link, string $title, string $snippet): array
     {
-        $haystack = $title . ' ' . $snippet . ' ' . $link;
+        $haystack = $title.' '.$snippet.' '.$link;
         if (preg_match('#(?:reddit\.com/user/|reddit\.com/u/|\\bu/)([\w-]+)#i', $haystack, $m)) {
             $username = $m[1];
 
             return [
-                'name' => 'u/' . $username,
-                'profile_url' => 'https://www.reddit.com/user/' . $username,
+                'name' => 'u/'.$username,
+                'profile_url' => 'https://www.reddit.com/user/'.$username,
             ];
         }
 
@@ -266,14 +266,14 @@ abstract class AbstractSerperSocialAdapter implements SocialSourceInterface
             if (! empty($m[1])) {
                 return [
                     'name' => null,
-                    'profile_url' => 'https://www.facebook.com/' . $m[1],
+                    'profile_url' => 'https://www.facebook.com/'.$m[1],
                 ];
             }
             $slug = $m[2] ?? '';
             if ($slug !== '' && ! in_array(mb_strtolower($slug), ['posts', 'watch', 'groups', 'events', 'share'], true)) {
                 return [
                     'name' => $this->humanizeSlug($slug),
-                    'profile_url' => 'https://www.facebook.com/' . $slug,
+                    'profile_url' => 'https://www.facebook.com/'.$slug,
                 ];
             }
         }

@@ -30,6 +30,13 @@ class ContactEnrichmentOrchestrator
      */
     private const PREFERRED_GENERIC_LOCALS = ['sales', 'info', 'contact', 'hello', 'enquiries', 'inquiries', 'business', 'office'];
 
+    /** Judgement context for the lead being enriched (set per enrichContacts call). */
+    private ?string $gateDomain = null;
+
+    private ?string $gateCountry = null;
+
+    private string $gatePerson = '';
+
     public function __construct(
         private readonly SnippetContactExtractor $snippetExtractor,
         private readonly BytemineEnricher $bytemine,
@@ -100,6 +107,15 @@ class ContactEnrichmentOrchestrator
 
         $logContext = [$organization, $personName !== '' ? $personName : ($company ?? ''), $leadId, $socialSignalId, $personIndex];
 
+        // Resolve the company domain first: every email below is judged against it.
+        $location = isset($seed['location']) ? (string) $seed['location'] : null;
+        $domain = $this->domainResolver->resolve($seed['website'] ?? null, $company, $snippets, $location);
+        $contacts['domain'] = $domain;
+        $country ??= $this->countryFromDomain($domain);
+        $this->gateDomain = $domain;
+        $this->gateCountry = $country;
+        $this->gatePerson = $isCompanyLead ? '' : $personName;
+
         $this->acceptEmail($contacts, (string) ($seed['email'] ?? ''), $isCompanyLead, $personName, 'seed', null, 'snippet', 'seed', 'existing');
         $this->acceptPhone($contacts, (string) ($seed['phone'] ?? ''), $isCompanyLead ? 'company_line' : 'direct', 'seed', null, 'snippet', $country, 'seed', 'existing');
 
@@ -128,11 +144,6 @@ class ContactEnrichmentOrchestrator
                 return $this->finalize($contacts);
             }
         }
-
-        $location = isset($seed['location']) ? (string) $seed['location'] : null;
-        $domain = $this->domainResolver->resolve($seed['website'] ?? null, $company, $snippets, $location);
-        $contacts['domain'] = $domain;
-        $country ??= $this->countryFromDomain($domain);
 
         /** @var list<array{email: string, name?: ?string}> $knownDomainEmails */
         $knownDomainEmails = [];
@@ -167,6 +178,8 @@ class ContactEnrichmentOrchestrator
                     $domain = $placeDomain;
                     $contacts['domain'] = $domain;
                     $country ??= $this->countryFromDomain($domain);
+                    $this->gateDomain = $domain;
+                    $this->gateCountry ??= $country;
                     [$crawlEmail, $crawlPhone] = $this->applyCrawl($contacts, $this->crawler->crawl($domain), $isCompanyLead, $personName, $country, $knownDomainEmails);
                     $foundEmail = $crawlEmail;
                     $foundPhone = $foundPhone || $crawlPhone;
@@ -415,7 +428,7 @@ class ContactEnrichmentOrchestrator
     private function acceptCompanyEmail(array &$contacts, string $email, string $method, ?string $sourceUrl, string $confidence, string $tier, string $provider, bool $isCompanyLead): bool
     {
         $email = $this->text->normalizeEmail($email);
-        if ($email === null || $this->isUnusableGeneric($email)) {
+        if ($email === null || $this->isUnusableGeneric($email) || ! $this->emailBelongsToCompany($email)) {
             return false;
         }
 
@@ -459,11 +472,16 @@ class ContactEnrichmentOrchestrator
             return false;
         }
 
-        $normalized = $this->phoneNormalizer->normalizeOrKeep($clean, $country);
+        $normalized = $this->validPhone($clean, $country);
+        if ($normalized === null) {
+            return false;
+        }
+        // A switchboard in another country is the head office, not a local line.
+        $lineType = $this->phoneNormalizer->belongsToCountry($normalized, $this->gateCountry) ? 'company_line' : 'hq_line';
         $filled = false;
         if ($contacts['company_phone'] === '') {
             $contacts['company_phone'] = $normalized;
-            $contacts['contact_sources']['company_phone'] = $this->source($normalized, 'company_line', $method, $sourceUrl, $confidence);
+            $contacts['contact_sources']['company_phone'] = $this->source($normalized, $lineType, $method, $sourceUrl, $confidence);
             $filled = true;
             if (! $isCompanyLead && $contacts['tier'] === null) {
                 $contacts['tier'] = $tier;
@@ -472,7 +490,7 @@ class ContactEnrichmentOrchestrator
         }
 
         if ($isCompanyLead) {
-            return $this->setPhone($contacts, $clean, 'company_line', $method, $sourceUrl, $confidence, $country, $tier, $provider) || $filled;
+            return $this->setPhone($contacts, $clean, $lineType, $method, $sourceUrl, $confidence, $country, $tier, $provider) || $filled;
         }
 
         return $filled;
@@ -484,7 +502,7 @@ class ContactEnrichmentOrchestrator
     private function setEmail(array &$contacts, string $email, string $type, string $method, ?string $sourceUrl, string $confidence, string $tier, string $provider): bool
     {
         $email = $this->text->normalizeEmail($email);
-        if ($email === null || $contacts['email'] !== '') {
+        if ($email === null || $contacts['email'] !== '' || ! $this->emailAllowedForLead($email)) {
             return false;
         }
 
@@ -506,7 +524,14 @@ class ContactEnrichmentOrchestrator
             return false;
         }
 
-        $normalized = $this->phoneNormalizer->normalizeOrKeep($clean, $country);
+        $normalized = $this->validPhone($clean, $country);
+        if ($normalized === null) {
+            return false;
+        }
+        // A person's direct line in another country is almost always someone else's number.
+        if ($type === 'direct' && $this->gatePerson !== '' && ! $this->phoneNormalizer->belongsToCountry($normalized, $this->gateCountry)) {
+            return false;
+        }
         $contacts['phone'] = $normalized;
         $contacts['contact_sources']['phone'] = $this->source($normalized, $type, $method, $sourceUrl, $confidence);
         if ($contacts['email'] === '' || $contacts['tier'] === null || $contacts['tier'] === 'seed') {
@@ -554,6 +579,54 @@ class ContactEnrichmentOrchestrator
         }
 
         return $best;
+    }
+
+    /**
+     * A full, dialable number: E.164 when the country is known or the number is international;
+     * a bare national number only when it is long enough to be complete.
+     */
+    private function validPhone(string $clean, ?string $country): ?string
+    {
+        $e164 = $this->phoneNormalizer->toE164($clean, $country);
+        if ($e164 !== null) {
+            return $e164;
+        }
+        $digits = preg_replace('/\D+/', '', $clean) ?? '';
+        if (str_starts_with(ltrim($clean), '+') || $country !== null || strlen($digits) < 9) {
+            return null;
+        }
+
+        return $clean;
+    }
+
+    /**
+     * Company mailboxes must live on the company's own domain (when we know it) and never on
+     * personal webmail: info@another-company.com or someone@gmail.com is not this company.
+     */
+    private function emailBelongsToCompany(string $email): bool
+    {
+        if ($this->text->isWebmail($email)) {
+            return false;
+        }
+
+        return $this->gateDomain === null || $this->text->isOnDomain($email, $this->gateDomain);
+    }
+
+    /**
+     * The lead's own address. Company leads: only the company's mailboxes. People: an address on
+     * the company domain, or webmail / another domain only when it carries the person's name.
+     */
+    private function emailAllowedForLead(string $email): bool
+    {
+        if ($this->gatePerson === '') {
+            return $this->emailBelongsToCompany($email);
+        }
+
+        if ($this->gateDomain !== null && $this->text->isOnDomain($email, $this->gateDomain)) {
+            return true;
+        }
+
+        return $this->text->emailMatchesPerson($email, $this->gatePerson);
     }
 
     private function isUnusableGeneric(string $email): bool
@@ -629,10 +702,16 @@ class ContactEnrichmentOrchestrator
      */
     private function finalize(array $contacts): array
     {
-        if ($contacts['phone'] === '' && $contacts['company_phone'] !== '') {
+        $companyLineType = $contacts['contact_sources']['company_phone']['type'] ?? null;
+        $isPerson = $this->gatePerson !== '';
+        if ($contacts['phone'] === '' && $contacts['company_phone'] !== '' && ! ($isPerson && $companyLineType === 'hq_line')) {
             $contacts['phone'] = $contacts['company_phone'];
             $contacts['contact_sources']['phone'] = $contacts['contact_sources']['company_phone'];
         }
+
+        $this->gateDomain = null;
+        $this->gateCountry = null;
+        $this->gatePerson = '';
 
         return $contacts;
     }

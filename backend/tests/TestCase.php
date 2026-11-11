@@ -5,6 +5,7 @@ namespace Tests;
 use App\Models\Organization;
 use App\Models\OrganizationUser;
 use App\Models\User;
+use App\Services\Enrichment\MxRecordChecker;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 
@@ -23,6 +24,16 @@ abstract class TestCase extends \Illuminate\Foundation\Testing\TestCase
             'services.reddit.client_secret' => null,
             'services.meta.access_token' => null,
         ]);
+
+        // Tests never touch real DNS: MX lookups hang when the network is flaky.
+        // Tests that care about MX behaviour mock MxRecordChecker themselves.
+        $this->app->instance(MxRecordChecker::class, new class extends MxRecordChecker
+        {
+            public function hasMx(string $domain): bool
+            {
+                return trim($domain) !== '';
+            }
+        });
     }
 
     protected function createUserWithOrg(array $userAttrs = [], array $orgAttrs = []): array

@@ -35,6 +35,23 @@ class ContactTextExtractor
         'mysite.com', 'yoursite.com', 'test.com', 'godaddy.com', 'w3.org', 'schema.org',
     ];
 
+    /**
+     * Template / placeholder mailboxes that appear in page source and forms ("jdoe@", "name@").
+     */
+    private const PLACEHOLDER_LOCAL_PARTS = [
+        'jdoe', 'johndoe', 'john.doe', 'john_doe',
+        'name', 'yourname', 'your.name', 'your_name', 'firstname', 'firstname.lastname', 'first.last', 'firstlast',
+        'youremail', 'your.email', 'your_email', 'email', 'example', 'sample', 'test', 'testing', 'user', 'username',
+        'someone', 'somebody', 'xxx', 'xxxx', 'abc', 'abc123', 'yourmail', 'me', 'myname', 'demo', 'placeholder',
+    ];
+
+    /** Personal mailbox providers: only trustworthy for a person whose name the address carries. */
+    public const WEBMAIL_DOMAINS = [
+        'gmail.com', 'googlemail.com', 'yahoo.com', 'yahoo.co.uk', 'ymail.com', 'hotmail.com', 'hotmail.co.uk',
+        'outlook.com', 'live.com', 'msn.com', 'icloud.com', 'me.com', 'aol.com', 'proton.me', 'protonmail.com',
+        'gmx.com', 'gmx.net', 'mail.com', 'yandex.com', 'yandex.ru', 'zoho.com', 'rocketmail.com',
+    ];
+
     private const ASSET_SUFFIXES = ['.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.css', '.js', '.ico'];
 
     private const PHONE_LABEL_PATTERN = '/(?:tel(?:ephone)?|phone|call(?:\s+us)?|mobile|mob|cell|hotline|whats\s?app|ph|t)\s*(?:no\.?|number|#)?\s*[.:\-–]?\s*((?:\+|00)?\(?\d[\d\s().\-\/]{5,20}\d)/iu';
@@ -156,6 +173,9 @@ class ContactTextExtractor
         }
 
         [$local, $domain] = explode('@', $email, 2);
+        if (in_array($local, self::PLACEHOLDER_LOCAL_PARTS, true)) {
+            return null;
+        }
         foreach (self::ASSET_SUFFIXES as $suffix) {
             if (str_ends_with($domain, $suffix)) {
                 return null;
@@ -180,6 +200,11 @@ class ContactTextExtractor
 
         return in_array($local, self::GENERIC_EMAIL_LOCAL_PARTS, true)
             || in_array(str_replace(['.', '_', '-'], '', $local), self::GENERIC_EMAIL_LOCAL_PARTS, true);
+    }
+
+    public function isWebmail(string $email): bool
+    {
+        return in_array($this->emailDomain($email), self::WEBMAIL_DOMAINS, true);
     }
 
     public function emailDomain(string $email): string

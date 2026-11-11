@@ -139,13 +139,25 @@ class SocialListeningRunService
             return is_string($summary) ? null : $summary;
         }
 
-        return array_intersect_key($summary, array_flip([
+        $public = array_intersect_key($summary, array_flip([
             'totalChecked',
             'qualified',
             'enrichment',
             'budget_exhausted',
             'model_unavailable',
         ]));
+
+        // Every source we searched failed (network, quota, outage): the empty result says
+        // nothing about the market, so the user must not be told "nothing new".
+        $attempted = array_values(array_filter(
+            is_array($summary['sources'] ?? null) ? $summary['sources'] : [],
+            static fn ($row): bool => is_array($row) && (int) ($row['attempts'] ?? 0) > 0,
+        ));
+        $public['sources_unavailable'] = $attempted !== [] && collect($attempted)->every(
+            static fn (array $row): bool => in_array($row['status'] ?? '', [SocialSourceHealth::ERROR, SocialSourceHealth::CREDITS, SocialSourceHealth::UNAUTHORIZED, SocialSourceHealth::RATE_LIMITED], true),
+        );
+
+        return $public;
     }
 
     private function failStaleQueuedRuns(Organization $organization, IcpProfile $icp): void

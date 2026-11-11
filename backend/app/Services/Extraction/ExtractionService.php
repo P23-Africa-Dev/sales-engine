@@ -738,6 +738,10 @@ class ExtractionService
         $headline = trim((string) ($hit->meta['title'] ?? $hit->name));
         if ($linkedinUrl !== null) {
             $name = $this->betterNameFromHeadline($headline, $name);
+            if ($this->isInitialsOnly($name)) {
+                $first = trim((string) (preg_split('/\s+[\-–—|·]\s+/u', $headline)[0] ?? ''));
+                $name = ! $this->isInitialsOnly($first) && preg_match('/^\p{Lu}[\p{L}\'.-]+(?:\s+\p{Lu}[\p{L}\'.-]+){1,3}$/u', $first) ? $first : '';
+            }
         }
 
         // Headline first ("Name - Founder/CEO - Acme"), then the snippet. Only text that names a
@@ -812,6 +816,13 @@ class ExtractionService
      * "Gbolahanfaniran" (slug) → "Gbolahan Faniran" when the headline's first segment spells
      * the same letters; "Bukola A." style headlines keep the fuller slug name.
      */
+    private function isInitialsOnly(string $name): bool
+    {
+        $parts = preg_split('/\s+/u', trim($name)) ?: [];
+
+        return $parts !== [] && collect($parts)->every(fn (string $part): bool => mb_strlen(rtrim($part, '.')) <= 1);
+    }
+
     private function betterNameFromHeadline(string $headline, string $slugName): string
     {
         $first = trim((string) (preg_split('/\s+[\-–—|·]\s+/u', $headline)[0] ?? ''));
@@ -855,13 +866,24 @@ class ExtractionService
             return [null, null];
         }
 
-        $role = '(?:(?:Co-?)?Founder|Owner|Partner|President|Chairman|(?:Group |Deputy |Executive )?(?:Managing Director|MD|CEO|CTO|CFO|COO|CMO|CIO|CPO)|Chief [A-Z][a-z]+(?: [A-Z][a-z]+)? Officer|Head of [A-Z][\w&]*(?: [A-Z&][\w&]*){0,3}|(?:Senior |Executive )?Vice President[\w ,&]{0,30}?|VP(?: of)? [A-Z][\w&]*(?: [A-Z&][\w&]*){0,2}|(?:Senior |Regional |Country |General )?(?:Director|Manager)(?: of| -)? ?[A-Z]?[\w&]*(?: [A-Z&][\w&]*){0,2})';
+        $role = '(?:(?:Co-?)?Founder|Owner|Partner|President|Chairman|(?:Group |Deputy |Executive )?(?:Managing Director|MD|CEO|CTO|CFO|COO|CMO|CIO|CPO)|Chief [A-Z][a-z]+(?: [A-Z][a-z]+)? Officer|Head of [A-Z][\w&]*(?: [A-Z&][\w&]*){0,3}|(?:Senior |Executive )?Vice President[\w ,&]{0,30}?|VP(?: of)? [A-Z][\w&]*(?: [A-Z&][\w&]*){0,2}|(?:\p{Lu}[\p{L}&-]+ ){0,3}(?:Director|Manager|Principal|Associate|Analyst|Lead)(?: of \p{Lu}[\w&]*(?: \p{Lu}[\w&]*){0,2})?)';
         $title = null;
         $company = null;
 
+        // LinkedIn's own shape: "[Name ·] Import Export Manager at Olam · Experience: …" or
+        // "Principal @ Prosper Global Ventures (formerly …)". Keep the whole title phrase.
+        foreach (preg_split('/\s*[·|]\s*/u', $snippet) ?: [] as $segment) {
+            if (preg_match('/^(\p{Lu}[\p{L}&\/,.\'\- ]{1,70}?)\s+(?:at|@)\s+(\p{Lu}[\p{L}\p{N}&.\'\- ]{1,60}?)\s*(?:\(|\.\s|\.$|$)/u', trim($segment), $m)
+                && $this->looksLikeRole($m[1])) {
+                $title = trim($m[1], ' ,.');
+                $company = trim($m[2], ' ,.');
+                break;
+            }
+        }
+
         // "Name · Title | Company | …" or "Title | Company | …"
         $segments = array_values(array_filter(array_map('trim', preg_split('/\s*[|·]\s*/u', $snippet) ?: [])));
-        foreach ($segments as $index => $segment) {
+        foreach ($title === null ? $segments : [] as $index => $segment) {
             if (preg_match('/^(?:'.$role.')(?:\s*(?:&|and|\/)\s*(?:'.$role.'))*$/u', $segment)) {
                 $title = $segment;
                 $next = $segments[$index + 1] ?? null;
@@ -897,6 +919,18 @@ class ExtractionService
         $company = $company !== null && mb_strlen($company) >= 2 && mb_strlen($company) <= 80 ? $company : null;
 
         return [$title, $company];
+    }
+
+    /**
+     * A job title, not a tagline: names a role somewhere in the phrase.
+     */
+    private function looksLikeRole(string $phrase): bool
+    {
+        if (mb_strlen($phrase) > 70 || preg_match('/\b(helping|passionate|driving|building|love|i\s|we\s)\b/iu', $phrase)) {
+            return false;
+        }
+
+        return (bool) preg_match('/\b(ceo|cto|cfo|coo|cmo|cio|cpo|md|gm|vp|chief|founder|co-founder|owner|partner|principal|president|chair(?:man|person)?|director|manager|head|officer|lead|associate|analyst|engineer|consultant|specialist|coordinator|executive|exporter|trader|buyer|investor|controller|treasurer|secretary)\b/iu', $phrase);
     }
 
     private function isLinkedInProfileUrl(?string $url): bool

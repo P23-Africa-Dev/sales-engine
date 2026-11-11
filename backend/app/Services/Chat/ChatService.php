@@ -393,6 +393,7 @@ class ChatService
                 $clientTimezone,
                 $historySlice,
                 $icpSearchBrief,
+                (int) ($result['run']->result_summary['requested_lead_count'] ?? 0),
             );
             foreach (
                 [
@@ -616,6 +617,7 @@ class ChatService
                     $clientTimezone,
                     $historySlice,
                     $icpSearchBrief,
+                    (int) ($result['run']->result_summary['requested_lead_count'] ?? 0),
                 );
                 foreach (
                     [
@@ -881,6 +883,7 @@ class ChatService
             $clientTimezone,
             $historySlice,
             (bool) ($userMeta['icp_search_brief'] ?? false),
+            $requested,
         );
         $spread = $this->countrySpreadNotice($result['run'], $merged);
         if ($spread !== '') {
@@ -1312,6 +1315,7 @@ class ChatService
         ?string $clientTimezone = null,
         array $historySlice = [],
         bool $icpSearchBrief = false,
+        int $requestedCount = 0,
     ): string {
         $count = count($leads);
 
@@ -1347,6 +1351,11 @@ class ChatService
 
         if ($icpSearchBrief && $count < 3) {
             $advisoryNote .= ' Thin batch after trust gates — try widening qualify filters or refining “What we search for.”';
+        }
+        if ($requestedCount > $count) {
+            // We only show strong fits, so say plainly why the batch is short and how to widen it.
+            $advisoryNote .= " You asked for {$requestedCount}; these {$count} are the ones that genuinely fit what you're looking for. "
+                .'Add more territories or decision-maker roles to your ICP, or run Generate more, to find others.';
         }
 
         return $this->formatGroundedLeadNarration($leads, $count, $advisoryNote);

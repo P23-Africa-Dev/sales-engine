@@ -131,6 +131,20 @@ class PhoneNumberNormalizer
     }
 
     /**
+     * True when an E.164 number belongs to the given country's calling code. Unknown
+     * countries match anything (no evidence either way).
+     */
+    public function belongsToCountry(string $e164, ?string $countryIso): bool
+    {
+        $code = $countryIso !== null ? (self::CALLING_CODES[mb_strtoupper($countryIso)] ?? null) : null;
+        if ($code === null) {
+            return true;
+        }
+
+        return str_starts_with(ltrim($e164, '+'), $code);
+    }
+
+    /**
      * Normalised value when possible, otherwise the cleaned original.
      */
     public function normalizeOrKeep(?string $phone, ?string $countryIso = null): string
