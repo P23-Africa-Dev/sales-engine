@@ -113,7 +113,7 @@ class RequalifySocialSignalsCommand extends Command
         Storage::disk('local')->put($path, (string) json_encode($report, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
 
         $this->table(array_keys($totals), [array_values($totals)]);
-        $this->info(($apply ? 'Applied. ' : 'Dry run only — nothing changed. ').'Report: storage/app/'.$path);
+        $this->info(($apply ? 'Applied. ' : 'Dry run only — nothing changed. ').'Report: '.Storage::disk('local')->path($path).' (restore with --restore='.$path.')');
 
         return self::SUCCESS;
     }

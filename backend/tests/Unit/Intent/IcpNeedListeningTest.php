@@ -133,4 +133,17 @@ class IcpNeedListeningTest extends TestCase
 
         $this->assertNotNull($dates->fromUrl('https://www.linkedin.com/feed/update/urn:li:ugcPost:7330955130554466307/'));
     }
+
+    public function test_a_provider_describing_itself_in_the_need_terms_is_a_sourcing_opening(): void
+    {
+        $profile = new ListeningProfile('source', 'mobile app development', [], false, ['Nigeria'], synonyms: ['fintech app developers'], target: 'fintech app developers');
+        $text = 'Acumen Digital is a Lagos-based digital technology company that works across mobile app development, digital products and web solutions for fintechs.';
+
+        $this->assertNull((new OpportunityGate)->rejection([
+            'actionability' => 'reply_now',
+            'author_role' => 'vendor',
+            'signal_type' => 'market_signal',
+            'evidence_quote' => 'Acumen Digital is a Lagos-based digital technology company that works across mobile app development',
+        ], $text, $profile));
+    }
 }

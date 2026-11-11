@@ -159,6 +159,12 @@ class OpportunityGate
             return true;
         }
 
+        // Sourcing: a provider describing itself in the need's own terms ("a mobile app development
+        // company building fintech applications") is the evidence — no "we offer" phrase required.
+        if ($profile->mode === 'source' && $this->prefilter->mentionsPlanTerm($quote, $profile)) {
+            return true;
+        }
+
         return $this->prefilter->hasCue($quote, $profile);
     }
 
