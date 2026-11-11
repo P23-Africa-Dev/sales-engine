@@ -24,6 +24,15 @@ class OpportunityPrefilter
 
     public const PARTNER_CUES = '/\b(looking for(?:\s+\w+){0,4}\s+partners?|seeking(?:\s+\w+){0,4}\s+partners?|partnership|collaborat(?:e|ion|ing)|distributors?|resellers?)\b/iu';
 
+    /** Source mode: someone offering or recommending what the account needs. */
+    public const SOURCE_CUES = '/\b(suppl(?:y|ier|iers|ying)|we offer|we provide|available|wholesale|distributor|manufacturer|in stock|price list|recommend(?:ed|ation)?|reliable|vendor|provider)\b/iu';
+
+    /** Raise mode: investors, funds, grants and programmes open to deals. */
+    public const RAISE_CUES = '/\b(we invest|now investing|looking to invest|new fund|fund (?:ii|iii|iv|\d)|pitch|applications? (?:open|now open)|call for applications|accelerator|grant|cheque|check size)\b/iu';
+
+    /** Customers mode: the target itself at a moment that opens a conversation. */
+    public const MOMENT_CUES = '/\b(expand(?:ing|s|ed)?|launch(?:es|ed|ing)?|new office|now open|raised|seeking|tender|rfp|request for proposals?)\b/iu';
+
     public const HIRING_CUES = '/\b(appointed|appoints|hiring|we.?re hiring|joining as|named as)\b/iu';
 
     public const JOB_BLOCK = '/\b(we.?re hiring|now hiring|job opening|job openings|vacancy|vacancies|apply now|headcount|send (?:your )?cv|job description)\b/iu';
@@ -89,10 +98,16 @@ class OpportunityPrefilter
         $pattern = match ($profile->mode) {
             'invest' => self::INVEST_CUES,
             'partner' => self::PARTNER_CUES,
+            'source' => self::SOURCE_CUES,
+            'raise' => self::RAISE_CUES,
             default => self::SELL_CUES,
         };
 
         if (preg_match($pattern, $text)) {
+            return true;
+        }
+
+        if ($profile->mode === 'sell' && $profile->hasDistinctTarget() && preg_match(self::MOMENT_CUES, $text)) {
             return true;
         }
 

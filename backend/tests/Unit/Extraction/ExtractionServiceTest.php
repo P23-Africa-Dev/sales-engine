@@ -156,6 +156,7 @@ class ExtractionServiceTest extends TestCase
             'slug without hyphen, caps headline' => ['GBOLAHAN FANIRAN - MinieMoney | LinkedIn', 'https://ng.linkedin.com/in/gbolahanfaniran', 'Founder/CEO MinieMoney. Fintech | Digital Banking | Lending', 'Gbolahan Faniran', 'Founder/CEO', 'MinieMoney'],
             'honorific and post-nominals' => ['Dr. Stanley Jacob FCIB - Zest Payments | LinkedIn', 'https://ng.linkedin.com/in/drstanleyjacob', 'Experience · Group Chief Innovation Officer · Founding CEO, Zest Payments Limited', 'Stanley Jacob', 'CEO', 'Zest Payments Limited'],
             'tagline is not a title' => ['Ope Adeoye - To grow, connect to the pipe | LinkedIn', 'https://ng.linkedin.com/in/opeadeoye', '20+ years in the technology & payments ecosystem.', 'Ope Adeoye', null, null],
+            'handle slug with digits' => ['Luis Hidalgo - Head of Sales | Player-Coach Sales Leader | LinkedIn', 'https://uk.linkedin.com/in/hidalgo1', 'London · Head of Sales at Ethos', 'Luis Hidalgo', 'Head of Sales', null],
             'second role is not a company' => ['Olayemi Toye - CIO | LinkedIn', 'https://ng.linkedin.com/in/olayemi-toye', 'CIO | CTO | Payments', 'Olayemi Toye', 'CIO', null],
         ];
     }

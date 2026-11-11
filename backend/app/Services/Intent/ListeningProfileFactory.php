@@ -46,6 +46,7 @@ class ListeningProfileFactory
                 'communities' => $refined['communities'] ?? null,
                 'exclude_terms' => $refined['exclude_terms'] ?? null,
                 'buyer' => $refined['buyer'] ?? null,
+                'target' => $refined['target'] ?? null,
             ],
         );
     }
@@ -66,7 +67,7 @@ class ListeningProfileFactory
             return null;
         }
 
-        $cacheKey = 'social_listening:plan:v2:'.$organization->id.':'.md5((string) json_encode([$prompt, $description, $keywords, $brief->exclusions]));
+        $cacheKey = 'social_listening:plan:v3:'.$organization->id.':'.md5((string) json_encode([$prompt, $description, $keywords, $brief->exclusions]));
         $cached = Cache::get($cacheKey);
         if (is_array($cached)) {
             return $cached;
@@ -103,17 +104,27 @@ class ListeningProfileFactory
 
     private function systemPrompt(): string
     {
-        return 'You plan a social-listening scan that finds people on Reddit, X, LinkedIn and Facebook who are a real opening for this user. '
-            .'Use ONLY custom_prompt, description and keywords. Do not invent an industry, territory, or job title. '
-            .'mode is sell when they want buyers or people asking for a product or service, invest when they want funding rounds or deals, partner when they want collaborations. '
-            .'offer is 2 to 4 words naming what they sell or the theme they track, in the words a buyer would type (e.g. "payroll software", not "HR excellence"). '
-            .'synonyms is 3 to 6 other short phrases (1 to 4 words) buyers use for the same thing, including plain-language and category terms. '
-            .'pain_phrases is 3 to 6 short first-person phrases (3 to 7 words) a buyer writes when they have the problem this offer solves but has not named a product yet, e.g. "our drivers keep faking fuel receipts". '
+        return 'You plan a social-listening scan that finds posts on Reddit, X, LinkedIn and Facebook that are a real opening for this user. '
+            .'custom_prompt, description and keywords state what the user is LOOKING FOR right now — their current need or wanted opportunity. '
+            .'They are NOT a description of the user\'s own business or product: never assume the user sells what the ICP names. '
+            .'Use ONLY those fields. Do not invent an industry, territory, or job title. '
+            .'mode is the kind of need: sell when they are looking for customers or clients (companies or people who would buy from them); '
+            .'source when they need to obtain a product, service, supplier, vendor, manufacturer or provider; '
+            .'invest when they are looking for startups, deals or funding rounds to invest in; partner when they are looking for partners, distributors or collaborators; '
+            .'raise when they are looking for investors, funding, grants or accelerators for themselves. '
+            .'target is 2 to 5 words naming WHO or WHAT they want to find (e.g. "fintech companies in Lagos", "cocoa suppliers", "seed-stage agritech startups", "impact investors"). '
+            .'offer is 2 to 4 words naming the thing the posts that fill this need are about, in the words people actually type: '
+            .'for sell, what the target customers would be asking for (only if the user says what they provide; otherwise repeat the target); '
+            .'for source, what they want to obtain (e.g. "payroll software", "cocoa beans"); for invest/partner/raise, the sector or theme. '
+            .'synonyms is 3 to 6 other short phrases (1 to 4 words) people use for the same thing, including plain-language and category terms. '
+            .'pain_phrases is 3 to 6 short first-person phrases (3 to 7 words) that the OTHER side writes when they are the opening: '
+            .'for sell, a target customer describing the problem (e.g. "our drivers keep faking fuel receipts"); for source, a supplier offering it (e.g. "we supply bulk cocoa beans"); '
+            .'for raise, an investor inviting pitches; for invest, a founder raising; for partner, an organisation seeking partners. '
             .'competitors is an array of real product or company names in this space (named by the user first, then the best-known alternatives), max 5, else []. '
-            .'communities is up to 5 subreddit names (no r/ prefix) where these buyers ask for help. Only name subreddits you are confident exist. '
+            .'communities is up to 5 subreddit names (no r/ prefix) where these openings are posted. Only name subreddits you are confident exist. '
             .'exclude_terms is up to 8 single words or short phrases that mark noise for this search (e.g. job ads, courses, unrelated meanings of the offer words). '
-            .'buyer is one sentence describing who counts as a real opening (role, situation). not_a_fit lists who the user excludes; never target them. '
+            .'buyer is one sentence describing who counts as a real opening for this need (role, situation). not_a_fit lists who the user excludes; never target them. '
             .'include_hiring is true only when they explicitly want hiring or appointment news. '
-            .'Return JSON only: {"mode":"sell|invest|partner","offer":"...","synonyms":[],"pain_phrases":[],"competitors":[],"communities":[],"exclude_terms":[],"buyer":"...","include_hiring":false}';
+            .'Return JSON only: {"mode":"sell|source|invest|partner|raise","target":"...","offer":"...","synonyms":[],"pain_phrases":[],"competitors":[],"communities":[],"exclude_terms":[],"buyer":"...","include_hiring":false}';
     }
 }

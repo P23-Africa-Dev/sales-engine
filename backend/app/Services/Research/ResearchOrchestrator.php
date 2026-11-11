@@ -6,12 +6,15 @@ use App\Models\DiscoveryRun;
 use App\Models\IcpProfile;
 use App\Models\Organization;
 use App\Models\User;
+use App\Services\Chat\IcpChatContextBuilder;
 use App\Services\Discovery\Adapters\SerperDiscoveryAdapter;
 use App\Services\Discovery\Contracts\DiscoverySourceInterface;
 use App\Services\Discovery\DTO\IcpBrief;
 use App\Services\Discovery\DTO\RawDiscoveryHit;
 use App\Services\Discovery\DTO\SearchContext;
+use App\Services\Discovery\QueryIntentService;
 use App\Services\Llm\GlmClient;
+use App\Support\IcpMeaning;
 
 class ResearchOrchestrator
 {
@@ -33,7 +36,7 @@ class ResearchOrchestrator
     public function __construct(
         private readonly array $sources,
         private readonly GlmClient $glm,
-        private readonly \App\Services\Chat\IcpChatContextBuilder $icpChatContext,
+        private readonly IcpChatContextBuilder $icpChatContext,
     ) {}
 
     /**
@@ -159,9 +162,9 @@ class ResearchOrchestrator
     {
         $count = count($sources);
         $lines = [
-            "## Research brief (partial)",
+            '## Research brief (partial)',
             '',
-            "Found {$count} source" . ($count === 1 ? '' : 's') . " for \"{$query}\" before the research window closed.",
+            "Found {$count} source".($count === 1 ? '' : 's')." for \"{$query}\" before the research window closed.",
             '',
             '### Sources',
         ];
@@ -172,7 +175,7 @@ class ResearchOrchestrator
             $url = trim((string) ($source['url'] ?? ''));
             $snippet = trim((string) ($source['snippet'] ?? ''));
             $link = $url !== '' ? "[{$title}]({$url})" : $title;
-            $lines[] = "{$n}. {$link}" . ($snippet !== '' ? ". {$snippet}" : '');
+            $lines[] = "{$n}. {$link}".($snippet !== '' ? ". {$snippet}" : '');
         }
 
         $lines[] = '';
@@ -196,7 +199,7 @@ class ResearchOrchestrator
             $result = $this->glm->chatJson([
                 [
                     'role' => 'system',
-                    'content' => 'Decompose a B2B research question into 1-3 focused web-search queries covering market context, competitors/signals, and geography for the active ICP. Keep each query short and searchable. Return JSON: {"sub_queries":["..."]}.',
+                    'content' => 'Decompose a B2B research question into 1-3 focused web-search queries covering market context, competitors/signals, and geography for what the account is looking for (its active ICP). '.IcpMeaning::RULE.' Keep each query short and searchable. Return JSON: {"sub_queries":["..."]}.',
                 ],
                 [
                     'role' => 'user',
@@ -212,7 +215,7 @@ class ResearchOrchestrator
 
             $subs = $result['sub_queries'] ?? [];
             if (is_array($subs) && count($subs) > 0) {
-                $filtered = array_values(array_filter($subs, fn($q) => is_string($q) && trim($q) !== ''));
+                $filtered = array_values(array_filter($subs, fn ($q) => is_string($q) && trim($q) !== ''));
 
                 return array_slice($filtered, 0, self::MAX_SUB_QUERIES) ?: $fallback;
             }
@@ -234,7 +237,7 @@ class ResearchOrchestrator
         }
 
         $parts = preg_split('/\s+(?:and|vs\.?|versus|compared to)\s+/iu', $trimmed) ?: [];
-        $parts = array_values(array_filter(array_map('trim', $parts), fn(string $p) => $p !== ''));
+        $parts = array_values(array_filter(array_map('trim', $parts), fn (string $p) => $p !== ''));
 
         if (count($parts) >= 2) {
             return array_slice($parts, 0, self::MAX_SUB_QUERIES);
@@ -260,7 +263,7 @@ class ResearchOrchestrator
         $ctx = new SearchContext($organization->id, $user?->id, 5, 'quick_research');
         // Research wants articles/reports as sources — never apply people-lead name gates.
         $primaryBrief = IcpBrief::fromIcpProfile($icp, $subQueries[0] ?? '')
-            ->withTarget(\App\Services\Discovery\QueryIntentService::TARGET_COMPANIES);
+            ->withTarget(QueryIntentService::TARGET_COMPANIES);
 
         foreach ($this->sources as $source) {
             if (! $source->isEnabled()) {
@@ -283,7 +286,7 @@ class ResearchOrchestrator
 
         $sources = [];
         /** @var RawDiscoveryHit $hit */
-        foreach ($hits->unique(fn(RawDiscoveryHit $h) => mb_strtolower($h->url ?? $h->name))->take(20) as $hit) {
+        foreach ($hits->unique(fn (RawDiscoveryHit $h) => mb_strtolower($h->url ?? $h->name))->take(20) as $hit) {
             $sources[] = [
                 'title' => $hit->name,
                 'url' => $hit->url,
@@ -344,7 +347,7 @@ class ResearchOrchestrator
         }
 
         $indexedSources = array_map(
-            fn(array $source, int $index) => [
+            fn (array $source, int $index) => [
                 'index' => $index + 1,
                 'title' => $source['title'],
                 'snippet' => $source['snippet'],
@@ -359,14 +362,15 @@ class ResearchOrchestrator
                 [
                     'role' => 'system',
                     'content' => 'You are Sales Engine. Write a concise research brief for a B2B sales team. '
-                        . 'Return JSON only: {"narrative":"markdown string","reasons":[{"index":1,"icp_relevance_reason":"..."}]}. '
-                        . 'Narrative structure: Executive Summary, Key Findings, Risks/Opportunities, Recommended Next Steps. '
-                        . 'Use markdown. Cite sources with inline markers like [1], [2] matching the 1-based source indexes provided. '
-                        . 'Ground findings in the active ICP (industries, territories, buyers). '
-                        . 'For each Key Finding, end with an ICP-relevance clause. '
-                        . 'Do not invent sources — only reference provided snippets. '
-                        . 'reasons[].index is 1-based and must match the sources array. '
-                        . 'When prior chat turns are provided, keep continuity.',
+                        .'Return JSON only: {"narrative":"markdown string","reasons":[{"index":1,"icp_relevance_reason":"..."}]}. '
+                        .'Narrative structure: Executive Summary, Key Findings, Risks/Opportunities, Recommended Next Steps. '
+                        .'Use markdown. Cite sources with inline markers like [1], [2] matching the 1-based source indexes provided. '
+                        .IcpMeaning::RULE.' '
+                        .'Ground findings in what the account is looking for: its target industries, territories and decision makers, and its stated need. '
+                        .'For each Key Finding, end with a clause on how it helps the account get what it is looking for. '
+                        .'Do not invent sources — only reference provided snippets. '
+                        .'reasons[].index is 1-based and must match the sources array. '
+                        .'When prior chat turns are provided, keep continuity.',
                 ],
             ];
 
@@ -434,7 +438,7 @@ class ResearchOrchestrator
         $lines = [
             '## Executive Summary',
             '',
-            "Quick scan for \"{$query}\" against **{$icp->name}**. Found {$count} public source" . ($count === 1 ? '' : 's') . '.',
+            "Quick scan for \"{$query}\" against **{$icp->name}**. Found {$count} public source".($count === 1 ? '' : 's').'.',
             '',
             '### Key Findings',
         ];
@@ -446,7 +450,7 @@ class ResearchOrchestrator
                 $n = $index + 1;
                 $title = trim((string) ($source['title'] ?? 'Untitled'));
                 $snippet = trim((string) ($source['snippet'] ?? ''));
-                $lines[] = "- [{$n}] **{$title}**" . ($snippet !== '' ? ". {$snippet}" : '');
+                $lines[] = "- [{$n}] **{$title}**".($snippet !== '' ? ". {$snippet}" : '');
             }
         }
 

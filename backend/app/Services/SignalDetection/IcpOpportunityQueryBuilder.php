@@ -61,7 +61,9 @@ class IcpOpportunityQueryBuilder
         $lanes = match ($profile->mode) {
             'invest' => $this->investLanes($terms, $place),
             'partner' => $this->partnerLanes($terms, $place),
-            default => $this->sellLanes($profile, $terms, $place),
+            'source' => $this->sourceLanes($profile, $terms, $place),
+            'raise' => $this->raiseLanes($terms, $place),
+            default => [...$this->sellLanes($profile, $terms, $place), $this->targetMomentLane($profile, $place)],
         };
 
         if ($profile->includeHiring) {
@@ -152,6 +154,72 @@ class IcpOpportunityQueryBuilder
     }
 
     /**
+     * Customers mode: the target companies/people themselves at a moment of need —
+     * expanding, launching, raising, seeking providers. Only when the target differs
+     * from the offer (the ICP names who they want, not just a product).
+     *
+     * @return list<array{query: string, native: string, family: string, only_sources: ?list<string>}>
+     */
+    private function targetMomentLane(ListeningProfile $profile, string $place): array
+    {
+        $target = trim($profile->target);
+        if (! $profile->hasDistinctTarget()) {
+            return [];
+        }
+        $phrase = $this->phrase($target);
+
+        return [
+            $this->entry(trim("{$phrase} (\"looking for\" OR seeking OR \"need a\" OR tender OR RFP) {$place}"), 'moment'),
+            $this->entry(trim("{$phrase} (expanding OR launch OR launched OR \"new office\" OR raised) {$place}"), 'moment'),
+        ];
+    }
+
+    /**
+     * Source mode: the account NEEDS this product/service, so suppliers offering it and
+     * people recommending providers are the openings.
+     *
+     * @param  list<string>  $terms
+     * @return list<list<array{query: string, native: string, family: string, only_sources: ?list<string>}>>
+     */
+    private function sourceLanes(ListeningProfile $profile, array $terms, string $place): array
+    {
+        $offering = [];
+        $recommended = [];
+        foreach ($terms as $index => $term) {
+            $phrase = $this->phrase($term);
+            $offering[] = $this->entry(trim("{$phrase} (supplier OR suppliers OR \"we supply\" OR \"we offer\" OR distributor OR manufacturer OR wholesale)".($index === 0 ? " {$place}" : '')), 'supply');
+            $recommended[] = $this->entry(trim("(\"recommend\" OR \"reliable\" OR \"best\") {$phrase} (supplier OR provider OR vendor)".($index === 0 ? " {$place}" : '')), 'supply');
+        }
+
+        $pain = [];
+        foreach (array_slice($profile->painPhrases, 0, 3) as $phrase) {
+            $pain[] = $this->entry($phrase, 'supply');
+        }
+
+        return [$offering, $recommended, $pain];
+    }
+
+    /**
+     * Raise mode: the account needs investors, so funds, investors, grants and
+     * accelerators open to its sector are the openings.
+     *
+     * @param  list<string>  $terms
+     * @return list<list<array{query: string, native: string, family: string, only_sources: ?list<string>}>>
+     */
+    private function raiseLanes(array $terms, string $place): array
+    {
+        $investors = [];
+        $programs = [];
+        foreach ($terms as $index => $term) {
+            $phrase = $this->phrase($term);
+            $investors[] = $this->entry(trim("(\"we invest in\" OR \"now investing\" OR \"new fund\" OR \"pitch us\" OR \"looking to invest\") {$phrase}".($index === 0 ? " {$place}" : '')), 'funding');
+            $programs[] = $this->entry(trim("(\"call for applications\" OR accelerator OR grant OR \"applications open\") {$phrase}".($index === 0 ? " {$place}" : '')), 'funding');
+        }
+
+        return [$investors, $programs];
+    }
+
+    /**
      * @param  list<string>  $terms
      * @return list<list<array{query: string, native: string, family: string, only_sources: ?list<string>}>>
      */
@@ -207,7 +275,7 @@ class IcpOpportunityQueryBuilder
         }
 
         return array_map(function (array $entry) use ($profile, $extra): array {
-            if ($profile->mode !== 'sell' || $entry['family'] === 'hiring') {
+            if (! in_array($profile->mode, ['sell', 'source'], true) || $entry['family'] === 'hiring') {
                 return $entry;
             }
             $entry['query'] = $this->clip(trim($entry['query'].' '.self::SELL_NOISE.' '.implode(' ', $extra)), 28);

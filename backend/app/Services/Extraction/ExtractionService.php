@@ -9,6 +9,7 @@ use App\Services\Discovery\DTO\IcpBrief;
 use App\Services\Discovery\DTO\RawDiscoveryHit;
 use App\Services\Discovery\QueryIntentService;
 use App\Services\Llm\GlmClient;
+use App\Support\IcpMeaning;
 
 class ExtractionService
 {
@@ -194,8 +195,9 @@ class ExtractionService
                 'content' => json_encode([
                     'user_query' => $brief->query,
                     'icp' => [
-                        'industries' => $brief->industries,
-                        'territories' => $brief->territories,
+                        'how_to_read' => IcpMeaning::SHORT,
+                        'target_industries' => $brief->industries,
+                        'target_territories' => $brief->territories,
                     ],
                     'hits' => $hits,
                 ], JSON_UNESCAPED_UNICODE),
@@ -327,8 +329,9 @@ class ExtractionService
                     'content' => json_encode([
                         'user_query' => $brief->query,
                         'icp' => [
-                            'industries' => $brief->industries,
-                            'territories' => $brief->territories,
+                            'how_to_read' => IcpMeaning::SHORT,
+                            'target_industries' => $brief->industries,
+                            'target_territories' => $brief->territories,
                         ],
                         'hit' => [
                             'name' => $hit->name,
@@ -827,7 +830,16 @@ class ExtractionService
             return $slugName;
         }
 
-        return str_contains($slugLetters, $headlineLetters) ? $first : $slugName;
+        if (str_contains($slugLetters, $headlineLetters)) {
+            return $first;
+        }
+
+        // Handles like "hidalgo1" or "javiermrosas": the slug is not a name, the headline is.
+        $slugIsHandle = ! str_contains(trim($slugName), ' ') || preg_match('/\d/u', $slugName);
+        $sharesSurname = collect(preg_split('/\s+/u', mb_strtolower($first)) ?: [])
+            ->contains(fn (string $part): bool => mb_strlen($part) >= 3 && str_contains($slugLetters, preg_replace('/[^\p{L}]/u', '', $part) ?? ''));
+
+        return $slugIsHandle && $sharesSurname ? $first : $slugName;
     }
 
     /**
@@ -872,8 +884,12 @@ class ExtractionService
 
         if ($company !== null) {
             $company = trim(preg_split('/\.\s|\s[|·]\s/u', $company)[0] ?? $company, ' .,;');
-            // "CIO | CTO": a second role is not an employer, and a wrong employer means wrong contacts.
-            if (preg_match('/^(?:'.$role.')(?:\s*(?:&|and|\/)\s*(?:'.$role.'))*$/u', $company)) {
+            // "CIO | CTO" or "Player-Coach Sales Leader": a role or tagline is not an employer,
+            // and a wrong employer means wrong contact details.
+            if (
+                preg_match('/^(?:'.$role.')(?:\s*(?:&|and|\/)\s*(?:'.$role.'))*$/u', $company)
+                || preg_match('/\b(leader|coach|expert|specialist|consultant|advisor|adviser|mentor|speaker|enthusiast|strategist|evangelist|transformation|helping|passionate|driving|building|growth)\b/iu', $company)
+            ) {
                 $company = null;
             }
         }

@@ -9,6 +9,7 @@ use App\Services\Discovery\DTO\IcpBrief;
 use App\Services\Intent\DTO\ListeningProfile;
 use App\Services\Intent\DTO\RawSocialHit;
 use App\Services\Llm\GlmClient;
+use App\Support\IcpMeaning;
 
 class SocialSignalEnricher
 {
@@ -134,7 +135,12 @@ class SocialSignalEnricher
     private function messages(IcpBrief $brief, RawSocialHit $hit, ?SignalTypeDefinition $signalType, ?ListeningProfile $profile): array
     {
         $systemPrompt = 'You qualify one public social post for a specific user and, when it is a real opening, write the dossier they will act on. '
-            .'Be strict: the user pays for openings, not for content. Most posts are NOT openings — vendors advertising, consultants posting tips, news, job ads, people sharing opinions with no need. '
+            .IcpMeaning::RULE.' '
+            .'interest.looking_for is the kind of need: sell = they need customers (an opening is a target customer with a need, or a target company at a moment such as expanding, launching or raising); '
+            .'source = they need to obtain interest.offer (an opening is a vendor, supplier or provider offering it, or someone recommending one — vendor posts COUNT here); '
+            .'invest = they need deals (an opening is a company raising or a deal); partner = they need partners (an opening is an organisation seeking partners or distributors); '
+            .'raise = they need investors (an opening is an investor, fund, grant or accelerator open to their sector). '
+            .'Be strict: the user pays for openings, not for content. Most posts are NOT openings — consultants posting tips, generic news, job ads, people sharing opinions with no need, and (unless looking_for is source) vendors advertising. '
             .'Return JSON only with keys: author_role, opportunity_kind, profile_name, persona, company_name, location_text, entity_type, industry, key_topics, competitors, '
             .'signal_type, buying_stage, intent_label, intent_description, problem, urgency, buying_intent_score, reasons, suggested_message, recommended_action_title, recommended_action_detail, follow_up_strategy, '
             .'summary, why_this_matters_to_you, benefits, personal_recommended_action_title, personal_recommended_action_detail, named_people, evidence_quote, actionability. '
@@ -143,8 +149,8 @@ class SocialSignalEnricher
             .'buying_stage MUST be exactly one of: Awareness, Consideration, Vendor Evaluation, Decision. '
             .'signal_type MUST be exactly one of: recommendation, switching, pricing, hiring_expansion, investment_opportunity, market_signal, partnership_opportunity, competitive_move, funding_event, regulatory_change, other. '
             .'Map opportunity_kind to signal_type: asking_for_recommendation and pain_point -> recommendation, competitor_dissatisfaction -> switching, pricing_question -> pricing, funding -> funding_event, partnership -> partnership_opportunity, hiring -> hiring_expansion, none -> other. '
-            .'buying_intent_score (0-100 integer) answers: how likely is it that the user wins business or a deal by replying this week? '
-            .'90+ = explicitly asking for exactly what the user offers, in their market; 70-89 = clear need the offer solves; 50-69 = plausible but indirect; under 40 = not worth their time (use signal_type other). '
+            .'buying_intent_score (0-100 integer) answers: how likely is it that acting on this post this week gets the user what they are looking for? '
+            .'90+ = exactly the target the user is looking for, in their market, with an explicit opening; 70-89 = clear match to their need; 50-69 = plausible but indirect; under 40 = not worth their time (use signal_type other). '
             .'If interest.not_a_fit is present, a post whose author or target is one of those is not an opening for this user. '
             .'Score lower when the location or segment clearly contradicts the user\'s interest, when the post is old news, or when the author is not the one with the need. '
             .'reasons is an array of short strings citing what in the post matches the user\'s interest. summary is a concise neutral summary. '
@@ -153,7 +159,7 @@ class SocialSignalEnricher
             .'personal_recommended_action_title / _detail is the single best next step for THIS user. '
             .'named_people is an array of full names of real people explicitly named in the post as taking an action; empty array if none. '
             .'evidence_quote is ONE sentence copied verbatim from the post (at least 25 characters) that proves the need, ask, or complaint. '
-            .'actionability is exactly "reply_now" or "not_an_opportunity". Use reply_now only when author_role is buyer or founder (or news, for funding/deal tracking) AND that quoted sentence is a concrete opening the user can act on this week. '
+            .'actionability is exactly "reply_now" or "not_an_opportunity". Use reply_now only when the author is the right side of the user\'s need (buyer or founder; vendor when looking_for is source; investor or news about a fund when looking_for is raise; news about a target company\'s expansion or raise when looking_for is sell) AND that quoted sentence is a concrete opening the user can act on this week. '
             .'Every field must be populated (use empty string/array rather than omitting a key).';
 
         if ($signalType !== null) {
@@ -166,13 +172,14 @@ class SocialSignalEnricher
         }
 
         $interest = [
-            'description' => $brief->description,
-            'custom_prompt' => $brief->customPrompt,
-            'industries' => $brief->industries,
-            'territories' => $brief->territories,
+            'how_to_read' => IcpMeaning::SHORT,
+            'what_they_are_looking_for' => IcpMeaning::need($brief->customPrompt, $brief->description),
+            'target_industries' => $brief->industries,
+            'target_territories' => $brief->territories,
         ];
         if ($profile !== null) {
             $interest['looking_for'] = $profile->mode;
+            $interest['target'] = $profile->target;
             $interest['offer'] = $profile->offer;
             $interest['offer_synonyms'] = $profile->synonyms;
             $interest['competitors'] = $profile->competitors;

@@ -3,6 +3,7 @@
 namespace App\Services\Chat;
 
 use App\Models\IcpProfile;
+use App\Support\IcpMeaning;
 use App\Support\TimeGreeting;
 
 class IcpChatContextBuilder
@@ -20,17 +21,18 @@ class IcpChatContextBuilder
 
         $config = is_array($icp->config) ? $icp->config : [];
 
-        return [
-            'name' => $icp->name,
-            'description' => (string) ($icp->description ?: ($config['description'] ?? '')),
-            'industries' => array_values(array_filter($config['industries'] ?? [], 'is_string')),
-            'territories' => array_values(array_filter($config['territories'] ?? [], 'is_string')),
-            'company_sizes' => array_values(array_filter($config['companySizes'] ?? [], 'is_string')),
-            'revenue_ranges' => array_values(array_filter($config['revenueRanges'] ?? [], 'is_string')),
-            'decision_makers' => array_values(array_filter($config['decisionMakers'] ?? [], 'is_string')),
-            'custom_prompt' => trim((string) ($config['customPrompt'] ?? '')),
-            'min_match_score' => (int) ($config['minMatchScore'] ?? 60),
-        ];
+        return IcpMeaning::payload(
+            name: (string) $icp->name,
+            customPrompt: (string) ($config['customPrompt'] ?? ''),
+            description: (string) ($icp->description ?: ($config['description'] ?? '')),
+            industries: array_values(array_filter($config['industries'] ?? [], 'is_string')),
+            territories: array_values(array_filter($config['territories'] ?? [], 'is_string')),
+            companySizes: array_values(array_filter($config['companySizes'] ?? [], 'is_string')),
+            revenueRanges: array_values(array_filter($config['revenueRanges'] ?? [], 'is_string')),
+            decisionMakers: array_values(array_filter($config['decisionMakers'] ?? [], 'is_string')),
+            exclusions: array_values(array_filter($config['exclusions'] ?? [], 'is_string')),
+            minMatchScore: (int) ($config['minMatchScore'] ?? 60),
+        );
     }
 
     public function buildFreeformSystemPrompt(
@@ -41,7 +43,7 @@ class IcpChatContextBuilder
         $parts = [
             'You are Sales Engine, an intelligent B2B sales advisor.',
             'Your job is to give satisfying, actionable answers AND continuously advise using the user\'s ACTIVE Ideal Customer Profile (ICP).',
-            'The ICP describes who the user sells to and what market they care about. Treat it as their interest model for every reply.',
+            IcpMeaning::RULE,
             TimeGreeting::promptContext($clientTimezone),
         ];
 
@@ -73,13 +75,13 @@ class IcpChatContextBuilder
             'Response rules when an active ICP is present:',
             '1. Answer the user\'s question directly with useful, concrete content (opportunities, trends, tactics, explanations). Never reply with only a request for more business details.',
             '2. After the answer, include a short section titled exactly: "Based on your active ICP".',
-            '3. In that section, recommend 3 to 5 prioritized opportunities, angles, or next moves that fit the active ICP industries, territories, company sizes, and decision makers.',
-            '4. For each recommendation, give a one-line reason that cites ICP fields (e.g. industry, territory, buyer persona).',
+            '3. In that section, recommend 3 to 5 prioritized opportunities, angles, or next moves that help the user get what their ICP says they are looking for (the target industries, territories, company sizes and decision makers).',
+            '4. For each recommendation, give a one-line reason that ties it to what they are looking for (e.g. the target industry, territory or decision maker it reaches).',
             '5. If the question is unrelated to sales/GTM, still answer it, then briefly note any ICP-relevant angle only if there is a genuine connection. Do not force irrelevant recommendations.',
             '6. If the user asks you to "use my ICP", apply the active ICP payload immediately; never substitute a generic wealth/tech celebrity list or invent ICP criteria.',
             '7. Prefer timely, actionable opportunities over generic textbook lists (market gaps, flash sales, etc.) unless those lists are explicitly tied to the ICP.',
             '8. When listing multiple items, number them sequentially as 1. 2. 3. Never repeat "1." for every item.',
-            '9. When answering factual or ranking-style questions (e.g. top/richest/wealthiest people or companies), still deliver the factual answer, then explicitly note whether/why each highlighted item does or does not align with the active ICP industries, territories, and decision makers. Do not leave ICP alignment implied.',
+            '9. When answering factual or ranking-style questions (e.g. top/richest/wealthiest people or companies), still deliver the factual answer, then explicitly note whether/why each highlighted item is or is not what the user is looking for (their target industries, territories and decision makers). Do not leave ICP alignment implied.',
             '10. End with one optional next step (e.g. refine ICP, run Generate New Leads, or dig into one recommendation) when helpful.',
         ]);
     }

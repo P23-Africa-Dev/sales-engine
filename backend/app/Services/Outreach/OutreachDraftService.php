@@ -11,6 +11,7 @@ use App\Models\OutreachActivity;
 use App\Models\SocialSignal;
 use App\Services\Chat\IcpChatContextBuilder;
 use App\Services\Llm\GlmClient;
+use App\Support\IcpMeaning;
 use App\Support\TimeGreeting;
 use Illuminate\Support\Collection;
 use InvalidArgumentException;
@@ -491,7 +492,7 @@ class OutreachDraftService
         }
 
         try {
-            $system = "Draft a concise {$channel} outreach message for the user's specific request. Do not claim the message was sent. Professional tone for African B2B. ".TimeGreeting::promptContext($clientTimezone).' Use the active ICP industries, territories, and decision makers to tailor the angle. Reference the provided lead context when relevant. When prior chat turns are provided, keep continuity with that conversation. Output ONLY the sendable message body. No subject line, no "Subject:" header, no To/From headers, and no ICP analysis preamble.';
+            $system = "Draft a concise {$channel} outreach message for the user's specific request. Do not claim the message was sent. Professional tone for African B2B. ".TimeGreeting::promptContext($clientTimezone).' '.IcpMeaning::RULE.' The message goes from the user to the lead: the reason for reaching out is what the user is looking for (their ICP need) and why this lead is part of it. Use the target industries, territories and decision makers to tailor the angle; never describe the ICP as the user\'s own business. Reference the provided lead context when relevant. When prior chat turns are provided, keep continuity with that conversation. Output ONLY the sendable message body. No subject line, no "Subject:" header, no To/From headers, and no ICP analysis preamble.';
             if ($channel === 'sms') {
                 $system .= ' This is an SMS. Keep it under 320 characters. No subject line.';
             }
@@ -547,7 +548,7 @@ class OutreachDraftService
         $industries = array_slice(array_values(array_filter($config['industries'] ?? [], 'is_string')), 0, 2);
         $territories = array_slice(array_values(array_filter($config['territories'] ?? [], 'is_string')), 0, 2);
 
-        $industryLabel = $industries !== [] ? implode(' / ', $industries) : 'your ICP industries';
+        $industryLabel = $industries !== [] ? implode(' / ', $industries) : 'your target industries';
         $territoryLabel = $territories !== [] ? implode(' / ', $territories) : null;
 
         $reasons = [];
@@ -565,9 +566,9 @@ class OutreachDraftService
         }
 
         $intro = "Targeting these {$count} lead".($count === 1 ? '' : 's')
-            ." because they relate to your {$industryLabel} focus"
+            ." because they match what you are looking for ({$industryLabel}"
             .($territoryLabel ? " in {$territoryLabel}" : '')
-            .'.';
+            .').';
 
         if ($reasons === []) {
             return $intro;

@@ -135,4 +135,15 @@ class LeadQueryNormalizerTest extends TestCase
         $this->assertStringNotContainsString('companies', $out);
         $this->assertStringContainsString('companies', $normalizer->normalize('give me leads of people that can scale my Ajo fintech app', $icp, 'companies'));
     }
+
+    public function test_first_batch_company_queries_search_linkedin_company_pages_with_a_short_phrase(): void
+    {
+        $icp = new IcpProfile(['name' => 'X', 'config' => ['industries' => ['SaaS']]]);
+        $brief = IcpBrief::fromIcpProfile($icp, 'B2B SaaS companies in London', 'companies');
+
+        $queries = app(LeadQueryNormalizer::class)->firstBatchCompanyQueries($brief);
+
+        $this->assertSame('B2B SaaS London site:linkedin.com/company', $queries[0]);
+        $this->assertCount(2, $queries);
+    }
 }

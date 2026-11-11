@@ -68,7 +68,7 @@ class ScoringServiceTest extends TestCase
             'authoritative_source' => true,
         ], $brief, $org);
 
-        $this->assertStringContainsString("doesn't match", mb_strtolower($scores['icp_relevance_reason']));
+        $this->assertStringContainsString("isn't what you're looking for", mb_strtolower($scores['icp_relevance_reason']));
         $this->assertStringContainsString('FinTech', $scores['icp_relevance_reason']);
     }
 
@@ -93,7 +93,8 @@ class ScoringServiceTest extends TestCase
         $this->assertStringContainsString('SaaS', $reason);
         $this->assertStringContainsString('Nairobi', $reason);
         $this->assertStringContainsString('CEO', $reason);
-        $this->assertStringContainsString('Fits your', $reason);
+        $this->assertStringContainsString("Matches what you're looking for", $reason);
+        $this->assertStringNotContainsString('your SaaS focus', $reason);
     }
 
     public function test_unknown_firmographics_do_not_claim_icp_fit(): void
@@ -307,6 +308,27 @@ class ScoringServiceTest extends TestCase
 
         $territory = collect($scores['fit_breakdown'])->firstWhere('dimension', 'territory');
         $this->assertSame('contradicted', $territory['status']);
+        $this->assertLessThan(ScoringService::QUALITY_BAR, $scores['priority_score']);
+    }
+
+    public function test_an_agency_that_mentions_the_target_industry_is_not_that_industry(): void
+    {
+        $brief = IcpBrief::fromIcpProfile(new IcpProfile([
+            'name' => 'UK SaaS',
+            'config' => array_merge(IcpProfile::defaultConfig(), [
+                'industries' => ['SaaS'],
+                'territories' => ['United Kingdom'],
+            ]),
+        ]), 'B2B SaaS companies in London', 'companies');
+
+        $scores = app(ScoringService::class)->heuristicScore([
+            'name' => 'Rocket SaaS',
+            'sector' => 'Marketing Services',
+            'location' => 'London, England',
+            'summary' => 'A digital marketing agency for B2B SaaS companies.',
+        ], $brief);
+
+        $this->assertSame('contradicted', collect($scores['fit_breakdown'])->firstWhere('dimension', 'industry')['status']);
         $this->assertLessThan(ScoringService::QUALITY_BAR, $scores['priority_score']);
     }
 }

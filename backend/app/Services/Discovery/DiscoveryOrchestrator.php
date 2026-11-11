@@ -365,6 +365,13 @@ class DiscoveryOrchestrator
                             && $passLimit <= QueryIntentService::DEFAULT_LEAD_LIMIT
                         ) {
                             $firstPassQueries = $this->leadQueryNormalizer->firstBatchPeopleQueries($passBrief);
+                        } elseif (
+                            in_array($intent, ['generate_leads', 'generate_more_leads'], true)
+                            && $passBrief->isCompanySearch()
+                            && ! $passBrief->isAuthoritativePeopleQuery()
+                            && $passLimit <= QueryIntentService::DEFAULT_LEAD_LIMIT
+                        ) {
+                            $firstPassQueries = $this->leadQueryNormalizer->firstBatchCompanyQueries($passBrief);
                         }
 
                         $reuseOnly = $intent === 'generate_more_leads'

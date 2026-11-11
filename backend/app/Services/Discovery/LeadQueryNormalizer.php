@@ -116,6 +116,31 @@ class LeadQueryNormalizer
     }
 
     /**
+     * First batch for company searches: LinkedIn company pages list real companies with
+     * their industry and HQ, where a plain web search returns listicles and agencies.
+     * The page query wants a short "sector place" phrase ("B2B SaaS London").
+     *
+     * @return list<string>
+     */
+    public function firstBatchCompanyQueries(IcpBrief $brief): array
+    {
+        $theme = $brief->cleanedUserQuery();
+        if ($theme === '') {
+            $theme = $brief->interestSearchSeed();
+        }
+
+        $short = preg_replace('/\b(companies|company|firms?|businesses|business|organi[sz]ations?|startups?|providers?|in|the|of|based|top|best|leading|list)\b/iu', ' ', $theme) ?? $theme;
+        $short = trim(preg_replace('/\s+/u', ' ', $short) ?? $short);
+        $words = preg_split('/\s+/u', $short) ?: [];
+        $short = implode(' ', array_slice($words, 0, 5));
+
+        return array_values(array_unique(array_filter([
+            $short !== '' ? $short.' site:linkedin.com/company' : null,
+            trim($brief->searchQuery()),
+        ])));
+    }
+
+    /**
      * Short LinkedIn-friendly queries for high-yield first batches of people.
      * Theme = the user's own ask (or the ICP interest seed for generic asks); roles = the ICP's
      * decision makers, because those are the people the user sells to. Territory stays out of the

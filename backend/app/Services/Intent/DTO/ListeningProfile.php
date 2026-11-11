@@ -8,12 +8,20 @@ use App\Services\Discovery\DTO\IcpBrief;
  * Short description of what a scan should hunt for. Built from the ICP's
  * own words, not from firmographic fields.
  *
+ * The ICP is what the account is LOOKING FOR right now, never what it does. `mode` is
+ * the kind of need: sell (they need customers), source (they need a product, service or
+ * supplier), invest (they need deals), partner (they need partners), raise (they need
+ * investors or funding). `target` names who or what they want to find; `offer` is the
+ * thing being asked for or offered in the posts that fill that need.
+ *
  * The expansion fields (synonyms, pain phrases, communities, exclusions)
  * come from the listening planner. They are what turn one vague offer into
  * the many short phrasings real buyers actually type.
  */
 readonly class ListeningProfile
 {
+    public const MODES = ['sell', 'source', 'invest', 'partner', 'raise'];
+
     /**
      * @param  list<string>  $competitors
      * @param  list<string>  $territories
@@ -37,6 +45,7 @@ readonly class ListeningProfile
         public array $excludeTerms = [],
         public string $buyer = '',
         public array $avoid = [],
+        public string $target = '',
     ) {}
 
     public static function fromBrief(IcpBrief $brief): self
@@ -44,12 +53,7 @@ readonly class ListeningProfile
         $text = trim($brief->customPrompt.' '.$brief->description);
         $lower = mb_strtolower($text);
 
-        $mode = 'sell';
-        if (preg_match('/\b(invest(?:ing|ment|or)?|venture|deal sourcing|portfolio compan)/u', $lower)) {
-            $mode = 'invest';
-        } elseif (preg_match('/\b(partnerships?|partner with|collaborat)/u', $lower)) {
-            $mode = 'partner';
-        }
+        $mode = self::modeFromNeed($lower);
 
         $includeHiring = (bool) preg_match('/\b(hiring|recruit|talent|appoint(?:ed|ment)?|leadership hire)/u', $lower);
 
@@ -69,7 +73,33 @@ readonly class ListeningProfile
                 static fn (string $keyword) => mb_strtolower($keyword) !== mb_strtolower($offer),
             )),
             avoid: self::phraseList($brief->exclusions, 10, 6),
+            target: $offer,
         );
+    }
+
+    /**
+     * What kind of need the ICP states. The ICP is what the account is looking for, so
+     * "suppliers of cocoa" is a sourcing need and "investors for our agritech startup" is
+     * a fundraising need — not a description of what the account sells.
+     */
+    public static function modeFromNeed(string $lower): string
+    {
+        if (preg_match('/\b(investors?|funding|grants?|accelerators?|capital|raise|raising)\b/u', $lower)
+            && preg_match('/\b(need|needs|looking for|seeking|want|raise|raising|for (?:our|my))\b/u', $lower)
+            && ! preg_match('/\b(invest in|investing in|deal flow|deal sourcing|portfolio compan)/u', $lower)) {
+            return 'raise';
+        }
+        if (preg_match('/\b(invest(?:ing|ment)? (?:in|opportunit)|venture deals?|deal ?flow|deal sourcing|portfolio compan|startups? (?:raising|to invest))/u', $lower)) {
+            return 'invest';
+        }
+        if (preg_match('/\b(partnerships?|partner with|partners? (?:for|to|in)|collaborat|distribution partners?|resellers?)/u', $lower)) {
+            return 'partner';
+        }
+        if (preg_match('/\b(suppliers?|vendors?|manufacturers?|wholesalers?|providers? (?:of|for)|sourcing|to source|procure(?:ment)?|purchase|to buy|we need (?:a|an)|we\'re looking for (?:a|an))\b/u', $lower)) {
+            return 'source';
+        }
+
+        return 'sell';
     }
 
     /**
@@ -77,7 +107,7 @@ readonly class ListeningProfile
      */
     public function withOverrides(?string $mode, ?string $offer, ?array $competitors, ?bool $includeHiring, array $expansion = []): self
     {
-        $nextMode = in_array($mode, ['sell', 'invest', 'partner'], true) ? $mode : $this->mode;
+        $nextMode = in_array($mode, self::MODES, true) ? $mode : $this->mode;
         $nextOffer = trim((string) $offer);
         $nextOffer = $nextOffer !== '' ? self::clipWords($nextOffer, 5) : $this->offer;
 
@@ -107,7 +137,19 @@ readonly class ListeningProfile
             excludeTerms: self::phraseList($expansion['exclude_terms'] ?? null, 10, 3) ?: $this->excludeTerms,
             buyer: self::clipWords(trim((string) ($expansion['buyer'] ?? '')), 20) ?: $this->buyer,
             avoid: $this->avoid,
+            target: self::clipWords(trim((string) ($expansion['target'] ?? '')), 6) ?: ($nextOffer !== '' ? $nextOffer : $this->target),
         );
+    }
+
+    /**
+     * True when the ICP names who the account wants (e.g. "fintech companies in Lagos")
+     * rather than only a product, so that target's own moments count as openings.
+     */
+    public function hasDistinctTarget(): bool
+    {
+        $target = mb_strtolower(trim($this->target));
+
+        return $target !== '' && $target !== mb_strtolower(trim($this->offer));
     }
 
     /**
@@ -135,6 +177,7 @@ readonly class ListeningProfile
     {
         return [
             'mode' => $this->mode,
+            'target' => $this->target,
             'offer' => $this->offer,
             'competitors' => $this->competitors,
             'include_hiring' => $this->includeHiring,

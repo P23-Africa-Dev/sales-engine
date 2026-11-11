@@ -58,15 +58,20 @@ class OpportunityGate
         }
 
         $role = mb_strtolower(trim((string) ($enriched['author_role'] ?? '')));
-        if (in_array($role, self::NON_BUYER_ROLES, true)) {
+        $type = mb_strtolower(trim((string) ($enriched['signal_type'] ?? 'other')));
+
+        // When the account needs a product or supplier, the vendor posting it IS the opening.
+        $vendorIsOpening = $profile->mode === 'source' && in_array($role, ['vendor', 'self_promotion'], true);
+        if (! $vendorIsOpening && in_array($role, self::NON_BUYER_ROLES, true)) {
             return 'not_a_buyer';
         }
-        if (in_array($role, ['news', 'media'], true) && $profile->mode === 'sell') {
+        // News about a target customer expanding or raising is a moment; news alone is not an ask.
+        if (in_array($role, ['news', 'media'], true) && $profile->mode === 'sell'
+            && ! ($profile->hasDistinctTarget() && in_array($type, ['market_signal', 'funding_event', 'partnership_opportunity'], true))) {
             return 'not_a_buyer';
         }
 
-        $type = mb_strtolower(trim((string) ($enriched['signal_type'] ?? 'other')));
-        if (in_array($type, ['', 'other', 'market_signal', 'regulatory_change'], true)) {
+        if (in_array($type, ['', 'other', 'regulatory_change'], true)) {
             return 'not_an_opportunity';
         }
 
@@ -120,9 +125,13 @@ class OpportunityGate
         }
 
         return match ($profile->mode) {
-            'invest' => in_array($type, ['funding_event', 'investment_opportunity'], true),
+            'invest', 'raise' => in_array($type, ['funding_event', 'investment_opportunity'], true),
             'partner' => $type === 'partnership_opportunity',
-            default => in_array($type, ['recommendation', 'switching', 'pricing', 'competitive_move'], true),
+            'source' => in_array($type, ['recommendation', 'pricing', 'market_signal', 'partnership_opportunity', 'competitive_move'], true),
+            // Customers: asks and switches; the target's own moments (expansion, raise, partnering)
+            // count only when the ICP names target companies, not just a product.
+            default => in_array($type, ['recommendation', 'switching', 'pricing', 'competitive_move'], true)
+                || ($profile->hasDistinctTarget() && in_array($type, ['market_signal', 'funding_event', 'partnership_opportunity'], true)),
         };
     }
 

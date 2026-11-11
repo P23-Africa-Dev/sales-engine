@@ -48,13 +48,13 @@ class FreeformOpportunityRetriever
         $firstName = trim(explode(' ', trim($user->name ?? ''), 2)[0] ?? '');
         $system = $this->icpChatContext->buildFreeformSystemPrompt($icp, $firstName, $clientTimezone);
         $system .= "\n\nYou have LIVE retrieved sources below. Prefer them over generic knowledge."
-            . "\nRules for sourced answers:"
-            . "\n- Lead with concrete opportunities/news/plays found in the sources (or say clearly when sources are thin)."
-            . "\n- Number items sequentially as 1. 2. 3. (never repeat 1.)."
-            . "\n- For each item include: what it is, why it fits the active ICP, and a markdown link to the source URL when available."
-            . "\n- Do not invent URLs. Only use URLs from the provided sources."
-            . "\n- End with \"Based on your active ICP\" recommendations grounded in both ICP and sources."
-            . "\n- When prior chat turns are provided, keep continuity with that conversation.";
+            ."\nRules for sourced answers:"
+            ."\n- Lead with concrete opportunities/news/plays found in the sources (or say clearly when sources are thin)."
+            ."\n- Number items sequentially as 1. 2. 3. (never repeat 1.)."
+            ."\n- For each item include: what it is, how it helps the user get what their ICP says they are looking for, and a markdown link to the source URL when available."
+            ."\n- Do not invent URLs. Only use URLs from the provided sources."
+            ."\n- End with \"Based on your active ICP\" recommendations grounded in both ICP and sources."
+            ."\n- When prior chat turns are provided, keep continuity with that conversation.";
 
         $userPayload = json_encode([
             'user_question' => $userQuery,
@@ -102,9 +102,9 @@ class FreeformOpportunityRetriever
     private function buildSearchQueries(?IcpProfile $icp, string $userQuery): array
     {
         $payload = $this->icpChatContext->toPromptPayload($icp);
-        $industry = is_array($payload['industries'] ?? null) ? ($payload['industries'][0] ?? '') : '';
-        $territory = is_array($payload['territories'] ?? null) ? ($payload['territories'][0] ?? '') : '';
-        $buyer = is_array($payload['decision_makers'] ?? null) ? ($payload['decision_makers'][0] ?? '') : '';
+        $industry = is_array($payload['target_industries'] ?? null) ? ($payload['target_industries'][0] ?? '') : '';
+        $territory = is_array($payload['target_territories'] ?? null) ? ($payload['target_territories'][0] ?? '') : '';
+        $buyer = is_array($payload['target_decision_makers'] ?? null) ? ($payload['target_decision_makers'][0] ?? '') : '';
 
         $base = trim($userQuery);
         $queries = [
@@ -113,7 +113,7 @@ class FreeformOpportunityRetriever
             trim(implode(' ', array_filter([$industry, $territory, 'news startups procurement RFP']))),
         ];
 
-        $queries = array_values(array_unique(array_filter($queries, fn(string $q) => mb_strlen($q) >= 8)));
+        $queries = array_values(array_unique(array_filter($queries, fn (string $q) => mb_strlen($q) >= 8)));
 
         if ($queries === []) {
             $queries = [$base !== '' ? $base : 'B2B market opportunities'];
@@ -143,7 +143,7 @@ class FreeformOpportunityRetriever
                         'X-API-KEY' => (string) config('services.serper.api_key'),
                         'Content-Type' => 'application/json',
                     ])
-                    ->post($baseUrl . '/search', [
+                    ->post($baseUrl.'/search', [
                         'q' => $query,
                         'num' => 5,
                     ]);
@@ -207,7 +207,7 @@ class FreeformOpportunityRetriever
         $sources = [];
         foreach ($query->get() as $signal) {
             $sources[] = [
-                'title' => trim(($signal->company_name ?: $signal->profile_name ?: 'Social signal') . ': ' . ($signal->intent_label ?: $signal->signal_type ?: 'signal')),
+                'title' => trim(($signal->company_name ?: $signal->profile_name ?: 'Social signal').': '.($signal->intent_label ?: $signal->signal_type ?: 'signal')),
                 'url' => $signal->post_url,
                 'snippet' => mb_substr((string) $signal->post_text, 0, 280),
                 'provider' => 'social_listening',
@@ -242,7 +242,7 @@ class FreeformOpportunityRetriever
         if ($icp) {
             $lines[] = '';
             $lines[] = 'Based on your active ICP';
-            $lines[] = 'Prioritize items that match ' . $icp->name . ' industries, territories, and buyer personas above.';
+            $lines[] = 'Prioritize items that match '.$icp->name.' industries, territories, and buyer personas above.';
         }
 
         return $this->numbering->normalize(implode("\n", $lines));

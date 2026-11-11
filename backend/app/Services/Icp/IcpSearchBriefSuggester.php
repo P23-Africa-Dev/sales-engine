@@ -4,8 +4,9 @@ namespace App\Services\Icp;
 
 use App\Models\Organization;
 use App\Services\Discovery\DiscoveryGeo;
-use Illuminate\Support\Facades\Log;
 use App\Services\Llm\GlmClient;
+use App\Support\IcpMeaning;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Turns ICP fields into a search-ready brief for “What we search for”.
@@ -705,6 +706,7 @@ class IcpSearchBriefSuggester
                     'NEVER write “industries specialize”, profile blurbs, or marketing slogans.',
                     'Territory is applied separately — leave geography out.',
                     'Your job is to refine so web search returns real companies/people, not essays.',
+                    IcpMeaning::RULE.' So the brief must describe the companies, people or opportunities the account wants to FIND — never the account\'s own business.',
                     'The same brief drives social listening, so keep what the user is after: if they want investment deals or partners rather than buyers, keep that intent in the brief (e.g. "seed-stage fintech startups raising", "distribution partners for solar kits").',
                     'Keep every exclusion the user gave; write them as "not X" or "exclude X".',
                     'keywords should include the plain words buyers use for the offer (synonyms, category names), not just industry jargon.',

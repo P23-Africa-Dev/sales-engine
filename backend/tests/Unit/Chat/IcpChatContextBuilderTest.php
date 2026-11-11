@@ -28,10 +28,13 @@ class IcpChatContextBuilderTest extends TestCase
         $payload = app(IcpChatContextBuilder::class)->toPromptPayload($icp);
 
         $this->assertSame('FMCG Lagos', $payload['name']);
-        $this->assertSame(['FMCG & Retail'], $payload['industries']);
-        $this->assertSame(['Lagos, NG'], $payload['territories']);
-        $this->assertSame(['Head of Sales'], $payload['decision_makers']);
-        $this->assertStringContainsString('cold-chain', $payload['custom_prompt']);
+        $this->assertSame(['FMCG & Retail'], $payload['target_industries']);
+        $this->assertSame(['Lagos, NG'], $payload['target_territories']);
+        $this->assertSame(['Head of Sales'], $payload['target_decision_makers']);
+        // The ICP is what the account is looking for, stated in its own words.
+        $this->assertStringContainsString('cold-chain', $payload['what_they_are_looking_for']);
+        $this->assertStringContainsString('Distributors in Lagos', $payload['what_they_are_looking_for']);
+        $this->assertStringContainsString('looking for', $payload['how_to_read']);
     }
 
     public function test_freeform_system_prompt_embeds_icp_and_recommendation_rules(): void
@@ -56,6 +59,8 @@ class IcpChatContextBuilderTest extends TestCase
         $this->assertStringContainsString('Tommy', $prompt);
         $this->assertStringContainsString('Do not ask the user to re-describe', $prompt);
         $this->assertStringNotContainsString('Active ICP: Health Tech.', $prompt);
+        $this->assertStringContainsString('is NOT a description of the account', $prompt);
+        $this->assertStringNotContainsString('who the user sells to', $prompt);
     }
 
     public function test_freeform_system_prompt_without_icp_suggests_activating_one(): void

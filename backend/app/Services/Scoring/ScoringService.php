@@ -7,6 +7,7 @@ use App\Services\Discovery\DTO\IcpBrief;
 use App\Services\IcpFiltering\DTO\CandidateCompany;
 use App\Services\IcpFiltering\IcpFilterService;
 use App\Services\Llm\GlmClient;
+use App\Support\IcpMeaning;
 
 class ScoringService
 {
@@ -201,13 +202,17 @@ class ScoringService
             return ['verified', $label];
         }
 
-        $tokenHit = $this->industryTokenHit($brief->industries, $label.' '.$text);
-        if ($tokenHit !== null) {
-            return ['partial', $tokenHit];
+        if ($label !== '') {
+            // "Rocket SaaS — Marketing Services" mentions SaaS but is an agency: the lead's own
+            // industry label decides, a keyword elsewhere in its text does not.
+            $labelHit = $this->industryTokenHit($brief->industries, $label);
+
+            return $labelHit !== null ? ['partial', $labelHit] : ['contradicted', $label];
         }
 
-        if ($label !== '') {
-            return ['contradicted', $label];
+        $tokenHit = $this->industryTokenHit($brief->industries, $text);
+        if ($tokenHit !== null) {
+            return ['partial', $tokenHit];
         }
 
         return ['unknown', ''];
@@ -514,7 +519,7 @@ class ScoringService
             ? 'Judge EVERY lead in leads[]. Return JSON: {"results":[{"index":<the lead index>,'.$row.'}]}. One result per lead, echoing its index. Judge each lead only on its own fields — never carry a location or industry from one lead to another.'
             : 'Judge the lead. Return JSON: {'.$row.'}.';
 
-        return $shape.' For each ICP dimension say what the lead\'s own fields prove: "verified" = the fields clearly show it matches the ICP value; "partial" = related or implied (e.g. a payments company for a FinTech ICP, a city inside an ICP country); "unknown" = the fields say nothing about it; "contradicted" = the fields show a different value. role compares a person\'s title with icp.decisionMakers (seniority equivalents count as partial). Never guess a location that is not written in the fields. query_relevance_score is how directly the lead answers user_query (or the ICP brief when user_query is generic): 90+ = exactly what was asked, 60-80 = adjacent, under 40 = unrelated. icp_relevance_reason is one short sentence citing the specific evidence. When is_factual_query is true and the lead is outside the ICP, phrase it like: "Answers your search for X; doesn\'t match your {industries} focus in {territories}."';
+        return $shape.' '.IcpMeaning::RULE.' The lead is a candidate for what the account is looking for; for each target dimension say what the lead\'s own fields prove: "verified" = the fields clearly show it matches the ICP value; "partial" = related or implied (e.g. a payments company for a FinTech ICP, a city inside an ICP country); "unknown" = the fields say nothing about it; "contradicted" = the fields show a different value. role compares a person\'s title with icp.decisionMakers (seniority equivalents count as partial). Never guess a location that is not written in the fields. query_relevance_score is how directly the lead answers user_query (or the ICP brief when user_query is generic): 90+ = exactly what was asked, 60-80 = adjacent, under 40 = unrelated. icp_relevance_reason is one short sentence citing the specific evidence. When is_factual_query is true and the lead is outside the ICP, phrase it like: "Answers your search for X; doesn\'t match your {industries} focus in {territories}."';
     }
 
     /**
@@ -522,16 +527,18 @@ class ScoringService
      */
     private function icpPromptContext(IcpBrief $brief): array
     {
-        return [
-            'name' => $brief->name,
-            'description' => $brief->description,
-            'industries' => $brief->industries,
-            'territories' => $brief->territories,
-            'companySizes' => $brief->companySizes,
-            'decisionMakers' => $brief->decisionMakers,
-            'customPrompt' => $brief->customPrompt,
-            'minMatchScore' => $brief->minMatchScore,
-        ];
+        return IcpMeaning::payload(
+            name: $brief->name,
+            customPrompt: $brief->customPrompt,
+            description: $brief->description,
+            industries: $brief->industries,
+            territories: $brief->territories,
+            companySizes: $brief->companySizes,
+            revenueRanges: $brief->revenueRanges,
+            decisionMakers: $brief->decisionMakers,
+            exclusions: $brief->exclusions,
+            minMatchScore: $brief->minMatchScore,
+        );
     }
 
     /**
@@ -611,7 +618,7 @@ class ScoringService
         if ($isFactualQuery && ! $matchesIcp) {
             $who = $leadName !== '' ? $leadName : 'This result';
 
-            return "{$who} answers your search for {$queryHint}; doesn't match your {$industryLabel} focus in {$territoryLabel}.";
+            return "{$who} answers your search for {$queryHint}; isn't what you're looking for ({$industryLabel} in {$territoryLabel}).";
         }
 
         if ($fit['unknown']) {
@@ -638,12 +645,12 @@ class ScoringService
                 return implode(' ', $parts).'.';
             }
 
-            $parts = ["Fits your {$industryLabel} focus"];
+            $parts = ["Matches what you're looking for: {$industryLabel}"];
             if ($canClaimTerritory) {
                 $parts[] = "in {$territoryLabel}";
             }
             if ($buyerLabel !== null) {
-                $parts[] = "aligned with {$buyerLabel}";
+                $parts[] = "reaching {$buyerLabel}";
             }
 
             return implode(' ', $parts).'.';
@@ -653,7 +660,7 @@ class ScoringService
         $briefNouns = $hasNicheBrief ? $this->briefNounOverlap($brief, $companyPayload) : [];
         if ($briefNouns !== []) {
             $suffix = $canClaimTerritory
-                ? '; limited firmographic overlap with your ICP filters.'
+                ? '; limited overlap with the rest of what you are looking for.'
                 : '; location not confirmed against your territories.';
 
             return 'Matches your search for '.implode(' / ', array_map(
@@ -666,7 +673,7 @@ class ScoringService
             return "Location not confirmed against {$territoryLabel}, so ICP fit is unproven. Still answers the search request.";
         }
 
-        return "Limited overlap with your {$industryLabel} focus in {$territoryLabel}. Still answers the search request.";
+        return "Limited overlap with what you're looking for ({$industryLabel} in {$territoryLabel}). Still answers the search request.";
     }
 
     /**
