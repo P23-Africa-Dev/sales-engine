@@ -4182,7 +4182,7 @@ function ListeningSettingsModal({
                       Meta Pages to monitor
                     </label>
                     <p className="mt-1 text-[11px] leading-[15px] text-white/45">
-                      Page name, @username or ID — one per line. We'll watch these pages for new posts.
+                      Page name, @username or ID — one per line. We&apos;ll watch these pages for new posts.
                     </p>
                     <textarea
                       id="meta-page-ids"
