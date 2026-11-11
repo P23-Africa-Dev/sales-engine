@@ -9,6 +9,8 @@ use App\Services\Discovery\DTO\RawDiscoveryHit;
 use App\Services\Discovery\QueryIntentService;
 use App\Services\Extraction\ExtractionService;
 use App\Services\Llm\GlmClient;
+use Illuminate\Support\Facades\Http;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 class ExtractionServiceTest extends TestCase
@@ -58,8 +60,8 @@ class ExtractionServiceTest extends TestCase
             'services.glm.extract_model' => 'glm-4-flash',
         ]);
 
-        \Illuminate\Support\Facades\Http::fake([
-            'glm.example.com/*' => \Illuminate\Support\Facades\Http::response([
+        Http::fake([
+            'glm.example.com/*' => Http::response([
                 'choices' => [[
                     'message' => [
                         'content' => json_encode([
@@ -140,5 +142,37 @@ class ExtractionServiceTest extends TestCase
         $extracted = $service->extract($hit, $brief, $org);
 
         $this->assertNull($extracted['location'] ?? null);
+    }
+
+    /**
+     * Shapes taken from live Serper results for "CEO fintech payment companies in Lagos site:linkedin.com/in".
+     *
+     * @return array<string, array{0: string, 1: string, 2: string, 3: string, 4: ?string, 5: ?string}>
+     */
+    public static function linkedInPeopleHits(): array
+    {
+        return [
+            'title and company in snippet' => ['Bukola Akinsanya - SaySwitch Limited | LinkedIn', 'https://ng.linkedin.com/in/bukola-akinsanya', 'Bukola A. · Managing Director & CEO | SaySwitch Limited | Driving Payments Innovation', 'Bukola Akinsanya', 'Managing Director & CEO', 'SaySwitch Limited'],
+            'slug without hyphen, caps headline' => ['GBOLAHAN FANIRAN - MinieMoney | LinkedIn', 'https://ng.linkedin.com/in/gbolahanfaniran', 'Founder/CEO MinieMoney. Fintech | Digital Banking | Lending', 'Gbolahan Faniran', 'Founder/CEO', 'MinieMoney'],
+            'honorific and post-nominals' => ['Dr. Stanley Jacob FCIB - Zest Payments | LinkedIn', 'https://ng.linkedin.com/in/drstanleyjacob', 'Experience · Group Chief Innovation Officer · Founding CEO, Zest Payments Limited', 'Stanley Jacob', 'CEO', 'Zest Payments Limited'],
+            'tagline is not a title' => ['Ope Adeoye - To grow, connect to the pipe | LinkedIn', 'https://ng.linkedin.com/in/opeadeoye', '20+ years in the technology & payments ecosystem.', 'Ope Adeoye', null, null],
+            'second role is not a company' => ['Olayemi Toye - CIO | LinkedIn', 'https://ng.linkedin.com/in/olayemi-toye', 'CIO | CTO | Payments', 'Olayemi Toye', 'CIO', null],
+        ];
+    }
+
+    #[DataProvider('linkedInPeopleHits')]
+    public function test_linkedin_people_hits_recover_name_title_and_company(string $title, string $url, string $snippet, string $name, ?string $role, ?string $company): void
+    {
+        config(['services.glm.api_key' => '']);
+        $brief = IcpBrief::fromIcpProfile(new IcpProfile(['name' => 'X', 'config' => IcpProfile::defaultConfig()]), 'fintech in Lagos', 'people');
+        $slugName = ucwords(str_replace('-', ' ', basename($url)));
+        $hit = new RawDiscoveryHit(name: $slugName, source: 'web', provider: 'serper', snippet: $snippet, url: $url, meta: ['title' => $title]);
+        $org = Organization::query()->create(['name' => 'O', 'slug' => 'o-'.uniqid()]);
+
+        $row = app(ExtractionService::class)->extractManyBatch([$hit], $brief, $org)[0][0];
+
+        $this->assertSame($name, $row['person_name']);
+        $this->assertSame($role, $row['title'] ?? null);
+        $this->assertSame($company, $row['company'] ?? null);
     }
 }

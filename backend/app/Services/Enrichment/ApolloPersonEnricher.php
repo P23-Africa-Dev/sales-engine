@@ -64,9 +64,9 @@ class ApolloPersonEnricher
 
         try {
             $response = Http::timeout(20)
-                ->post('https://api.apollo.io/v1/mixed_people/search', array_merge($payload, [
-                    'api_key' => (string) config('services.apollo.api_key'),
-                ]));
+                ->withHeaders(['X-Api-Key' => (string) config('services.apollo.api_key')])
+                ->acceptJson()
+                ->post('https://api.apollo.io/v1/mixed_people/search', $payload);
 
             if (! $response->successful()) {
                 Log::warning('Apollo person enrichment failed', ['status' => $response->status()]);
@@ -87,7 +87,7 @@ class ApolloPersonEnricher
                 'email' => trim((string) ($person['email'] ?? '')),
                 'phone' => trim((string) (($person['phone_numbers'][0]['sanitized_number'] ?? '') ?: '')),
                 'linkedin_url' => trim((string) ($person['linkedin_url'] ?? '')),
-            ], fn(string $v) => $v !== '');
+            ], fn (string $v) => $v !== '');
         } catch (\Throwable $e) {
             Log::warning('Apollo person enrichment exception', ['error' => $e->getMessage()]);
 

@@ -36,9 +36,9 @@ class IcpFilterService
 
     /**
      * @param  list<string>  $availableFields  Which fields this candidate's data source can
-     *                                          actually populate. Fields outside this list are
-     *                                          always treated as passed (not evaluated), regardless
-     *                                          of whether the ICP constrains them.
+     *                                         actually populate. Fields outside this list are
+     *                                         always treated as passed (not evaluated), regardless
+     *                                         of whether the ICP constrains them.
      */
     public function passes(IcpBrief $brief, CandidateCompany $candidate, array $availableFields = self::ALL_FIELDS): IcpFilterResult
     {
@@ -205,12 +205,21 @@ class IcpFilterService
     {
         $normalized = mb_strtolower(trim($value));
         $tokens = $this->tokenize($normalized);
-        // Short geo codes (uk, ng, us) are meaningful for territory matching.
-        $rawParts = preg_split('/[,\s\/]+/u', $normalized) ?: [];
-        foreach ($rawParts as $part) {
-            $part = trim($part);
-            if ($part !== '' && mb_strlen($part) >= 2 && mb_strlen($part) < 3) {
-                $tokens[] = $part;
+        // Short geo codes (UK, NG, US) are meaningful for territory matching — but only when written
+        // as a code ("Lagos, NG", "US") or as a whole comma segment. Lower-case "in" / "de" / "us"
+        // inside prose ("based in London", "Rio de Janeiro") must not match India / Germany / USA.
+        $segments = preg_split('/\s*[,\/|]\s*/u', trim($value)) ?: [];
+        foreach ($segments as $segment) {
+            foreach (preg_split('/\s+/u', trim($segment)) ?: [] as $word) {
+                $word = trim($word, ' .()');
+                if (mb_strlen($word) !== 2) {
+                    continue;
+                }
+                $isUpperCode = $word === mb_strtoupper($word) && preg_match('/^\p{Lu}{2}$/u', $word);
+                $isWholeSegment = mb_strtolower(trim($segment, ' .()')) === mb_strtolower($word);
+                if ($isUpperCode || $isWholeSegment) {
+                    $tokens[] = mb_strtolower($word);
+                }
             }
         }
         $tokens = array_values(array_unique($tokens));

@@ -155,7 +155,7 @@ class QueryIntentService
 
     private function parseLimit(string $normalized, string $intent = 'generate_leads'): int
     {
-        $clamp = fn(int $value): int => min(self::MAX_LEAD_LIMIT, max(1, $value));
+        $clamp = fn (int $value): int => min(self::MAX_LEAD_LIMIT, max(1, $value));
 
         if (preg_match('/\b(?:give me|find|get|show|list|need|want)\s+(\d{1,3})\b/u', $normalized, $matches)) {
             return $clamp((int) $matches[1]);
@@ -213,6 +213,35 @@ class QueryIntentService
         );
 
         return trim(preg_replace('/\s+/u', ' ', $stripped ?? $query) ?? $query);
+    }
+
+    /**
+     * Map the UI entity-mode picker value to a discovery target. Null when absent/unknown.
+     */
+    public static function targetFromEntityMode(?string $entityMode): ?string
+    {
+        return match (mb_strtolower(trim((string) $entityMode))) {
+            'both', 'mixed' => self::TARGET_BOTH,
+            'companies', 'company', 'accounts' => self::TARGET_COMPANIES,
+            'people', 'person', 'persons', 'individuals', 'contacts' => self::TARGET_PEOPLE,
+            default => null,
+        };
+    }
+
+    /**
+     * Legacy clients append "(companies only)" / "(people only)". That cue is the user's explicit
+     * choice, so it wins over keyword guessing instead of being one more keyword.
+     */
+    public function entityModeCueTarget(string $query): ?string
+    {
+        if (preg_match('/\(?\s*(companies|accounts)\s+only\s*\)?\s*$/iu', $query)) {
+            return self::TARGET_COMPANIES;
+        }
+        if (preg_match('/\(?\s*(people|contacts)\s+only\s*\)?\s*$/iu', $query)) {
+            return self::TARGET_PEOPLE;
+        }
+
+        return null;
     }
 
     /**

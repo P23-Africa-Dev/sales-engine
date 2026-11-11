@@ -78,7 +78,7 @@ class ContactEnrichmentWaterfallTest extends TestCase
         $this->assertSame('tier1', $profile->contactEnrichmentTier);
         $this->assertSame('snippet_extractor', $profile->contactEnrichmentProvider);
 
-        Http::assertNotSent(fn($request) => str_contains($request->url(), 'bytemine.example.com'));
+        Http::assertNotSent(fn ($request) => str_contains($request->url(), 'bytemine.example.com'));
     }
 
     public function test_enrichment_waterfall_uses_bytemine_when_snippets_incomplete(): void
@@ -134,7 +134,10 @@ class ContactEnrichmentWaterfallTest extends TestCase
                 'mobilePhone' => '+15551230000',
             ], 200),
             'api.apollo.io/*' => Http::response(['people' => []], 200),
+            'google.serper.dev/places' => Http::response(['places' => []], 200),
+            'acme.com/*' => Http::response('', 404),
         ]);
+        Http::preventStrayRequests();
 
         $icp = IcpProfile::query()->create([
             'organization_id' => $org->id,
@@ -155,6 +158,6 @@ class ContactEnrichmentWaterfallTest extends TestCase
         $this->assertSame('tier2', $profile->contactEnrichmentTier);
         $this->assertSame('bytemine', $profile->contactEnrichmentProvider);
 
-        Http::assertNotSent(fn($request) => str_contains($request->url(), 'api.apollo.io'));
+        Http::assertNotSent(fn ($request) => str_contains($request->url(), 'api.apollo.io'));
     }
 }

@@ -110,11 +110,11 @@ describe("icp-search-brief", () => {
     ).toBe("logistics 3PL operators");
   });
 
-  it("encodes confirm count in the chat body without flipping generic asks", () => {
+  it("never rewrites the user's prompt for the confirm count (count is a request field)", () => {
     expect(withProspectCountCue("give me prospects", 12)).toBe("give me prospects");
-    expect(withProspectCountCue("give me prospects", 25)).toBe("give me 25 prospects");
-    expect(withProspectCountCue("give me prospects (companies only)", 40)).toBe(
-      "give me 40 prospects (companies only)"
+    expect(withProspectCountCue("give me prospects", 25)).toBe("give me prospects");
+    expect(withProspectCountCue("  logistics operators in Lagos ", 40)).toBe(
+      "logistics operators in Lagos"
     );
     expect(withProspectCountCue("find 50 logistics companies", 25)).toBe(
       "find 50 logistics companies"

@@ -14,9 +14,13 @@ class LeadQueryNormalizer
 {
     public function __construct(private readonly QueryIntentService $queryIntent) {}
 
-    public function normalize(string $query, IcpProfile $icp): string
+    /**
+     * @param  string|null  $entityMode  Explicit UI choice (both|companies|people); only "companies" may add a company noun.
+     */
+    public function normalize(string $query, IcpProfile $icp, ?string $entityMode = null): string
     {
-        $cleaned = $this->queryIntent->stripProspectCountInstruction($query);
+        $cleaned = $this->queryIntent->stripEntityModeCue($this->queryIntent->stripProspectCountInstruction($query));
+        $target = QueryIntentService::targetFromEntityMode($entityMode);
         $trimmed = trim($cleaned);
 
         if ($trimmed === '') {
@@ -26,14 +30,14 @@ class LeadQueryNormalizer
         if ($this->isMetaPromptRequest($trimmed) || $this->queryIntent->isGenericLeadRequest($trimmed)) {
             $theme = $this->extractTheme($trimmed);
 
-            return $this->composeActionableQuery($icp, $theme);
+            return $this->composeActionableQuery($icp, $theme, $target);
         }
 
         // Soften "give me leads of people that can scale my X" into role+industry search.
         if ($this->isGoalFramedLeadRequest($trimmed)) {
             $theme = $this->extractTheme($trimmed);
 
-            return $this->composeActionableQuery($icp, $theme !== '' ? $theme : $trimmed);
+            return $this->composeActionableQuery($icp, $theme !== '' ? $theme : $trimmed, $target);
         }
 
         return $trimmed;
@@ -89,17 +93,18 @@ class LeadQueryNormalizer
 
         // Prefer recognizable product/brand tokens (e.g. "ajo fintech application").
         if (preg_match('/\b([a-z0-9][a-z0-9\-]{1,30})\s+(fintech|payments?|saas|app|application|platform)\b/u', $normalized, $m)) {
-            return trim($m[0] . ($residual !== '' && ! str_contains($residual, $m[1]) ? ' ' . $residual : ''));
+            return trim($m[0].($residual !== '' && ! str_contains($residual, $m[1]) ? ' '.$residual : ''));
         }
 
         return $residual;
     }
 
-    private function composeActionableQuery(IcpProfile $icp, string $theme): string
+    private function composeActionableQuery(IcpProfile $icp, string $theme, ?string $target = null): string
     {
         $theme = trim(preg_replace('/\s+/u', ' ', $theme) ?? $theme);
         if ($theme !== '') {
-            return $theme.' companies';
+            // Appending "companies" used to flip people / both asks into company-only searches.
+            return $target === QueryIntentService::TARGET_COMPANIES ? $theme.' companies' : $theme;
         }
 
         return $this->icpSeededQuery($icp);
@@ -111,18 +116,37 @@ class LeadQueryNormalizer
     }
 
     /**
-     * Short LinkedIn-friendly queries for high-yield first batches.
-     * Uses interest language only — never ICP industry / territory / role fields.
+     * Short LinkedIn-friendly queries for high-yield first batches of people.
+     * Theme = the user's own ask (or the ICP interest seed for generic asks); roles = the ICP's
+     * decision makers, because those are the people the user sells to. Territory stays out of the
+     * text — Serper gl/location and the country gate handle geography.
      *
      * @return list<string>
      */
-    public function firstBatchPeopleQueries(IcpProfile $icp): array
+    public function firstBatchPeopleQueries(IcpBrief $brief): array
     {
-        $seed = IcpBrief::fromIcpProfile($icp)->interestSearchSeed();
+        $theme = $brief->cleanedUserQuery();
+        if ($theme === '') {
+            $theme = $brief->interestSearchSeed();
+        }
+        $theme = trim($theme);
 
-        return array_values(array_unique(array_filter([
-            trim($seed.' site:linkedin.com/in'),
-            trim($seed.' executives founders'),
-        ])));
+        if (preg_match('/\b(ceos?|ctos?|cfos?|coos?|cmos?|founders?|directors?|managers?|head of|vps?|vice president|president|owners?|partners?)\b/iu', $theme)) {
+            return array_values(array_unique(array_filter([
+                trim($theme.' site:linkedin.com/in'),
+                $theme,
+            ])));
+        }
+
+        $queries = [];
+        foreach ($brief->peopleRoleTerms() as $role) {
+            $queries[] = trim('"'.$role.'" '.$theme.' site:linkedin.com/in');
+        }
+        if ($queries === []) {
+            $queries[] = trim($theme.' site:linkedin.com/in');
+        }
+        $queries[] = trim($theme.' executives founders');
+
+        return array_values(array_unique(array_filter($queries)));
     }
 }

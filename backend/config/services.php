@@ -50,6 +50,8 @@ return [
         'base_url' => env('SERPER_BASE_URL', 'https://google.serper.dev'),
         // Raise via env; ConfigMap defaults to 20 for freemium yield.
         'max_results' => (int) env('SERPER_MAX_RESULTS', 20),
+        // Google Maps listings for company discovery (website + phone + address per business).
+        'places_enabled' => (bool) env('SERPER_PLACES_ENABLED', true),
     ],
 
     'mono' => [
@@ -81,6 +83,18 @@ return [
 
     'hunter' => [
         'api_key' => env('HUNTER_API_KEY'),
+    ],
+
+    'contact_finder' => [
+        // Concurrency driver for EnrichLeadContactsJob batches: process|fork|sync.
+        'concurrency_driver' => env('CONTACT_FINDER_CONCURRENCY', 'process'),
+        'batch_size' => (int) env('CONTACT_FINDER_BATCH_SIZE', 4),
+        // Find contacts after leads are shown (EnrichLeadContactsJob) instead of inside the search run.
+        'async' => (bool) env('CONTACT_FINDER_ASYNC', true),
+        // A worker must consume this queue (see k8s/discovery-queue-worker-deployment.yaml).
+        'queue' => env('CONTACT_FINDER_QUEUE', 'enrichment'),
+        // Read top candidates' homepages as industry evidence before scoring (cached per domain).
+        'evidence_check' => (bool) env('LEAD_EVIDENCE_CHECK', true),
     ],
 
     'bytemine' => [

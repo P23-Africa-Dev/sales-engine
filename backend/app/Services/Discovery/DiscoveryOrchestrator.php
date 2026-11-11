@@ -19,6 +19,7 @@ use App\Services\Discovery\DTO\RawDiscoveryHit;
 use App\Services\Discovery\DTO\SearchContext;
 use App\Services\Enrichment\LeadProfileEnrichmentService;
 use App\Services\Enrichment\ProfileUrlValidator;
+use App\Services\Enrichment\WebsiteContactCrawler;
 use App\Services\Extraction\ExtractionService;
 use App\Services\IcpFiltering\DTO\CandidateCompany;
 use App\Services\IcpFiltering\DTO\IcpFilterResult;
@@ -122,6 +123,7 @@ class DiscoveryOrchestrator
      * @param  list<string>  $excludeLeadNames  Names already shown (generate-more).
      * @param  string|null  $searchQueryOverride  When set (ICP Search Brief), Serper uses this while
      *                                            `$query` stays the user's ask for hasUserQuery / hard-gate mode.
+     * @param  string|null  $entityMode  Explicit UI choice (both|companies|people). A locked choice is never switched by rescue passes.
      * @return array{run: DiscoveryRun, leads: list<array<string, mixed>>, companies: Collection}
      */
     public function run(
@@ -137,8 +139,9 @@ class DiscoveryOrchestrator
         bool $deferContactEnrichment = true,
         ?string $searchQueryOverride = null,
         array $seedHitSnapshots = [],
+        ?string $entityMode = null,
     ): array {
-        $briefSeed = IcpBrief::fromIcpProfile($icp, $query);
+        $briefSeed = IcpBrief::fromIcpProfile($icp, $query, $entityMode);
         if ($searchQueryOverride !== null && trim($searchQueryOverride) !== '') {
             $briefSeed = $briefSeed->withSearchQueryOverride(trim($searchQueryOverride));
         }
@@ -197,7 +200,11 @@ class DiscoveryOrchestrator
                 'dropped_icp_exclusion' => 0,
             ];
             $this->providerHealth->reset();
-            $this->enrichment->setDeferContactWaterfall($deferContactEnrichment);
+            // Contacts are found after the leads are shown (EnrichLeadContactsJob), so the search
+            // clock is spent finding better leads, not crawling websites one lead at a time.
+            $this->enrichment->setDeferContactWaterfall(
+                $deferContactEnrichment || (bool) config('services.contact_finder.async', true),
+            );
             if ($seedHitSnapshots !== []) {
                 $this->seedHits = $this->hydrateHitSnapshots($seedHitSnapshots, $excludeLeadNames);
             } elseif (in_array($intent, ['generate_more_leads'], true)) {
@@ -269,7 +276,7 @@ class DiscoveryOrchestrator
             $peoplePassCompleted = ! $brief->isBothSearch();
 
             foreach ($targetPasses as $passIndex => $targetPass) {
-                if ($this->pastDeadline() || count($leadsPayload) >= $effectiveLimit) {
+                if ($this->pastDeadline() || $this->strongLeadCount($leadsPayload) >= $effectiveLimit) {
                     break;
                 }
 
@@ -280,7 +287,7 @@ class DiscoveryOrchestrator
                     // An earlier pass may have found nothing (the people pass is web-only, so it
                     // returns zero when web search is down). Hand its unused quota to this pass
                     // instead of returning half of what the user asked for.
-                    $passLimit = max($passLimit, $effectiveLimit - count($leadsPayload));
+                    $passLimit = max($passLimit, $effectiveLimit - $this->strongLeadCount($leadsPayload));
                 }
                 $isAuthoritativePass = $passBrief->isAuthoritativePeopleQuery();
                 $isPeoplePass = ($targetPass['stage'] ?? null) === 'people_pass'
@@ -302,10 +309,12 @@ class DiscoveryOrchestrator
                         break;
                     }
 
-                    $passYield = count($leadsPayload) - $passStartCount;
+                    // Only strong matches (>= quality bar) count toward the quota, so a batch padded
+                    // with partial matches keeps searching; the final sort + slice keeps the best.
+                    $passYield = $this->strongLeadCount($leadsPayload, $passStartCount);
                     $remaining = min(
                         $passLimit - $passYield,
-                        $effectiveLimit - count($leadsPayload),
+                        $effectiveLimit - $this->strongLeadCount($leadsPayload),
                     );
                     if ($remaining <= 0) {
                         break;
@@ -355,7 +364,7 @@ class DiscoveryOrchestrator
                             && ! $passBrief->isAuthoritativePeopleQuery()
                             && $passLimit <= QueryIntentService::DEFAULT_LEAD_LIMIT
                         ) {
-                            $firstPassQueries = $this->leadQueryNormalizer->firstBatchPeopleQueries($icp);
+                            $firstPassQueries = $this->leadQueryNormalizer->firstBatchPeopleQueries($passBrief);
                         }
 
                         $reuseOnly = $intent === 'generate_more_leads'
@@ -444,8 +453,8 @@ class DiscoveryOrchestrator
                     $this->absorbUnusedHitsAsSeed($seenLeadNames);
                     $this->publishPartialProgress($run, $leadsPayload, $effectiveLimit);
 
-                    $passYield = count($leadsPayload) - $passStartCount;
-                    if ($passYield >= $passLimit || count($leadsPayload) >= $effectiveLimit) {
+                    $passYield = $this->strongLeadCount($leadsPayload, $passStartCount);
+                    if ($passYield >= $passLimit || $this->strongLeadCount($leadsPayload) >= $effectiveLimit) {
                         break;
                     }
 
@@ -471,6 +480,7 @@ class DiscoveryOrchestrator
             if (
                 $leadsPayload === []
                 && $brief->isPeopleSearch()
+                && ! $brief->targetLocked
                 && in_array($intent, ['generate_leads', 'generate_more_leads'], true)
                 && ! $this->pastSoftDeadline()
             ) {
@@ -535,6 +545,7 @@ class DiscoveryOrchestrator
             if (
                 $leadsPayload === []
                 && $brief->isCompanySearch()
+                && ! $brief->targetLocked
                 && in_array($intent, ['generate_leads', 'generate_more_leads'], true)
                 && ! $this->pastSoftDeadline()
             ) {
@@ -595,11 +606,16 @@ class DiscoveryOrchestrator
                 }
             }
 
-            $leadsPayload = array_slice(
-                $this->sortLeadsPayload($this->applyAdvisoryCap($leadsPayload, $effectiveLimit)),
-                0,
-                $effectiveLimit,
-            );
+            $createdLeadIds = array_values(array_filter(array_map(
+                static fn (array $lead): int => (int) ($lead['id'] ?? 0),
+                $leadsPayload,
+            )));
+            $leadsPayload = $this->sortLeadsPayload($this->applyAdvisoryCap($leadsPayload, $effectiveLimit));
+            if ($brief->isBothSearch()) {
+                $leadsPayload = $this->interleaveEntityTypes($leadsPayload);
+            }
+            $leadsPayload = array_slice($leadsPayload, 0, $effectiveLimit);
+            $this->discardTrimmedDraftLeads($organization, $createdLeadIds, $leadsPayload);
             $unusedHits = $this->unusedHitsForReuse($leadsPayload);
 
             $this->appendStage($run, 'compiling_results');
@@ -1281,6 +1297,7 @@ class DiscoveryOrchestrator
             || $this->pastSoftDeadline()
             || $this->remainingSeconds() < 45;
 
+        $scorePayloads = $this->attachWebsiteEvidence($scorePayloads, $brief);
         $batchScores = $this->scoring->scoreBatch($scorePayloads, $brief, $organization, $heuristicOnly);
 
         foreach ($prepared as $index => $candidate) {
@@ -1708,7 +1725,8 @@ class DiscoveryOrchestrator
      */
     private function icpHardGateResult(IcpBrief $brief, array $extracted): IcpFilterResult
     {
-        $industry = trim((string) ($extracted['industry'] ?? '')) ?: null;
+        // Company extraction returns `sector`; reading only `industry` silently skipped the gate.
+        $industry = trim((string) ($extracted['industry'] ?? $extracted['sector'] ?? '')) ?: null;
         $territory = trim((string) ($extracted['location'] ?? $extracted['territory'] ?? $extracted['city'] ?? '')) ?: null;
         $companySize = trim((string) ($extracted['company_size'] ?? $extracted['employee_count'] ?? '')) ?: null;
         $revenue = trim((string) ($extracted['revenue'] ?? '')) ?: null;
@@ -1812,8 +1830,13 @@ class DiscoveryOrchestrator
                 return true;
             }
 
-            // First-batch people must have a usable profile URL (LinkedIn /in/ or other profile).
-            return $this->hasPersonProfileUrl($extracted);
+            // A profile URL (LinkedIn /in/ or other) is the strongest proof, but team pages and
+            // press bios that name the person's role and employer are real people too.
+            if ($this->hasPersonProfileUrl($extracted)) {
+                return true;
+            }
+
+            return filled($extracted['title'] ?? null) && filled($extracted['company'] ?? null);
         }
 
         return $this->companyNameValidator->isValidCompanyName($displayName, $extracted)
@@ -2373,6 +2396,7 @@ class DiscoveryOrchestrator
                 'location_status' => $locationStatus !== '' ? $locationStatus : null,
                 'email' => $email !== '' ? $email : null,
                 'phone' => $phone !== '' ? $phone : null,
+                'phone_type' => $phone !== '' ? ($extracted['phone_type'] ?? null) : null,
                 'website' => $website !== '' ? $website : null,
                 'profile_urls' => $profileUrls !== [] ? $profileUrls : null,
                 'linkedin_url' => $linkedinUrl !== '' ? $linkedinUrl : null,
@@ -2389,6 +2413,8 @@ class DiscoveryOrchestrator
                 'query_relevance_score' => (int) round($scores['query_relevance_score']),
                 'query_match' => $queryMatch,
                 'icp_relevance_reason' => trim((string) ($scores['icp_relevance_reason'] ?? '')) ?: null,
+                'fit_breakdown' => ($scores['fit_breakdown'] ?? []) !== [] ? $scores['fit_breakdown'] : null,
+                'partial_match' => (float) $scores['priority_score'] < ScoringService::QUALITY_BAR,
             ], fn ($v) => $v !== null && $v !== ''),
         ]);
 
@@ -2431,6 +2457,8 @@ class DiscoveryOrchestrator
                 'query_relevance_score' => (int) round($scores['query_relevance_score']),
                 'query_match' => $queryMatch,
                 'icp_relevance_reason' => trim((string) ($scores['icp_relevance_reason'] ?? '')) ?: null,
+                'fit_breakdown' => $scores['fit_breakdown'] ?? [],
+                'partial_match' => (float) $scores['priority_score'] < ScoringService::QUALITY_BAR,
             ],
         ];
     }
@@ -2473,6 +2501,12 @@ class DiscoveryOrchestrator
     private function sortLeadsPayload(array $leadsPayload): array
     {
         usort($leadsPayload, function (array $a, array $b): int {
+            $strongA = ($a['partial_match'] ?? false) ? 0 : 1;
+            $strongB = ($b['partial_match'] ?? false) ? 0 : 1;
+            if ($strongA !== $strongB) {
+                return $strongB <=> $strongA;
+            }
+
             $queryMatchA = ($a['query_match'] ?? false) ? 1 : 0;
             $queryMatchB = ($b['query_match'] ?? false) ? 1 : 0;
             if ($queryMatchA !== $queryMatchB) {
@@ -2495,6 +2529,141 @@ class DiscoveryOrchestrator
         });
 
         return $leadsPayload;
+    }
+
+    /**
+     * Company homepages say what a business actually does. Read the title, meta description
+     * and opening text of the top candidates' websites so the score can confirm industry and
+     * niche fit from the source instead of marking it "unknown". Fetched in parallel and cached
+     * per domain for 14 days (shared with the contact crawler).
+     *
+     * @param  list<array<string, mixed>>  $payloads
+     * @return list<array<string, mixed>>
+     */
+    private function attachWebsiteEvidence(array $payloads, IcpBrief $brief): array
+    {
+        if (
+            $brief->isPeopleSearch()
+            || ! (bool) config('services.contact_finder.evidence_check', true)
+            || $this->remainingSeconds() < 60
+        ) {
+            return $payloads;
+        }
+
+        $maxChecks = min(16, max(4, $this->requestedLeadLimit * 2));
+        $hostsByIndex = [];
+        foreach ($payloads as $index => $payload) {
+            if (count($hostsByIndex) >= $maxChecks) {
+                break;
+            }
+            $website = trim((string) ($payload['website'] ?? ''));
+            if ($website === '' || $this->isProfileOrSocialHost($website)) {
+                continue;
+            }
+            $host = parse_url(str_contains($website, '://') ? $website : 'https://'.$website, PHP_URL_HOST);
+            if (is_string($host) && $host !== '') {
+                $hostsByIndex[$index] = mb_strtolower(preg_replace('/^www\./i', '', $host) ?? $host);
+            }
+        }
+
+        if ($hostsByIndex === []) {
+            return $payloads;
+        }
+
+        try {
+            $profiles = app(WebsiteContactCrawler::class)->fetchProfiles(array_values($hostsByIndex));
+        } catch (\Throwable) {
+            return $payloads;
+        }
+
+        foreach ($hostsByIndex as $index => $host) {
+            $profile = $profiles[$host] ?? null;
+            if (! is_array($profile)) {
+                continue;
+            }
+            $summary = trim(implode(' ', array_filter([
+                (string) ($profile['title'] ?? ''),
+                (string) ($profile['description'] ?? ''),
+                (string) ($profile['excerpt'] ?? ''),
+            ])));
+            if ($summary !== '') {
+                $payloads[$index]['website_summary'] = mb_substr($summary, 0, 600);
+            }
+        }
+
+        return $payloads;
+    }
+
+    /**
+     * Over-fetching to replace partial matches persists more draft leads than the user sees.
+     * Drop the ones this run created but trimmed, so they do not pile up or inflate lead_count.
+     *
+     * @param  list<int>  $createdLeadIds
+     * @param  list<array<string, mixed>>  $returnedLeads
+     */
+    private function discardTrimmedDraftLeads(Organization $organization, array $createdLeadIds, array $returnedLeads): void
+    {
+        $returned = array_map(static fn (array $lead): int => (int) ($lead['id'] ?? 0), $returnedLeads);
+        $trimmed = array_values(array_diff($createdLeadIds, $returned));
+        if ($trimmed === []) {
+            return;
+        }
+
+        Lead::query()
+            ->where('organization_id', $organization->id)
+            ->whereIn('id', $trimmed)
+            ->where('save_status', Lead::SAVE_DRAFT)
+            ->delete();
+    }
+
+    /**
+     * Leads at or above the quality bar, optionally counted from an offset (one pass's yield).
+     *
+     * @param  list<array<string, mixed>>  $leadsPayload
+     */
+    private function strongLeadCount(array $leadsPayload, int $from = 0): int
+    {
+        $count = 0;
+        foreach (array_slice($leadsPayload, $from) as $lead) {
+            if (! ($lead['partial_match'] ?? false)) {
+                $count++;
+            }
+        }
+
+        return $count;
+    }
+
+    /**
+     * "Both" must read as a mix: alternate person / company rows (each list keeps its own ranking)
+     * instead of letting one type's sort keys push the other to the bottom.
+     *
+     * @param  list<array<string, mixed>>  $leadsPayload
+     * @return list<array<string, mixed>>
+     */
+    private function interleaveEntityTypes(array $leadsPayload): array
+    {
+        $people = [];
+        $companies = [];
+        foreach ($leadsPayload as $lead) {
+            if (($lead['entity_type'] ?? null) === 'person') {
+                $people[] = $lead;
+            } else {
+                $companies[] = $lead;
+            }
+        }
+
+        $mixed = [];
+        $max = max(count($people), count($companies));
+        for ($i = 0; $i < $max; $i++) {
+            if (isset($people[$i])) {
+                $mixed[] = $people[$i];
+            }
+            if (isset($companies[$i])) {
+                $mixed[] = $companies[$i];
+            }
+        }
+
+        return $mixed;
     }
 
     private function appendStage(DiscoveryRun $run, string $stage): void

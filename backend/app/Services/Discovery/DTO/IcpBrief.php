@@ -2,6 +2,7 @@
 
 namespace App\Services\Discovery\DTO;
 
+use App\Models\IcpProfile;
 use App\Models\SignalTypeDefinition;
 use App\Services\Discovery\QueryIntentService;
 
@@ -35,16 +36,24 @@ readonly class IcpBrief
         public array $searchKeywords = [],
         /** @var list<string> things the user said to leave out (brokers, consultants…) */
         public array $exclusions = [],
+        /** True when the user chose the entity mode explicitly (UI picker) — never re-guessed or switched. */
+        public bool $targetLocked = false,
     ) {}
 
-    public static function fromIcpProfile(\App\Models\IcpProfile $profile, string $query = ''): self
+    /**
+     * @param  string|null  $entityMode  Explicit UI choice: both|companies|people. Null = infer from the query (legacy clients).
+     */
+    public static function fromIcpProfile(IcpProfile $profile, string $query = '', ?string $entityMode = null): self
     {
         $config = $profile->config ?? [];
         $queryIntent = app(QueryIntentService::class);
         // Parse limit from the raw query first so "Find 50 leads" wrappers survive stripping.
         $intent = $queryIntent->analyze($query, 'generate_leads');
-        $cleanedQuery = $queryIntent->stripProspectCountInstruction($query);
-        $target = $queryIntent->analyze($cleanedQuery, 'generate_leads')['target'];
+        $countStripped = $queryIntent->stripProspectCountInstruction($query);
+        $explicitTarget = QueryIntentService::targetFromEntityMode($entityMode)
+            ?? $queryIntent->entityModeCueTarget($countStripped);
+        $cleanedQuery = $queryIntent->stripEntityModeCue($countStripped);
+        $target = $explicitTarget ?? $queryIntent->analyze($cleanedQuery, 'generate_leads')['target'];
 
         return new self(
             name: $profile->name,
@@ -62,16 +71,17 @@ readonly class IcpBrief
             revenueRanges: array_values($config['revenueRanges'] ?? []),
             signalTypePacks: array_values(array_filter(
                 array_map('strval', $config['signalTypePacks'] ?? []),
-                static fn(string $pack) => $pack !== '',
+                static fn (string $pack) => $pack !== '',
             )),
             searchKeywords: array_values(array_filter(array_map(
-                static fn($keyword) => is_string($keyword) ? trim($keyword) : '',
+                static fn ($keyword) => is_string($keyword) ? trim($keyword) : '',
                 $config['searchKeywords'] ?? [],
             ))),
             exclusions: array_values(array_filter(array_map(
-                static fn($exclusion) => is_string($exclusion) ? trim($exclusion) : '',
+                static fn ($exclusion) => is_string($exclusion) ? trim($exclusion) : '',
                 $config['exclusions'] ?? [],
             ))),
+            targetLocked: $explicitTarget !== null,
         );
     }
 
@@ -98,6 +108,7 @@ readonly class IcpBrief
             signalTypePacks: $this->signalTypePacks,
             searchKeywords: $this->searchKeywords,
             exclusions: $this->exclusions,
+            targetLocked: $this->targetLocked,
         );
     }
 
@@ -126,6 +137,7 @@ readonly class IcpBrief
             signalTypePacks: $this->signalTypePacks,
             searchKeywords: $this->searchKeywords,
             exclusions: $this->exclusions,
+            targetLocked: $this->targetLocked,
         );
     }
 
@@ -152,6 +164,7 @@ readonly class IcpBrief
             signalTypePacks: $this->signalTypePacks,
             searchKeywords: $this->searchKeywords,
             exclusions: $this->exclusions,
+            targetLocked: $this->targetLocked,
         );
     }
 
@@ -200,7 +213,7 @@ readonly class IcpBrief
     {
         $packs = array_values(array_filter(
             $this->signalTypePacks,
-            static fn($pack) => is_string($pack) && trim($pack) !== '',
+            static fn ($pack) => is_string($pack) && trim($pack) !== '',
         ));
 
         if (in_array(SignalTypeDefinition::PACK_NONE, $packs, true)) {
@@ -226,7 +239,7 @@ readonly class IcpBrief
 
         if (trim($cleaned) !== '' && ! $queryIntent->isGenericLeadRequest($cleaned)) {
             if ($this->isAuthoritativePeopleQuery()) {
-                return trim($cleaned) . ' Forbes Bloomberg billionaires richest people world ranking list';
+                return trim($cleaned).' Forbes Bloomberg billionaires richest people world ranking list';
             }
 
             if ($this->isPeopleSearch() || $this->isBothSearch()) {
@@ -240,7 +253,9 @@ readonly class IcpBrief
                     return trim($cleaned);
                 }
 
-                return trim($cleaned) . ' CEO founder managing director';
+                $roles = $this->peopleRoleTerms();
+
+                return trim($cleaned).' '.($roles !== [] ? implode(' ', $roles) : 'CEO founder managing director');
             }
 
             return $cleaned;
@@ -259,7 +274,7 @@ readonly class IcpBrief
     public function searchBrief(): string
     {
         $industries = array_values(array_filter(array_map(
-            static fn($industry) => is_string($industry) ? trim($industry) : '',
+            static fn ($industry) => is_string($industry) ? trim($industry) : '',
             $this->industries,
         )));
 
@@ -274,7 +289,7 @@ readonly class IcpBrief
         }
 
         if ($industries !== []) {
-            return implode(' ', $industries) . ' companies';
+            return implode(' ', $industries).' companies';
         }
 
         return $this->isPeopleSearch()
@@ -300,27 +315,27 @@ readonly class IcpBrief
         if (count($words) <= $maxWords) {
             $clauses[] = $brief;
         } else {
-        $parts = preg_split('/\s*(?:,|;|\n|\bor\b)\s*/iu', $brief) ?: [];
-        foreach ($parts as $part) {
-            $part = trim(preg_replace('/\s+/u', ' ', (string) $part) ?? '');
-            if ($part === '') {
-                continue;
+            $parts = preg_split('/\s*(?:,|;|\n|\bor\b)\s*/iu', $brief) ?: [];
+            foreach ($parts as $part) {
+                $part = trim(preg_replace('/\s+/u', ' ', (string) $part) ?? '');
+                if ($part === '') {
+                    continue;
+                }
+                $clauseWords = preg_split('/\s+/u', $part) ?: [];
+                if (count($clauseWords) > $maxWords) {
+                    $part = implode(' ', array_slice($clauseWords, 0, $maxWords));
+                }
+                if ($part !== '' && ! in_array($part, $clauses, true)) {
+                    $clauses[] = $part;
+                }
+                if (count($clauses) >= $maxClauses) {
+                    break;
+                }
             }
-            $clauseWords = preg_split('/\s+/u', $part) ?: [];
-            if (count($clauseWords) > $maxWords) {
-                $part = implode(' ', array_slice($clauseWords, 0, $maxWords));
-            }
-            if ($part !== '' && ! in_array($part, $clauses, true)) {
-                $clauses[] = $part;
-            }
-            if (count($clauses) >= $maxClauses) {
-                break;
-            }
-        }
 
-        if ($clauses === []) {
-            $clauses[] = implode(' ', array_slice($words, 0, $maxWords));
-        }
+            if ($clauses === []) {
+                $clauses[] = implode(' ', array_slice($words, 0, $maxWords));
+            }
         }
 
         foreach ($this->searchKeywords as $keyword) {
@@ -341,6 +356,47 @@ readonly class IcpBrief
         }
 
         return $clauses;
+    }
+
+    /**
+     * Decision-maker roles from the ICP, split on "/" and "," ("Managing Director / CEO" → two roles).
+     * These are who the user sells to, so people discovery searches for them by name.
+     *
+     * @return list<string>
+     */
+    public function peopleRoleTerms(int $max = 3): array
+    {
+        $roles = [];
+        foreach ($this->decisionMakers as $decisionMaker) {
+            foreach (preg_split('/\s*[\/,|]\s*/u', (string) $decisionMaker) ?: [] as $part) {
+                $part = trim(preg_replace('/\s+/u', ' ', $part) ?? $part);
+                if ($part === '' || mb_strlen($part) > 40) {
+                    continue;
+                }
+                $key = mb_strtolower($part);
+                if (! isset($roles[$key])) {
+                    $roles[$key] = $part;
+                }
+                if (count($roles) >= $max) {
+                    break 2;
+                }
+            }
+        }
+
+        return array_values($roles);
+    }
+
+    /**
+     * The user's own ask without count / entity-mode wrappers, or '' for generic asks.
+     */
+    public function cleanedUserQuery(): string
+    {
+        if (! $this->hasUserQuery()) {
+            return '';
+        }
+        $queryIntent = app(QueryIntentService::class);
+
+        return trim($queryIntent->stripEntityModeCue($queryIntent->stripProspectCountInstruction($this->query)));
     }
 
     private function normalizeBriefText(string $text): string

@@ -3,6 +3,7 @@
 namespace App\Services\Extraction;
 
 use App\Models\Organization;
+use App\Services\Discovery\Adapters\SerperPlacesDiscoveryAdapter;
 use App\Services\Discovery\DiscoveryGeo;
 use App\Services\Discovery\DTO\IcpBrief;
 use App\Services\Discovery\DTO\RawDiscoveryHit;
@@ -25,7 +26,7 @@ class ExtractionService
      * concurrently. One call per hit was what limited a run to ~19 candidates.
      *
      * @param  list<RawDiscoveryHit>  $hits
-     * @return array<int, list<array<string, mixed>>>  Keyed by the input index.
+     * @return array<int, list<array<string, mixed>>> Keyed by the input index.
      */
     public function extractManyBatch(array $hits, IcpBrief $brief, Organization $organization): array
     {
@@ -41,6 +42,13 @@ class ExtractionService
             // Listicles expand one hit into many people; keep that on the single-hit path.
             if ($brief->isListiclePeopleQuery()) {
                 $extracted[$index] = $this->extractMany($hit, $brief, $organization);
+
+                continue;
+            }
+
+            if (! $isPeople && $hit->provider === SerperPlacesDiscoveryAdapter::PROVIDER) {
+                // Maps listings are already structured; the LLM would only lose the phone number.
+                $extracted[$index] = $this->wrapExtractedRow($this->placesRow($hit));
 
                 continue;
             }
@@ -126,6 +134,28 @@ class ExtractionService
      * @param  array<string, mixed>  $row
      * @return list<array<string, mixed>>
      */
+    /**
+     * @return array<string, mixed>
+     */
+    private function placesRow(RawDiscoveryHit $hit): array
+    {
+        $phone = trim((string) ($hit->meta['phone'] ?? ''));
+
+        return array_filter([
+            'name' => $hit->name,
+            'website' => $hit->website,
+            'location' => $hit->location,
+            'sector' => $hit->sector,
+            'industry' => $hit->sector,
+            'summary' => $hit->snippet,
+            'phone' => $phone !== '' ? $phone : null,
+            'phone_type' => $phone !== '' ? 'company_line' : null,
+            'business_fields' => array_filter(['source_url' => $hit->url, 'address' => $hit->meta['address'] ?? null]),
+            'commercial_signals' => [],
+            'low_confidence' => false,
+        ], static fn ($v): bool => $v !== null && $v !== '');
+    }
+
     private function wrapExtractedRow(array $row): array
     {
         $name = trim((string) ($row['person_name'] ?? $row['name'] ?? ''));
@@ -374,7 +404,7 @@ class ExtractionService
                 $result = $this->glm->chatJson([
                     [
                         'role' => 'system',
-                        'content' => 'Extract individual person names from a listicle search result. Return JSON: people (array of objects with person_name, title optional, company optional, summary optional — one unique sentence per person from the snippet, never the full listicle). Use real full names only (first and last name) — never invent, never return sentence fragments, channel names, article titles, or single generic words. Include title and company when mentioned near each name. Max ' . $limit . ' people. No markdown.',
+                        'content' => 'Extract individual person names from a listicle search result. Return JSON: people (array of objects with person_name, title optional, company optional, summary optional — one unique sentence per person from the snippet, never the full listicle). Use real full names only (first and last name) — never invent, never return sentence fragments, channel names, article titles, or single generic words. Include title and company when mentioned near each name. Max '.$limit.' people. No markdown.',
                     ],
                     [
                         'role' => 'user',
@@ -449,7 +479,7 @@ class ExtractionService
      */
     private function heuristicListiclePeople(RawDiscoveryHit $hit, IcpBrief $brief, int $limit): array
     {
-        $text = trim(($hit->snippet ?? '') . "\n" . ($hit->name ?? ''));
+        $text = trim(($hit->snippet ?? '')."\n".($hit->name ?? ''));
         $extracted = [];
 
         if (preg_match_all('/(?:\d+[\.\)]\s*|[\-\x{2022}]\s*)([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)/u', $text, $matches)) {
@@ -577,7 +607,7 @@ class ExtractionService
             ]),
             'commercial_signals' => [],
             'low_confidence' => false,
-        ], fn($v) => $v !== null && $v !== '');
+        ], fn ($v) => $v !== null && $v !== '');
     }
 
     /**
@@ -700,9 +730,34 @@ class ExtractionService
             ];
         }
 
+        // The Serper adapter names LinkedIn hits from the URL slug; the real headline
+        // ("Gbolahan Faniran – Founder/CEO – MinieMoney | LinkedIn") is kept in meta.title.
+        $headline = trim((string) ($hit->meta['title'] ?? $hit->name));
+        if ($linkedinUrl !== null) {
+            $name = $this->betterNameFromHeadline($headline, $name);
+        }
+
+        // Headline first ("Name - Founder/CEO - Acme"), then the snippet. Only text that names a
+        // real role counts as a title — taglines like "To grow, connect…" are not job titles.
+        [$title, $company] = [null, null];
+        if ($linkedinUrl !== null) {
+            $rest = preg_replace('/\s*[|\-–—]\s*LinkedIn\s*$/iu', '', $headline) ?? $headline;
+            $parts = preg_split('/\s+[\-–—|]\s+/u', $rest) ?: [];
+            array_shift($parts);
+            [$title, $company] = $this->titleAndCompanyFromSnippet(implode(' | ', $parts));
+        }
+        if ($title === null) {
+            [$title, $company] = $this->titleAndCompanyFromSnippet((string) ($hit->snippet ?? ''));
+        }
+        if ($name === mb_strtoupper($name)) {
+            $name = mb_convert_case(mb_strtolower($name), MB_CASE_TITLE, 'UTF-8');
+        }
+
         return array_filter([
             'name' => $name,
             'person_name' => $name,
+            'title' => $title,
+            'company' => $company,
             'linkedin_url' => $linkedinUrl,
             'location' => $this->honestLocation($hit, null),
             'summary' => $this->queryIntent->isListicleUrl($hit->url) ? '' : ($hit->snippet ?? $name),
@@ -712,7 +767,120 @@ class ExtractionService
             ]),
             'commercial_signals' => [],
             'low_confidence' => $lowConfidence,
-        ], fn($v) => $v !== null && $v !== '');
+        ], fn ($v) => $v !== null && $v !== '');
+    }
+
+    /**
+     * LinkedIn result titles read "Jane Doe - Head of Sales - Acme Ltd | LinkedIn" or
+     * "Jane Doe – CEO at Acme | LinkedIn". Recover the role and employer the LLM pass skips.
+     *
+     * @return array{0: ?string, 1: ?string}
+     */
+    private function titleAndCompanyFromLinkedInHeadline(string $headline, string $personName): array
+    {
+        $headline = trim(preg_replace('/\s*[|\-–—]\s*LinkedIn\s*$/iu', '', $headline) ?? $headline);
+        $parts = array_values(array_filter(array_map(
+            'trim',
+            preg_split('/\s+[\-–—|]\s+/u', $headline) ?: [],
+        )));
+        if ($parts !== [] && mb_strtolower($parts[0]) === mb_strtolower($personName)) {
+            array_shift($parts);
+        } elseif ($parts !== [] && str_contains(mb_strtolower($parts[0]), mb_strtolower(explode(' ', $personName)[0] ?? ''))) {
+            array_shift($parts);
+        }
+        if ($parts === []) {
+            return [null, null];
+        }
+
+        $title = $parts[0];
+        $company = $parts[1] ?? null;
+        if (preg_match('/^(.+?)\s+(?:at|@)\s+(.+)$/iu', $title, $m)) {
+            $title = trim($m[1]);
+            $company ??= trim($m[2]);
+        }
+
+        $title = mb_strlen($title) <= 80 ? $title : null;
+        $company = $company !== null && mb_strlen($company) <= 80 && ! str_contains($company, '...') ? $company : null;
+
+        return [$title, $company];
+    }
+
+    /**
+     * "Gbolahanfaniran" (slug) → "Gbolahan Faniran" when the headline's first segment spells
+     * the same letters; "Bukola A." style headlines keep the fuller slug name.
+     */
+    private function betterNameFromHeadline(string $headline, string $slugName): string
+    {
+        $first = trim((string) (preg_split('/\s+[\-–—|·]\s+/u', $headline)[0] ?? ''));
+        $first = trim(preg_replace('/\s*\|\s*LinkedIn\s*$/iu', '', $first) ?? $first);
+        // "Dr. Stanley Jacob FCIB" → "Stanley Jacob": honorifics and post-nominals are not the name.
+        $first = trim(preg_replace('/^(?:Dr|Mr|Mrs|Ms|Miss|Engr|Prof|Chief|Sir|Hon|Arc|Pst|Barr)\.?\s+/u', '', $first) ?? $first);
+        $first = trim(preg_replace('/(?:,?\s+(?:\p{Lu}{2,6}|Ph\.?D|MBA|ACA|FCA|CFA|PMP))+$/u', '', $first) ?? $first);
+        if ($first === '' || mb_strlen($first) > 60 || ! preg_match('/^\p{Lu}[\p{L}\'.-]*(?:\s+\p{Lu}[\p{L}\'.-]*){1,3}$/u', $first)) {
+            return $slugName;
+        }
+
+        $letters = static fn (string $value): string => preg_replace('/[^\p{L}]/u', '', mb_strtolower($value)) ?? '';
+        $headlineLetters = $letters($first);
+        $slugLetters = $letters($slugName);
+        if ($headlineLetters === '' || mb_strlen($headlineLetters) < 5 || str_contains($first, '.')) {
+            return $slugName;
+        }
+
+        return str_contains($slugLetters, $headlineLetters) ? $first : $slugName;
+    }
+
+    /**
+     * Role and employer from a LinkedIn snippet: "Managing Director & CEO | SaySwitch Limited | …",
+     * "Founder/CEO MinieMoney.", "Founder/Group CEO of VALUEPAY HOLDINGS", "Experience: Flexfees".
+     *
+     * @return array{0: ?string, 1: ?string}
+     */
+    private function titleAndCompanyFromSnippet(string $snippet): array
+    {
+        $snippet = trim(preg_replace('/\s+/u', ' ', $snippet) ?? $snippet);
+        if ($snippet === '') {
+            return [null, null];
+        }
+
+        $role = '(?:(?:Co-?)?Founder|Owner|Partner|President|Chairman|(?:Group |Deputy |Executive )?(?:Managing Director|MD|CEO|CTO|CFO|COO|CMO|CIO|CPO)|Chief [A-Z][a-z]+(?: [A-Z][a-z]+)? Officer|Head of [A-Z][\w&]*(?: [A-Z&][\w&]*){0,3}|(?:Senior |Executive )?Vice President[\w ,&]{0,30}?|VP(?: of)? [A-Z][\w&]*(?: [A-Z&][\w&]*){0,2}|(?:Senior |Regional |Country |General )?(?:Director|Manager)(?: of| -)? ?[A-Z]?[\w&]*(?: [A-Z&][\w&]*){0,2})';
+        $title = null;
+        $company = null;
+
+        // "Name · Title | Company | …" or "Title | Company | …"
+        $segments = array_values(array_filter(array_map('trim', preg_split('/\s*[|·]\s*/u', $snippet) ?: [])));
+        foreach ($segments as $index => $segment) {
+            if (preg_match('/^(?:'.$role.')(?:\s*(?:&|and|\/)\s*(?:'.$role.'))*$/u', $segment)) {
+                $title = $segment;
+                $next = $segments[$index + 1] ?? null;
+                if (is_string($next) && preg_match('/^\p{Lu}[\w&.\'-]*(?:\s+[\p{Lu}&(][\w&.()\'-]*){0,5}$/u', $next)) {
+                    $company = $next;
+                }
+                break;
+            }
+        }
+
+        // "Founder/CEO MinieMoney." / "CEO at Acme" / "Founder/Group CEO of VALUEPAY HOLDINGS"
+        if ($title === null && preg_match('/\b((?:'.$role.')(?:\s*(?:&|and|\/)\s*(?:'.$role.'))*)\s*(?:at|of|@|,|-|–)?\s+(\p{Lu}[\w&.\'-]*(?:\s+\p{Lu}[\w&.\'-]*){0,4})/u', $snippet, $m)) {
+            $title = trim($m[1]);
+            $company = trim($m[2], ' .,;');
+        }
+
+        if ($company === null && preg_match('/\bExperience:\s*(\p{Lu}[\w&.\'-]*(?:\s+\p{Lu}[\w&.\'-]*){0,4})/u', $snippet, $m)) {
+            $company = trim($m[1], ' .,;');
+        }
+
+        if ($company !== null) {
+            $company = trim(preg_split('/\.\s|\s[|·]\s/u', $company)[0] ?? $company, ' .,;');
+            // "CIO | CTO": a second role is not an employer, and a wrong employer means wrong contacts.
+            if (preg_match('/^(?:'.$role.')(?:\s*(?:&|and|\/)\s*(?:'.$role.'))*$/u', $company)) {
+                $company = null;
+            }
+        }
+        $title = $title !== null && mb_strlen($title) <= 80 ? $title : null;
+        $company = $company !== null && mb_strlen($company) >= 2 && mb_strlen($company) <= 80 ? $company : null;
+
+        return [$title, $company];
     }
 
     private function isLinkedInProfileUrl(?string $url): bool
@@ -751,7 +919,7 @@ class ExtractionService
 
     private function personNameFromSnippet(string $snippet, string $title): string
     {
-        $haystack = trim($snippet . ' ' . $title);
+        $haystack = trim($snippet.' '.$title);
         if ($haystack === '') {
             return '';
         }

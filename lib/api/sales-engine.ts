@@ -570,6 +570,37 @@ export function suggestIcpSearchBrief(payload: {
 
 export type ChatIntent = "freeform" | "quick_research" | "generate_leads" | "generate_more_leads" | "create_outreach";
 
+/** Entity mix for lead generation; sent as a structured field (not a prompt cue). */
+export type ChatEntityMode = "both" | "companies" | "people";
+
+export type LeadFitStatus = "verified" | "partial" | "unknown" | "contradicted";
+
+export type LeadFitBreakdownItem = {
+  dimension: string;
+  status: LeadFitStatus | string;
+  evidence?: string | null;
+};
+
+export type LeadContactSource = {
+  value?: string | null;
+  type?: "direct" | "generic" | "company_line" | string | null;
+  method?: string | null;
+  source_url?: string | null;
+  confidence?: "on_page" | "snippet" | "pattern" | "provider" | string | null;
+};
+
+/** Optional per-lead metadata from newer backends; every field may be absent. */
+export type ChatLeadMeta = {
+  fit_breakdown?: LeadFitBreakdownItem[] | null;
+  partial_match?: boolean | null;
+  contact_sources?: {
+    email?: LeadContactSource | null;
+    phone?: LeadContactSource | null;
+  } | null;
+  contact_status?: string | null;
+  [key: string]: unknown;
+};
+
 export type ChatLead = {
   id: number;
   name: string;
@@ -587,7 +618,7 @@ export type ChatLead = {
   linkedin_url?: string | null;
   profile_urls?: string[] | null;
   contact_ready?: boolean;
-  contact_status?: "not_attempted" | "found" | "not_found" | string | null;
+  contact_status?: "not_attempted" | "found" | "not_found" | "searching" | string | null;
   contact_enrichment_tier?: string | null;
   contact_enrichment_provider?: string | null;
   next_action?: string | null;
@@ -608,6 +639,11 @@ export type ChatLead = {
   query_match?: boolean;
   icp_relevance_reason?: string | null;
   location_status?: "unknown" | "confirmed" | "resolved" | "outside_territory" | string | null;
+  /** Chat lead payloads carry these at the top level; `meta` is the Lead resource shape. */
+  fit_breakdown?: LeadFitBreakdownItem[] | null;
+  partial_match?: boolean | null;
+  contact_sources?: ChatLeadMeta["contact_sources"];
+  meta?: ChatLeadMeta | null;
 };
 
 export type ChatMessageApi = {
@@ -680,6 +716,11 @@ const DISCOVERY_STAGE_LABELS: Record<string, string> = {
   enriching: "Enriching signal data…",
   synthesizing: "Synthesizing insights…",
   compiling_results: "Compiling ranked results…",
+  people_pass: "Finding decision makers…",
+  company_pass: "Finding matching companies…",
+  people_rescue_pass: "Widening the search for people…",
+  company_rescue_pass: "Widening the search for companies…",
+  enriching_contacts: "Looking up contact details…",
   completed: "Finalizing results…",
 };
 
@@ -688,8 +729,13 @@ const STAGE_TO_STEP: Record<string, number> = {
   analyzing_brief: 0,
   analyzing_icp: 0,
   searching_sources: 1,
+  people_pass: 1,
+  company_pass: 1,
+  people_rescue_pass: 1,
+  company_rescue_pass: 1,
   extracting: 2,
   enriching: 2,
+  enriching_contacts: 2,
   synthesizing: 2,
   compiling_results: 3,
   completed: 3,
@@ -907,9 +953,30 @@ export function listChatMessages(sessionId: number): Promise<ChatMessageApi[]> {
   );
 }
 
+export type SendChatMessagePayload = {
+  body: string;
+  intent: ChatIntent;
+  /** Lead-gen only: which entities to return. Omitted for other intents. */
+  entity_mode?: ChatEntityMode;
+  /** Lead-gen only: requested number of prospects. */
+  count?: number;
+};
+
+/** Build the JSON body for POST /chat/sessions/{id}/messages — structured fields, never prompt cues. */
+export function buildChatMessageRequestBody(payload: SendChatMessagePayload): SendChatMessagePayload {
+  const body: SendChatMessagePayload = { body: payload.body, intent: payload.intent };
+  if (payload.entity_mode) {
+    body.entity_mode = payload.entity_mode;
+  }
+  if (typeof payload.count === "number" && Number.isFinite(payload.count) && payload.count > 0) {
+    body.count = Math.round(payload.count);
+  }
+  return body;
+}
+
 export async function sendChatMessage(
   sessionId: number,
-  payload: { body: string; intent: ChatIntent },
+  payload: SendChatMessagePayload,
   options?: {
     onStage?: (info: DiscoveryStageInfo) => void;
     onDiscoveryRun?: (runId: number) => void;
@@ -924,78 +991,80 @@ export async function sendChatMessage(
     extraWaitMsRef?: { current: number };
   }
 ): Promise<SendChatMessageResult> {
-  return withSessionRetry(async () => {
-    const timeoutMs = payload.intent === "create_outreach" ? CHAT_OUTREACH_TIMEOUT_MS : undefined;
+  const timeoutMs = payload.intent === "create_outreach" ? CHAT_OUTREACH_TIMEOUT_MS : undefined;
 
-    const initial = await seRequest<SendChatMessageResult>({
+  // Only the POST is retried on 401. The poll below uses calls that re-auth on their own,
+  // so an expired token mid-poll can never re-POST and start a duplicate run.
+  const initial = await withSessionRetry(() =>
+    seRequest<SendChatMessageResult>({
       method: "POST",
       path: `/chat/sessions/${sessionId}/messages`,
-      body: payload,
+      body: buildChatMessageRequestBody(payload),
       timeoutMs,
+    })
+  );
+
+  if (
+    ASYNC_CHAT_INTENTS.includes(payload.intent) &&
+    initial.status === "processing" &&
+    initial.discovery_run_id
+  ) {
+    options?.onDiscoveryRun?.(initial.discovery_run_id);
+
+    let messages = await listChatMessages(sessionId);
+    const placeholder = findLatestAssistantMessage(messages);
+
+    const pollResult = await pollDiscoveryRunUntilComplete(initial.discovery_run_id, {
+      intent: payload.intent,
+      onStage: options?.onStage,
+      onPartial: options?.onPartial,
+      signal: options?.signal,
+      extraWaitMsRef: options?.extraWaitMsRef,
+      maxMs:
+        payload.intent === "quick_research" ? CHAT_QUICK_RESEARCH_POLL_MAX_MS : CHAT_POLL_MAX_MS,
     });
 
-    if (
-      ASYNC_CHAT_INTENTS.includes(payload.intent) &&
-      initial.status === "processing" &&
-      initial.discovery_run_id
-    ) {
-      options?.onDiscoveryRun?.(initial.discovery_run_id);
+    messages = await listChatMessages(sessionId);
+    const assistantMessage =
+      findLatestAssistantMessage(messages.filter((message) => !message.meta?.pending)) ??
+      findLatestAssistantMessage(messages) ??
+      placeholder;
 
-      let messages = await listChatMessages(sessionId);
-      const placeholder = findLatestAssistantMessage(messages);
-
-      const pollResult = await pollDiscoveryRunUntilComplete(initial.discovery_run_id, {
-        intent: payload.intent,
-        onStage: options?.onStage,
-        onPartial: options?.onPartial,
-        signal: options?.signal,
-        extraWaitMsRef: options?.extraWaitMsRef,
-        maxMs:
-          payload.intent === "quick_research" ? CHAT_QUICK_RESEARCH_POLL_MAX_MS : CHAT_POLL_MAX_MS,
-      });
-
-      messages = await listChatMessages(sessionId);
-      const assistantMessage =
-        findLatestAssistantMessage(messages.filter((message) => !message.meta?.pending)) ??
-        findLatestAssistantMessage(messages) ??
-        placeholder;
-
-      if (pollResult.aborted) {
-        return {
-          ...initial,
-          assistant_message: assistantMessage ?? null,
-          status: "processing",
-          pending: true,
-        };
-      }
-
-      if (pollResult.timedOut && pollResult.run.status !== "completed") {
-        return {
-          ...initial,
-          assistant_message: assistantMessage ?? null,
-          status: "processing",
-          pending: true,
-        };
-      }
-
-      if (!assistantMessage || assistantMessage.meta?.pending) {
-        throw new SalesEngineApiError("Assistant response was not found after processing.", 500);
-      }
-
+    if (pollResult.aborted) {
       return {
         ...initial,
-        assistant_message: assistantMessage,
-        status: "completed",
-        pending: false,
+        assistant_message: assistantMessage ?? null,
+        status: "processing",
+        pending: true,
       };
     }
 
-    if (!initial.assistant_message) {
-      throw new SalesEngineApiError("Assistant response was missing from the server.", 500);
+    if (pollResult.timedOut && pollResult.run.status !== "completed") {
+      return {
+        ...initial,
+        assistant_message: assistantMessage ?? null,
+        status: "processing",
+        pending: true,
+      };
     }
 
-    return initial;
-  });
+    if (!assistantMessage || assistantMessage.meta?.pending) {
+      throw new SalesEngineApiError("Assistant response was not found after processing.", 500);
+    }
+
+    return {
+      ...initial,
+      assistant_message: assistantMessage,
+      status: "completed",
+      pending: false,
+    };
+  }
+
+  if (!initial.assistant_message) {
+    throw new SalesEngineApiError("Assistant response was missing from the server.", 500);
+  }
+
+  return initial;
 }
 
 // ── Metrics ─────────────────────────────────────────────────────────────────

@@ -16,7 +16,7 @@ class ScoringServiceTest extends TestCase
 
         $org = Organization::query()->create([
             'name' => 'Test Org',
-            'slug' => 'test-org-scoring-' . uniqid(),
+            'slug' => 'test-org-scoring-'.uniqid(),
         ]);
 
         $brief = IcpBrief::fromIcpProfile(new IcpProfile([
@@ -48,7 +48,7 @@ class ScoringServiceTest extends TestCase
 
         $org = Organization::query()->create([
             'name' => 'Test Org',
-            'slug' => 'test-org-factual-' . uniqid(),
+            'slug' => 'test-org-factual-'.uniqid(),
         ]);
 
         $brief = IcpBrief::fromIcpProfile(new IcpProfile([
@@ -204,7 +204,7 @@ class ScoringServiceTest extends TestCase
 
         $org = Organization::query()->create([
             'name' => 'Batch Org',
-            'slug' => 'batch-org-' . uniqid(),
+            'slug' => 'batch-org-'.uniqid(),
         ]);
 
         $brief = IcpBrief::fromIcpProfile(new IcpProfile([
@@ -233,5 +233,80 @@ class ScoringServiceTest extends TestCase
         $this->assertCount(2, $scores);
         $this->assertGreaterThan($scores[1]['priority_score'], $scores[0]['priority_score']);
         $this->assertStringNotContainsString('in Lagos', $scores[1]['icp_relevance_reason']);
+    }
+
+    public function test_lead_verified_on_every_icp_dimension_scores_ninety_plus(): void
+    {
+        $brief = IcpBrief::fromIcpProfile(new IcpProfile([
+            'name' => 'Lagos FinTech',
+            'config' => array_merge(IcpProfile::defaultConfig(), [
+                'industries' => ['FinTech'],
+                'territories' => ['Lagos, NG'],
+                'decisionMakers' => ['CTO'],
+                'minMatchScore' => 60,
+            ]),
+        ]), 'fintech payment startups in Lagos', 'people');
+
+        $scores = app(ScoringService::class)->heuristicScore([
+            'entity_type' => 'person',
+            'person_name' => 'Ada Obi',
+            'name' => 'Ada Obi',
+            'title' => 'CTO',
+            'company' => 'NovaPay',
+            'industry' => 'FinTech',
+            'location' => 'Lagos, Nigeria',
+            'summary' => 'CTO at NovaPay, a fintech payment startup in Lagos.',
+        ], $brief);
+
+        $this->assertGreaterThanOrEqual(90, $scores['priority_score']);
+        $this->assertSame($scores['icp_fit_score'], $scores['priority_score']);
+        $statuses = collect($scores['fit_breakdown'])->pluck('status', 'dimension')->all();
+        $this->assertSame('verified', $statuses['industry']);
+        $this->assertSame('verified', $statuses['territory']);
+        $this->assertSame('verified', $statuses['role']);
+    }
+
+    public function test_dimensions_the_icp_leaves_empty_do_not_lower_the_score(): void
+    {
+        $brief = IcpBrief::fromIcpProfile(new IcpProfile([
+            'name' => 'Any SaaS',
+            'config' => array_merge(IcpProfile::defaultConfig(), [
+                'industries' => ['SaaS'],
+                'territories' => [],
+                'decisionMakers' => [],
+                'companySizes' => [],
+                'revenueRanges' => [],
+            ]),
+        ]), 'B2B SaaS analytics platforms', 'companies');
+
+        $scores = app(ScoringService::class)->heuristicScore([
+            'name' => 'Metricly',
+            'industry' => 'SaaS',
+            'summary' => 'B2B SaaS analytics platform for retailers.',
+        ], $brief);
+
+        $this->assertGreaterThanOrEqual(90, $scores['priority_score']);
+        $this->assertSame(['industry', 'relevance'], collect($scores['fit_breakdown'])->pluck('dimension')->all());
+    }
+
+    public function test_known_wrong_country_is_contradicted_and_scores_low(): void
+    {
+        $brief = IcpBrief::fromIcpProfile(new IcpProfile([
+            'name' => 'Kenya Logistics',
+            'config' => array_merge(IcpProfile::defaultConfig(), [
+                'industries' => ['Logistics'],
+                'territories' => ['Kenya'],
+            ]),
+        ]), 'logistics companies', 'companies');
+
+        $scores = app(ScoringService::class)->heuristicScore([
+            'name' => 'Rhine Freight',
+            'industry' => 'Logistics',
+            'location' => 'Berlin, Germany',
+        ], $brief);
+
+        $territory = collect($scores['fit_breakdown'])->firstWhere('dimension', 'territory');
+        $this->assertSame('contradicted', $territory['status']);
+        $this->assertLessThan(ScoringService::QUALITY_BAR, $scores['priority_score']);
     }
 }

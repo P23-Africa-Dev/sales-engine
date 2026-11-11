@@ -314,7 +314,10 @@ export function entityModeLabel(mode: GenerateEntityMode): string {
   }
 }
 
-/** Append a cue the backend QueryIntentService already understands. */
+/**
+ * @deprecated Entity mode is now sent as the structured `entity_mode` field on the chat
+ * request. Kept only for older call sites; new code must not append cues to the prompt.
+ */
 export function withEntityModeCue(body: string, mode: GenerateEntityMode): string {
   const trimmed = body.trim();
   if (mode === "both") return trimmed;
@@ -327,20 +330,13 @@ export function withEntityModeCue(body: string, mode: GenerateEntityMode): strin
 
 export type GenerateProspectCount = 12 | 25 | 40;
 
-/** Encode confirm-card count in chat body so QueryIntentService.parseLimit sees it. */
+/**
+ * The confirm-card count is sent as the structured `count` field on the chat request, so the
+ * user's prompt is passed through untouched (only trimmed). Never rewrites it to "give me N prospects".
+ */
 export function withProspectCountCue(body: string, count: GenerateProspectCount): string {
-  const trimmed = body.trim();
-  const alreadyNumbered =
-    /\b(?:give me|find|get|show|list|need|want)\s+\d{1,3}\b/i.test(trimmed) ||
-    /\b\d{1,3}\s+(?:people|persons|leads|prospects|contacts|names|executives|companies|accounts)\b/i.test(
-      trimmed
-    );
-  if (alreadyNumbered) return trimmed;
-  if (count === 12) return trimmed;
-  if (/^give me prospects\b/i.test(trimmed)) {
-    return trimmed.replace(/^give me prospects/i, `give me ${count} prospects`);
-  }
-  return `give me ${count} prospects`;
+  void count;
+  return body.trim();
 }
 
 const INDUSTRY_SEARCH_SEEDS: Array<[needle: string, seed: string]> = [

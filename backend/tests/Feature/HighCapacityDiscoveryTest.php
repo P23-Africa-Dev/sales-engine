@@ -2,8 +2,10 @@
 
 namespace Tests\Feature;
 
+use App\Jobs\EnrichLeadContactsJob;
 use App\Models\IcpProfile;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
 class HighCapacityDiscoveryTest extends TestCase
@@ -105,6 +107,9 @@ class HighCapacityDiscoveryTest extends TestCase
             ]),
         ]);
 
+        // Contact lookup runs after the search on its own queue; this test measures the search budget.
+        Queue::fake([EnrichLeadContactsJob::class]);
+
         $serperCalls = 0;
         Http::fake(function ($request) use (&$serperCalls) {
             if (! str_contains($request->url(), 'google.serper.dev')) {
@@ -149,5 +154,6 @@ class HighCapacityDiscoveryTest extends TestCase
         $this->assertLessThanOrEqual(100, count($leads));
         $this->assertLessThan(60_000, $elapsedMs);
         $this->assertLessThanOrEqual(30, $serperCalls);
+        Queue::assertPushed(EnrichLeadContactsJob::class);
     }
 }

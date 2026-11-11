@@ -17,15 +17,17 @@ class SerperPersonSearchAdapter
     /**
      * @return list<array{title: string, snippet: ?string, url: ?string}>
      */
-    public function searchPerson(Organization $organization, string $personName, string $contextQuery = ''): array
+    public function searchPerson(Organization $organization, string $personName, string $contextQuery = '', string $title = ''): array
     {
         if (! $this->isEnabled()) {
             return [];
         }
 
-        $query = trim($personName . ' CEO company LinkedIn official biography');
+        // Use the person's real role when known; a hard-coded "CEO" pulled in namesakes.
+        $role = trim($title) !== '' ? trim($title) : (trim($contextQuery) === '' ? 'executive' : '');
+        $query = trim(preg_replace('/\s+/u', ' ', '"'.$personName.'" '.$role.' LinkedIn biography') ?? '');
         if (trim($contextQuery) !== '') {
-            $query .= ' ' . trim($contextQuery);
+            $query .= ' '.trim($contextQuery);
         }
 
         $baseUrl = rtrim((string) config('services.serper.base_url'), '/');
@@ -36,7 +38,7 @@ class SerperPersonSearchAdapter
                     'X-API-KEY' => (string) config('services.serper.api_key'),
                     'Content-Type' => 'application/json',
                 ])
-                ->post($baseUrl . '/search', [
+                ->post($baseUrl.'/search', [
                     'q' => $query,
                     'num' => 5,
                 ]);

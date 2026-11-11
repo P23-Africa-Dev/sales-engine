@@ -118,6 +118,8 @@ class ChatController extends Controller
             'body' => ['required', 'string', 'max:10000'],
             'intent' => ['nullable', 'string', 'in:freeform,quick_research,generate_leads,generate_more_leads,create_outreach'],
             'timezone' => ['nullable', 'string', 'max:64'],
+            'entity_mode' => ['nullable', 'string', 'in:both,companies,people'],
+            'count' => ['nullable', 'integer', 'min:1', 'max:150'],
         ]);
 
         try {
@@ -128,6 +130,8 @@ class ChatController extends Controller
                 $data['body'],
                 $data['intent'] ?? 'freeform',
                 $data['timezone'] ?? null,
+                $data['entity_mode'] ?? null,
+                isset($data['count']) ? (int) $data['count'] : null,
             );
         } catch (HttpException $e) {
             return response()->json(['message' => $e->getMessage()], $e->getStatusCode());

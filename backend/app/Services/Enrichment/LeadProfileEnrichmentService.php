@@ -4,6 +4,7 @@ namespace App\Services\Enrichment;
 
 use App\Models\IcpProfile;
 use App\Models\Organization;
+use App\Services\Discovery\DTO\IcpBrief;
 use App\Services\Discovery\QueryIntentService;
 use App\Services\Enrichment\DTO\EnrichedLeadProfile;
 use App\Services\Llm\GlmClient;
@@ -76,7 +77,7 @@ class LeadProfileEnrichmentService
         $seedEmail = trim((string) ($extracted['email'] ?? ''));
         $seedPhone = trim((string) ($extracted['phone'] ?? ''));
 
-        $searchResults = $this->searchPerson($organization, $personName, $queryContext);
+        $searchResults = $this->searchPerson($organization, $personName, $queryContext, $seedTitle);
         $profile = $this->parseWithGlm($organization, $personName, $queryContext, $searchResults, $seedTitle, $seedCompany);
 
         if ($seedTitle !== '' && $profile->title === '') {
@@ -120,7 +121,7 @@ class LeadProfileEnrichmentService
         Organization $organization,
         IcpProfile $icp,
         string $companyName,
-        \App\Services\Discovery\DTO\IcpBrief $brief,
+        IcpBrief $brief,
         array $extracted,
     ): array {
         if (! $this->shouldEnrich($icp)) {
@@ -255,7 +256,7 @@ class LeadProfileEnrichmentService
     /**
      * @return list<array{title: string, snippet: ?string, url: ?string}>
      */
-    private function searchPerson(Organization $organization, string $personName, string $queryContext): array
+    private function searchPerson(Organization $organization, string $personName, string $queryContext, string $title = ''): array
     {
         if (! $this->serper->isEnabled() || $this->serperCallsThisRun >= self::MAX_SERPER_CALLS_PER_RUN) {
             return [];
@@ -263,7 +264,7 @@ class LeadProfileEnrichmentService
 
         $this->serperCallsThisRun++;
 
-        return $this->serper->searchPerson($organization, $personName, $queryContext);
+        return $this->serper->searchPerson($organization, $personName, $queryContext, $title);
     }
 
     /**
@@ -429,7 +430,6 @@ class LeadProfileEnrichmentService
     }
 
     /**
-     * @param  mixed  $urls
      * @param  list<string>  $trustedUrls
      * @return list<string>
      */
@@ -604,6 +604,6 @@ class LeadProfileEnrichmentService
     {
         $normalized = mb_strtolower(trim(preg_replace('/\s+/u', ' ', $personName) ?? $personName));
 
-        return 'lead_enrichment:' . $organizationId . ':' . $normalized;
+        return 'lead_enrichment:'.$organizationId.':'.$normalized;
     }
 }

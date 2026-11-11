@@ -3,6 +3,7 @@
 namespace Tests\Unit\Discovery;
 
 use App\Models\IcpProfile;
+use App\Services\Discovery\DTO\IcpBrief;
 use App\Services\Discovery\LeadQueryNormalizer;
 use Tests\TestCase;
 
@@ -98,11 +99,40 @@ class LeadQueryNormalizerTest extends TestCase
             ],
         ]);
 
-        $queries = $normalizer->firstBatchPeopleQueries($icp);
+        $queries = $normalizer->firstBatchPeopleQueries(IcpBrief::fromIcpProfile($icp));
         $this->assertNotEmpty($queries);
-        $this->assertTrue(collect($queries)->contains(fn($q) => str_contains($q, 'site:linkedin.com/in')));
-        $this->assertTrue(collect($queries)->every(fn($q) => ! str_contains($q, 'Head of Sales')));
-        $this->assertTrue(collect($queries)->contains(fn($q) => str_contains($q, 'textile')));
-        $this->assertTrue(collect($queries)->every(fn($q) => ! str_contains($q, 'Lagos')));
+        $this->assertTrue(collect($queries)->contains(fn ($q) => str_contains($q, 'site:linkedin.com/in')));
+        $this->assertTrue(collect($queries)->contains(fn ($q) => str_contains($q, '"Head of Sales"')));
+        $this->assertTrue(collect($queries)->contains(fn ($q) => str_contains($q, 'textile')));
+        $this->assertTrue(collect($queries)->every(fn ($q) => ! str_contains($q, 'Lagos')));
+    }
+
+    public function test_first_batch_people_queries_keep_the_users_niche(): void
+    {
+        $normalizer = app(LeadQueryNormalizer::class);
+        $icp = new IcpProfile([
+            'name' => 'Tommy Test',
+            'config' => [
+                'industries' => ['textile'],
+                'decisionMakers' => ['Procurement Manager'],
+            ],
+        ]);
+
+        $brief = IcpBrief::fromIcpProfile($icp, 'cocoa exporters in Ghana', 'people');
+        $queries = $normalizer->firstBatchPeopleQueries($brief);
+
+        $this->assertTrue(collect($queries)->every(fn ($q) => str_contains($q, 'cocoa exporters in Ghana')));
+        $this->assertTrue(collect($queries)->contains(fn ($q) => str_contains($q, '"Procurement Manager"')));
+    }
+
+    public function test_goal_framed_people_request_is_not_flipped_to_companies(): void
+    {
+        $normalizer = app(LeadQueryNormalizer::class);
+        $icp = new IcpProfile(['name' => 'X', 'config' => ['industries' => ['FinTech']]]);
+
+        $out = $normalizer->normalize('give me leads of people that can scale my Ajo fintech app', $icp, 'people');
+
+        $this->assertStringNotContainsString('companies', $out);
+        $this->assertStringContainsString('companies', $normalizer->normalize('give me leads of people that can scale my Ajo fintech app', $icp, 'companies'));
     }
 }

@@ -3,6 +3,7 @@
 namespace App\Services\Chat;
 
 use App\Jobs\ContinueDiscoveryJob;
+use App\Jobs\EnrichLeadContactsJob;
 use App\Jobs\ProcessChatIntentJob;
 use App\Jobs\ProcessQuickResearchJob;
 use App\Models\ChatMessage;
@@ -112,6 +113,8 @@ class ChatService
         string $body,
         string $intent = 'freeform',
         ?string $clientTimezone = null,
+        ?string $entityMode = null,
+        ?int $requestedCount = null,
     ): array {
         if (! in_array($intent, self::INTENTS, true)) {
             throw new InvalidArgumentException('Invalid intent.');
@@ -148,9 +151,21 @@ class ChatService
                 $excludeLeadNames = $this->recentLeadNamesFromSession($session);
             }
 
-            $useIcpBrief = $this->intentResolver->isGenericLeadBody($body)
+            // "Generate more" after a niche search must keep that niche, not fall back to the generic brief.
+            $previousSpecificQuery = $intent === 'generate_more_leads'
+                && $this->intentResolver->isGenericLeadBody($body)
+                && ! $this->recentGenerateWasIcpSearchBrief($session)
+                    ? $this->recentGenerateQueryFromSession($session)
+                    : null;
+            if ($intent === 'generate_more_leads') {
+                $entityMode ??= $this->recentGenerateEntityMode($session);
+            }
+
+            $useIcpBrief = $previousSpecificQuery === null && (
+                $this->intentResolver->isGenericLeadBody($body)
                 || $this->intentResolver->isGenericLeadBody($effectiveBody)
-                || ($intent === 'generate_more_leads' && $this->recentGenerateWasIcpSearchBrief($session));
+                || ($intent === 'generate_more_leads' && $this->recentGenerateWasIcpSearchBrief($session))
+            );
 
             if ($useIcpBrief) {
                 $searchBrief = IcpBrief::fromIcpProfile($icp)->searchBrief();
@@ -162,8 +177,13 @@ class ChatService
                     : 'generate leads';
                 $icpSearchBrief = true;
                 $queryNormalized = true;
+            } elseif ($previousSpecificQuery !== null) {
+                $originalQuery = $body;
+                $effectiveBody = $previousSpecificQuery;
+                $briefUserQuery = $previousSpecificQuery;
+                $queryNormalized = true;
             } else {
-                $normalized = $this->leadQueryNormalizer->normalize($effectiveBody, $icp);
+                $normalized = $this->leadQueryNormalizer->normalize($effectiveBody, $icp, $entityMode);
                 if (trim($normalized) !== '' && trim($normalized) !== trim($effectiveBody)) {
                     $originalQuery = $effectiveBody;
                     $effectiveBody = $normalized;
@@ -194,6 +214,17 @@ class ChatService
         }
 
         $userMeta = ['intent' => $intent];
+        $resolvedTarget = QueryIntentService::targetFromEntityMode($entityMode);
+        if ($resolvedTarget !== null) {
+            $userMeta['entity_mode'] = $resolvedTarget;
+        }
+        if ($requestedCount !== null && $requestedCount > 0) {
+            $userMeta['requested_count'] = min(QueryIntentService::MAX_LEAD_LIMIT, $requestedCount);
+        }
+        if (in_array($intent, ['generate_leads', 'generate_more_leads'], true) && trim($effectiveBody) !== '') {
+            // Shown under the user's message ("Searching: … · Mode: …") and survives history reloads.
+            $userMeta['search_caption'] = mb_substr(trim($effectiveBody), 0, 200);
+        }
         if (trim($effectiveBody) !== trim($body) || $queryNormalized) {
             $userMeta['effective_query'] = $effectiveBody;
             $userMeta['used_context'] = true;
@@ -320,7 +351,7 @@ class ChatService
             $meta['research'] = $result['research'];
             $assistantBody = $result['narrative'];
         } elseif (in_array($intent, ['generate_leads', 'generate_more_leads'], true) && $icp) {
-            $brief = IcpBrief::fromIcpProfile($icp, $briefUserQuery);
+            $brief = IcpBrief::fromIcpProfile($icp, $briefUserQuery, $userMeta['entity_mode'] ?? null);
             if ($searchQueryOverride !== null) {
                 $brief = $brief->withSearchQueryOverride($searchQueryOverride);
             }
@@ -331,11 +362,12 @@ class ChatService
                 $briefUserQuery,
                 $intent === 'generate_more_leads' ? 'generate_more_leads' : 'generate_leads',
                 $session->id,
-                $brief->requestedLimit,
+                (int) ($userMeta['requested_count'] ?? $brief->requestedLimit),
                 null,
                 $excludeLeadNames,
                 false,
                 $searchQueryOverride,
+                entityMode: $userMeta['entity_mode'] ?? null,
             );
             $leads = $result['leads'];
             $discoveryRunId = $result['run']->id;
@@ -425,6 +457,9 @@ class ChatService
             'leads' => $leads ?: null,
             'meta' => $meta,
         ]);
+        if ($leads !== [] && $icp) {
+            $this->queueContactEnrichment($organization, $icp, $assistantMessage);
+        }
 
         if (! $session->title) {
             $session->update(['title' => mb_substr($body, 0, 80)]);
@@ -512,8 +547,11 @@ class ChatService
                     $userMeta['icp_search_brief'] = true;
                     $userMeta['brief_user_query'] = $briefUserQuery;
                     $userMessage->update(['meta' => $userMeta]);
+                } elseif ((bool) ($userMeta['query_normalized'] ?? false)) {
+                    // Already normalized at post time (or seeded from the previous niche search).
+                    $briefUserQuery = $effectiveBody;
                 } else {
-                    $normalized = $this->leadQueryNormalizer->normalize($effectiveBody, $icp);
+                    $normalized = $this->leadQueryNormalizer->normalize($effectiveBody, $icp, $userMeta['entity_mode'] ?? null);
                     if (trim($normalized) !== '' && trim($normalized) !== trim($effectiveBody)) {
                         $meta['original_query'] = $effectiveBody;
                         $meta['query_normalized'] = true;
@@ -535,7 +573,7 @@ class ChatService
                     $excludeLeadNames = $this->recentLeadNamesFromSession($session);
                 }
 
-                $brief = IcpBrief::fromIcpProfile($icp, $briefUserQuery);
+                $brief = IcpBrief::fromIcpProfile($icp, $briefUserQuery, $userMeta['entity_mode'] ?? null);
                 if ($searchQueryOverride !== null) {
                     $brief = $brief->withSearchQueryOverride($searchQueryOverride);
                 }
@@ -546,11 +584,12 @@ class ChatService
                     $briefUserQuery,
                     $intent,
                     $session->id,
-                    $brief->requestedLimit,
+                    (int) ($userMeta['requested_count'] ?? $brief->requestedLimit),
                     $run,
                     $excludeLeadNames,
                     false,
                     $searchQueryOverride,
+                    entityMode: $userMeta['entity_mode'] ?? null,
                 );
                 $leads = $result['leads'];
                 if ($intent === 'generate_more_leads') {
@@ -632,6 +671,9 @@ class ChatService
                     'leads' => $leads ?: null,
                     'meta' => array_merge($meta, ['pending' => false, 'partial' => false]),
                 ]);
+                if ($leads !== []) {
+                    $this->queueContactEnrichment($organization, $icp, $placeholder);
+                }
 
                 if ($run->fresh()?->status !== 'completed') {
                     $run->update([
@@ -795,7 +837,7 @@ class ChatService
         }
 
         $userMeta = is_array($userMessage->meta) ? $userMessage->meta : [];
-        $briefUserQuery = trim((string) ($userMeta['brief_user_query'] ?? $userMessage->body));
+        $briefUserQuery = trim((string) ($userMeta['brief_user_query'] ?? $userMeta['effective_query'] ?? $userMessage->body));
         $searchQueryOverride = (bool) ($userMeta['icp_search_brief'] ?? false)
             ? IcpBrief::fromIcpProfile($icp)->searchBrief()
             : null;
@@ -820,6 +862,7 @@ class ChatService
             true,
             $searchQueryOverride,
             $unused,
+            $userMeta['entity_mode'] ?? null,
         );
 
         $merged = $this->mergeLeadPayloads($existing, $result['leads']);
@@ -858,6 +901,9 @@ class ChatService
                     : null,
             ]),
         ]);
+        if (! $stillShort && $merged !== []) {
+            $this->queueContactEnrichment($organization, $icp, $placeholder);
+        }
 
         $freshSummary = is_array($result['run']->result_summary) ? $result['run']->result_summary : [];
         $result['run']->update([
@@ -898,6 +944,12 @@ class ChatService
             $placeholder->update([
                 'meta' => array_merge($meta, ['pending' => false, 'partial' => false]),
             ]);
+
+            $organization = Organization::query()->find($run->organization_id);
+            $icp = $run->icp_profile_id ? IcpProfile::query()->find($run->icp_profile_id) : null;
+            if ($organization && $icp && is_array($placeholder->leads) && $placeholder->leads !== []) {
+                $this->queueContactEnrichment($organization, $icp, $placeholder);
+            }
         }
 
         if ($run->status !== 'cancelled') {
@@ -1022,6 +1074,69 @@ class ChatService
         $body = trim((string) $message->body);
 
         return $body !== '' ? $body : null;
+    }
+
+    /**
+     * Leads are shown as soon as they are found; emails and phones follow from
+     * EnrichLeadContactsJob (website crawl, Serper, Places, pattern inference, then paid
+     * providers). Leads still missing an email or phone are marked "searching" so the UI
+     * keeps polling until the job writes them back into this message.
+     */
+    private function queueContactEnrichment(Organization $organization, IcpProfile $icp, ChatMessage $message): void
+    {
+        $config = is_array($icp->config) ? $icp->config : [];
+        if (! (bool) config('services.contact_finder.async', true) || ! (bool) ($config['enrichContactDetails'] ?? true)) {
+            return;
+        }
+
+        $leads = is_array($message->leads) ? $message->leads : [];
+        $leadIds = [];
+        foreach ($leads as $index => $payload) {
+            if (! is_array($payload) || ! is_numeric($payload['id'] ?? null)) {
+                continue;
+            }
+            $status = (string) ($payload['contact_status'] ?? '');
+            $complete = filled($payload['email'] ?? null) && filled($payload['phone'] ?? null);
+            if ($complete || $status === 'searching') {
+                continue;
+            }
+            $leadIds[] = (int) $payload['id'];
+            $leads[$index]['contact_status'] = 'searching';
+        }
+
+        if ($leadIds === []) {
+            return;
+        }
+
+        $message->update(['leads' => $leads]);
+        Lead::query()
+            ->where('organization_id', $organization->id)
+            ->whereIn('id', $leadIds)
+            ->get()
+            ->each(function (Lead $lead): void {
+                $meta = is_array($lead->meta) ? $lead->meta : [];
+                $meta['contact_status'] = 'searching';
+                $lead->update(['meta' => $meta]);
+            });
+
+        EnrichLeadContactsJob::dispatch($organization->id, $leadIds, $message->id);
+    }
+
+    /**
+     * Entity mode the user picked on their last generate request, so "Generate more" keeps it.
+     */
+    private function recentGenerateEntityMode(ChatSession $session): ?string
+    {
+        $message = ChatMessage::query()
+            ->where('chat_session_id', $session->id)
+            ->where('role', 'user')
+            ->whereIn('intent', ['generate_leads', 'generate_more_leads'])
+            ->orderByDesc('id')
+            ->first(['meta']);
+
+        $mode = is_array($message?->meta) ? ($message->meta['entity_mode'] ?? null) : null;
+
+        return is_string($mode) && $mode !== '' ? $mode : null;
     }
 
     private function recentGenerateWasIcpSearchBrief(ChatSession $session): bool

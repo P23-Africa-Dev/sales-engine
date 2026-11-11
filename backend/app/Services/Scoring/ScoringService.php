@@ -4,12 +4,34 @@ namespace App\Services\Scoring;
 
 use App\Models\Organization;
 use App\Services\Discovery\DTO\IcpBrief;
+use App\Services\IcpFiltering\DTO\CandidateCompany;
+use App\Services\IcpFiltering\IcpFilterService;
 use App\Services\Llm\GlmClient;
 
 class ScoringService
 {
     /** Candidates per model call when scoring a page. */
     private const SCORE_BATCH_SIZE = 8;
+
+    /** Leads at or above this evidence score are "strong"; below it they are labelled partial matches. */
+    public const QUALITY_BAR = 80;
+
+    /** Highest score any lead can show — nothing is a certain buyer. */
+    private const SCORE_CEILING = 98.0;
+
+    /** Credit per evidence status. Unknown is not zero: a gap is not a contradiction. */
+    private const STATUS_VALUE = [
+        'verified' => 1.0,
+        'partial' => 0.75,
+        'unknown' => 0.4,
+        'contradicted' => 0.0,
+    ];
+
+    private const SENIOR_TITLE_PATTERN = '/\b(ceo|cto|cfo|coo|cmo|cio|chief|founder|co-founder|owner|president|vp|vice president|director|head of|partner|managing|general manager|principal)\b/iu';
+
+    private const SIGNAL_PATTERN = '/\b(hiring|raised|funding|series [a-d]|seed round|expanding|expansion|launch(?:ed|es|ing)?|new office|partnership|acquired|acquisition|tender|rfp|growing)\b/iu';
+
+    private const INDUSTRY_STOP_WORDS = ['and', 'the', 'services', 'service', 'industry', 'industries', 'other', 'general', 'solutions', 'products', 'companies', 'company'];
 
     public function __construct(private readonly GlmClient $glm) {}
 
@@ -21,57 +43,296 @@ class ScoringService
      */
     public function heuristicScore(array $companyPayload, IcpBrief $brief): array
     {
-        $hasUserQuery = $brief->hasUserQuery();
-        $isFactualQuery = $brief->isAuthoritativePeopleQuery();
-        // ICP-brief runs have no user query. Score against the brief itself, otherwise
-        // any company in the right industry scores the same as one that sells what we search for.
-        $queryScore = $hasUserQuery
-            ? $this->heuristicQueryRelevance($companyPayload, $brief->query)
-            : $this->heuristicQueryRelevance($companyPayload, $brief->searchBrief());
+        $queryScore = $this->queryRelevanceFor($companyPayload, $brief);
+        $evaluation = $this->evaluateEvidence($companyPayload, $brief, $queryScore);
 
+        return $this->scoreRowFromEvaluation($evaluation, $companyPayload, $brief, $queryScore, 'Evidence score (heuristic).', null);
+    }
+
+    /**
+     * Evidence-based ICP fit. Each ICP dimension the user filled in is checked against what the
+     * lead actually shows: verified / partial / unknown / contradicted. Dimensions the ICP leaves
+     * empty are not scored, so a lead that matches everything the user asked for reads 90%+.
+     *
+     * @param  array<string, mixed>  $payload
+     * @param  array<string, string>  $modelStatuses  Model judgements per dimension (industry, territory, role).
+     * @return array{score: float, breakdown: list<array{dimension: string, label: string, status: string, weight: int, evidence: string}>, has_signal: bool}
+     */
+    public function evaluateEvidence(array $payload, IcpBrief $brief, float $queryScore, array $modelStatuses = []): array
+    {
+        $isPerson = $this->isPersonPayload($payload);
+        $text = $this->payloadText($payload);
+        $hasUserQuery = $brief->hasUserQuery();
+        $dimensions = [];
+
+        if ($brief->industries !== []) {
+            [$status, $evidence] = $this->industryStatus($payload, $brief, $text);
+            $status = $this->mergeModelStatus($status, $modelStatuses['industry'] ?? null, true);
+            $dimensions[] = ['dimension' => 'industry', 'label' => 'Industry', 'status' => $status, 'weight' => 30, 'evidence' => $evidence];
+        }
+
+        if ($brief->territories !== []) {
+            [$status, $evidence] = $this->territoryStatus($payload, $brief);
+            // The model may only lift an unknown location to partial; a known wrong country stays wrong.
+            $status = $this->mergeModelStatus($status, $modelStatuses['territory'] ?? null, false);
+            $dimensions[] = ['dimension' => 'territory', 'label' => 'Location', 'status' => $status, 'weight' => 20, 'evidence' => $evidence];
+        }
+
+        if ($isPerson && $brief->decisionMakers !== []) {
+            [$status, $evidence] = $this->roleStatus($payload, $brief);
+            $status = $this->mergeModelStatus($status, $modelStatuses['role'] ?? null, true);
+            $dimensions[] = ['dimension' => 'role', 'label' => 'Role', 'status' => $status, 'weight' => 20, 'evidence' => $evidence];
+        }
+
+        if (! $isPerson && ($brief->companySizes !== [] || $brief->revenueRanges !== [])) {
+            $sizeValue = trim((string) ($payload['company_size'] ?? $payload['employee_count'] ?? $payload['revenue'] ?? ''));
+            // Size data is rarely published; only score it when the lead states it.
+            if ($sizeValue !== '') {
+                $allowed = array_merge($brief->companySizes, $brief->revenueRanges);
+                $status = $this->valueMatchesAllowed($allowed, $sizeValue) ? 'verified' : 'partial';
+                $dimensions[] = ['dimension' => 'size', 'label' => 'Size', 'status' => $status, 'weight' => 15, 'evidence' => $sizeValue];
+            }
+        }
+
+        $relevance = max(0.0, min(1.0, ($queryScore - 45) / 45));
+        $relevanceStatus = $relevance >= 0.8 ? 'verified' : ($relevance >= 0.4 ? 'partial' : 'unknown');
+        $dimensions[] = [
+            'dimension' => 'relevance',
+            'label' => $hasUserQuery ? 'Matches your search' : 'Matches your ICP brief',
+            'status' => $relevanceStatus,
+            'weight' => $hasUserQuery ? 35 : 20,
+            'evidence' => '',
+            'value' => $relevance,
+        ];
+
+        $hasSignal = (bool) preg_match(self::SIGNAL_PATTERN, $text, $signalMatch);
+        if ($hasSignal) {
+            // Buying signals only ever add evidence; their absence is not held against a lead.
+            $dimensions[] = ['dimension' => 'signals', 'label' => 'Buying signal', 'status' => 'verified', 'weight' => 10, 'evidence' => mb_strtolower($signalMatch[0])];
+        }
+
+        $earned = 0.0;
+        $possible = 0;
+        foreach ($dimensions as $dimension) {
+            $value = $dimension['value'] ?? self::STATUS_VALUE[$dimension['status']];
+            $earned += $dimension['weight'] * $value;
+            $possible += $dimension['weight'];
+        }
+
+        $score = $possible > 0 ? ($earned / $possible) * 100 : 50.0;
+        $score = round(max(0.0, min(self::SCORE_CEILING, $score)), 1);
+
+        $breakdown = array_map(static function (array $dimension): array {
+            unset($dimension['value']);
+
+            return $dimension;
+        }, $dimensions);
+
+        return ['score' => $score, 'breakdown' => $breakdown, 'has_signal' => $hasSignal];
+    }
+
+    /**
+     * @param  array{score: float, breakdown: list<array<string, mixed>>, has_signal: bool}  $evaluation
+     * @param  array<string, mixed>  $companyPayload
+     * @return array{icp_fit_score: float, intent_score: float, priority_score: float, query_relevance_score: float, rationale: string, icp_relevance_reason: string, fit_breakdown: list<array<string, mixed>>}
+     */
+    private function scoreRowFromEvaluation(
+        array $evaluation,
+        array $companyPayload,
+        IcpBrief $brief,
+        float $queryScore,
+        string $rationale,
+        ?string $modelReason,
+    ): array {
+        $fitScore = $evaluation['score'];
         $fit = $this->assessFirmographicFit($companyPayload, $brief);
-        $icpBase = 55.0;
-        if ($fit['verified_match']) {
-            $icpBase += $fit['bonus'];
-        }
-        if (filled($companyPayload['linkedin_url'] ?? null) || filled($companyPayload['title'] ?? null)) {
-            $icpBase += 4;
-        }
-        // Without firmographic evidence, stay below typical minMatchScore so we do not rubber-stamp.
-        $icpFit = $fit['unknown']
-            ? min(58, $icpBase)
-            : min(92, $icpBase);
 
         if (
-            ! $hasUserQuery
+            ! $brief->hasUserQuery()
             && ! $this->isPersonPayload($companyPayload)
             && ! $this->hasIcpEvidence($fit)
             && $this->briefNounOverlap($brief, $companyPayload) === []
         ) {
             // A company row in ICP-brief mode with nothing tying it to the ICP — no matching
             // industry, no confirmed territory, no brief wording — may not be recommended.
-            // People are exempt: their qualification is a trusted profile, not firmographics.
-            $icpFit = min($icpFit, max(0, $brief->minMatchScore - 1));
+            $fitScore = min($fitScore, (float) max(0, $brief->minMatchScore - 1));
         }
 
-        $priority = $hasUserQuery
-            ? min(95, ($queryScore * 0.55) + ($icpFit * 0.45))
-            // Brief relevance lifts ranking but never demotes a verified firmographic fit.
-            : min(92, max($icpFit, ($queryScore * 0.4) + ($icpFit * 0.6)));
+        $reason = trim((string) $modelReason);
+        if ($reason === '' || $this->reasonClaimsUnverifiedTerritory($reason, $brief, $fit)) {
+            $reason = $this->buildIcpRelevanceReason($brief, $fitScore, $brief->isAuthoritativePeopleQuery(), $companyPayload);
+        }
 
         return [
-            'icp_fit_score' => $icpFit,
-            'intent_score' => 45.0,
-            'priority_score' => $priority,
+            'icp_fit_score' => $fitScore,
+            'intent_score' => $evaluation['has_signal'] ? 70.0 : 45.0,
+            // One number everywhere: what the card shows is the evidence score.
+            'priority_score' => $fitScore,
             'query_relevance_score' => $queryScore,
-            'rationale' => 'Heuristic first-batch score.',
-            'icp_relevance_reason' => $this->buildIcpRelevanceReason(
-                $brief,
-                $icpFit,
-                $isFactualQuery,
-                $companyPayload,
-            ),
+            'rationale' => $rationale,
+            'icp_relevance_reason' => $reason,
+            'fit_breakdown' => $evaluation['breakdown'],
         ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     */
+    private function queryRelevanceFor(array $payload, IcpBrief $brief): float
+    {
+        $query = $brief->hasUserQuery() ? $brief->cleanedUserQuery() : $brief->searchBrief();
+        $score = $this->heuristicQueryRelevance($payload, $query);
+
+        if (! empty($payload['authoritative_source'])) {
+            $score = min(95, $score + 15);
+        }
+
+        return $score;
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     * @return array{0: string, 1: string}
+     */
+    private function industryStatus(array $payload, IcpBrief $brief, string $text): array
+    {
+        $label = trim((string) ($payload['industry'] ?? $payload['sector'] ?? $payload['company_industry'] ?? ''));
+        if ($label !== '' && $this->valueMatchesAllowed($brief->industries, $label)) {
+            return ['verified', $label];
+        }
+
+        $tokenHit = $this->industryTokenHit($brief->industries, $label.' '.$text);
+        if ($tokenHit !== null) {
+            return ['partial', $tokenHit];
+        }
+
+        if ($label !== '') {
+            return ['contradicted', $label];
+        }
+
+        return ['unknown', ''];
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     * @return array{0: string, 1: string}
+     */
+    private function territoryStatus(array $payload, IcpBrief $brief): array
+    {
+        $location = trim((string) ($payload['location'] ?? $payload['territory'] ?? $payload['city'] ?? ''));
+        if ($location !== '') {
+            return $this->valueMatchesAllowed($brief->territories, $location)
+                || app(IcpFilterService::class)->passes($brief, new CandidateCompany(territory: $location), ['territory'])->passed
+                ? ['verified', $location]
+                : ['contradicted', $location];
+        }
+
+        return ['unknown', ''];
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     * @return array{0: string, 1: string}
+     */
+    private function roleStatus(array $payload, IcpBrief $brief): array
+    {
+        $title = trim((string) ($payload['title'] ?? $payload['role'] ?? ''));
+        if ($title === '') {
+            return ['unknown', ''];
+        }
+
+        $titleLower = mb_strtolower($title);
+        foreach ($brief->peopleRoleTerms(10) as $role) {
+            $roleLower = mb_strtolower($role);
+            if (str_contains($titleLower, $roleLower)) {
+                return ['verified', $title];
+            }
+            // "Head of Sales" vs "Sales Director": every meaningful role word appears.
+            $words = array_values(array_filter(
+                preg_split('/[^\p{L}\p{N}]+/u', $roleLower) ?: [],
+                static fn (string $word): bool => mb_strlen($word) >= 3 && ! in_array($word, ['head', 'the', 'and'], true),
+            ));
+            if ($words !== [] && collect($words)->every(fn (string $word): bool => str_contains($titleLower, $word))) {
+                return ['verified', $title];
+            }
+        }
+
+        if (preg_match(self::SENIOR_TITLE_PATTERN, $title)) {
+            return ['partial', $title];
+        }
+
+        return ['unknown', $title];
+    }
+
+    /**
+     * A model judgement may refine a dimension, never invent evidence the fields contradict.
+     */
+    private function mergeModelStatus(string $heuristic, mixed $model, bool $modelMayDowngrade): string
+    {
+        if (! is_string($model) || ! isset(self::STATUS_VALUE[$model])) {
+            return $heuristic;
+        }
+        if ($heuristic === 'contradicted' && ! $modelMayDowngrade) {
+            return $heuristic;
+        }
+        if (! $modelMayDowngrade) {
+            // Location: the model may only lift unknown → partial.
+            return $heuristic === 'unknown' && in_array($model, ['partial', 'verified'], true) ? 'partial' : $heuristic;
+        }
+
+        // With no evidence in the lead's own fields, the model may suggest a match but not confirm it.
+        if ($heuristic === 'unknown' && $model === 'verified') {
+            return 'partial';
+        }
+
+        return $model;
+    }
+
+    /**
+     * @param  list<string>  $industries
+     */
+    private function industryTokenHit(array $industries, string $text): ?string
+    {
+        $text = mb_strtolower($text);
+        if (trim($text) === '') {
+            return null;
+        }
+
+        foreach ($industries as $industry) {
+            foreach (preg_split('/[^\p{L}\p{N}]+/u', mb_strtolower((string) $industry)) ?: [] as $token) {
+                if (mb_strlen($token) < 4 || in_array($token, self::INDUSTRY_STOP_WORDS, true)) {
+                    continue;
+                }
+                $stem = mb_substr($token, 0, max(4, mb_strlen($token) - 2));
+                if (preg_match('/\b'.preg_quote($stem, '/').'/u', $text)) {
+                    return (string) $industry;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     */
+    private function payloadText(array $payload): string
+    {
+        return mb_strtolower(implode(' ', array_filter(array_map(
+            static fn ($value): string => is_string($value) ? $value : '',
+            [
+                $payload['name'] ?? null,
+                $payload['person_name'] ?? null,
+                $payload['company'] ?? null,
+                $payload['title'] ?? null,
+                $payload['summary'] ?? null,
+                $payload['snippet'] ?? null,
+                $payload['description'] ?? null,
+                $payload['industry'] ?? null,
+                $payload['sector'] ?? null,
+                $payload['website_summary'] ?? null,
+            ],
+        ))));
     }
 
     /**
@@ -103,24 +364,8 @@ class ScoringService
 
             return $this->applyGlmScoreRow($result, $companyPayload, $brief);
         } catch (\Throwable) {
-            $queryScore = $hasUserQuery
-                ? $this->heuristicQueryRelevance($companyPayload, $brief->query)
-                : 45.0;
-            $icpFit = 50.0;
-
-            return [
-                'icp_fit_score' => $icpFit,
-                'intent_score' => 40.0,
-                'priority_score' => $hasUserQuery ? max(45, $queryScore - 5) : 45.0,
-                'query_relevance_score' => $queryScore,
-                'rationale' => 'Scoring fallback.',
-                'icp_relevance_reason' => $this->buildIcpRelevanceReason(
-                    $brief,
-                    $icpFit,
-                    $isFactualQuery,
-                    $companyPayload,
-                ),
-            ];
+            // Model unavailable: the evidence heuristic is a real score, not a fixed placeholder.
+            return $this->heuristicScore($companyPayload, $brief);
         }
     }
 
@@ -220,7 +465,12 @@ class ScoringService
 
         $min = (float) max(1, $brief->minMatchScore);
 
-        return $fit >= $min - 15 && $fit <= $min + 10;
+        // Only leads near a decision boundary go to the model: the ICP minimum (recommended or
+        // not) and the quality bar (strong or partial). Clear cases keep their heuristic score.
+        $nearMinimum = $fit >= $min - 15 && $fit <= $min + 10;
+        $nearQualityBar = $fit >= self::QUALITY_BAR - 15 && $fit < self::QUALITY_BAR + 5;
+
+        return $nearMinimum || $nearQualityBar;
     }
 
     /**
@@ -230,59 +480,41 @@ class ScoringService
      */
     private function applyGlmScoreRow(array $result, array $companyPayload, IcpBrief $brief): array
     {
-        $hasUserQuery = $brief->hasUserQuery();
-        $isFactualQuery = $brief->isAuthoritativePeopleQuery();
+        $heuristicRelevance = $this->queryRelevanceFor($companyPayload, $brief);
+        $modelRelevance = is_numeric($result['query_relevance_score'] ?? null)
+            ? max(0.0, min(100.0, (float) $result['query_relevance_score']))
+            : null;
+        // The model reads meaning, not token overlap; trust it but keep the authoritative-source lift.
+        $queryScore = $modelRelevance === null
+            ? $heuristicRelevance
+            : (! empty($companyPayload['authoritative_source']) ? min(95, $modelRelevance + 15) : $modelRelevance);
 
-        $queryRelevance = (float) ($result['query_relevance_score'] ?? 50);
-        $icpFit = (float) ($result['icp_fit_score'] ?? 50);
-        $priority = (float) ($result['priority_score'] ?? 45);
+        $modelStatuses = array_filter([
+            'industry' => $result['industry'] ?? null,
+            'territory' => $result['territory'] ?? null,
+            'role' => $result['role'] ?? null,
+        ], static fn ($value): bool => is_string($value));
 
-        if ($hasUserQuery) {
-            $priority = min(95, ($queryRelevance * 0.65) + ($icpFit * 0.35));
-        }
+        $evaluation = $this->evaluateEvidence($companyPayload, $brief, $queryScore, $modelStatuses);
 
-        if (! empty($companyPayload['authoritative_source'])) {
-            $queryRelevance = min(95, $queryRelevance + 15);
-            if ($hasUserQuery) {
-                $priority = min(95, ($queryRelevance * 0.65) + ($icpFit * 0.35));
-            }
-        }
-
-        $fit = $this->assessFirmographicFit($companyPayload, $brief);
-        if (
-            ! $hasUserQuery
-            && ! $this->isPersonPayload($companyPayload)
-            && ! $this->hasIcpEvidence($fit)
-            && $this->briefNounOverlap($brief, $companyPayload) === []
-        ) {
-            // Same truth floor as the heuristic path: the model may not promote a lead
-            // whose only evidence is an industry label.
-            $icpFit = min($icpFit, max(0, $brief->minMatchScore - 1));
-            $priority = min($priority, $icpFit);
-        }
-
-        $reason = trim((string) ($result['icp_relevance_reason'] ?? ''));
-        if ($reason === '' || $this->reasonClaimsUnverifiedTerritory($reason, $brief, $fit)) {
-            $reason = $this->buildIcpRelevanceReason($brief, $icpFit, $isFactualQuery, $companyPayload);
-        }
-
-        return [
-            'icp_fit_score' => $icpFit,
-            'intent_score' => (float) ($result['intent_score'] ?? 40),
-            'priority_score' => $priority,
-            'query_relevance_score' => $queryRelevance,
-            'rationale' => (string) ($result['rationale'] ?? ''),
-            'icp_relevance_reason' => $reason,
-        ];
+        return $this->scoreRowFromEvaluation(
+            $evaluation,
+            $companyPayload,
+            $brief,
+            $queryScore,
+            trim((string) ($result['rationale'] ?? '')) ?: 'Evidence score (model-checked).',
+            (string) ($result['icp_relevance_reason'] ?? ''),
+        );
     }
 
     private function scoreSystemPrompt(bool $batch = false): string
     {
+        $row = '"industry":"verified|partial|unknown|contradicted","territory":"verified|partial|unknown|contradicted","role":"verified|partial|unknown|contradicted","query_relevance_score":0-100,"rationale":"","icp_relevance_reason":""';
         $shape = $batch
-            ? 'Score EVERY lead in leads[]. Return JSON: {"results":[{"index":<the lead index>,"icp_fit_score":0-100,"intent_score":0-100,"query_relevance_score":0-100,"priority_score":0-100,"rationale":"","icp_relevance_reason":""}]}. One result per lead, echoing its index. Judge each lead only on its own fields — never carry a location or industry from one lead to another.'
-            : 'Score lead relevance. Return JSON: icp_fit_score (0-100), intent_score (0-100), query_relevance_score (0-100), priority_score (0-100), rationale (string), icp_relevance_reason (string).';
+            ? 'Judge EVERY lead in leads[]. Return JSON: {"results":[{"index":<the lead index>,'.$row.'}]}. One result per lead, echoing its index. Judge each lead only on its own fields — never carry a location or industry from one lead to another.'
+            : 'Judge the lead. Return JSON: {'.$row.'}.';
 
-        return $shape.' icp_relevance_reason is one short sentence citing specific ICP industries/territories/decision makers. Score query relevance to the user\'s words first. ICP fit is advisory — results that answer the query but fall outside ICP industries/territories should still have high query_relevance_score. If ICP territories are set and the lead\'s location is a different country, icp_fit_score must be low unless the user query named that other country. Boost query_relevance_score when authoritative_source is true. When is_factual_query is true and icp_fit_score is below minMatchScore, phrase icp_relevance_reason like: "Answers your search for X; doesn\'t match your {industries} focus in {territories}." When firmographic fields are missing, do not claim the lead fits ICP industries.';
+        return $shape.' For each ICP dimension say what the lead\'s own fields prove: "verified" = the fields clearly show it matches the ICP value; "partial" = related or implied (e.g. a payments company for a FinTech ICP, a city inside an ICP country); "unknown" = the fields say nothing about it; "contradicted" = the fields show a different value. role compares a person\'s title with icp.decisionMakers (seniority equivalents count as partial). Never guess a location that is not written in the fields. query_relevance_score is how directly the lead answers user_query (or the ICP brief when user_query is generic): 90+ = exactly what was asked, 60-80 = adjacent, under 40 = unrelated. icp_relevance_reason is one short sentence citing the specific evidence. When is_factual_query is true and the lead is outside the ICP, phrase it like: "Answers your search for X; doesn\'t match your {industries} focus in {territories}."';
     }
 
     /**
@@ -385,7 +617,7 @@ class ScoringService
         if ($fit['unknown']) {
             $briefNouns = $this->briefNounOverlap($brief, $companyPayload);
             if ($briefNouns !== []) {
-                return 'Matches your search for ' . implode(' / ', $briefNouns) . '; firmographic fit not verified yet.';
+                return 'Matches your search for '.implode(' / ', $briefNouns).'; firmographic fit not verified yet.';
             }
 
             return 'Matched search; firmographic fit not verified yet.';
@@ -395,15 +627,15 @@ class ScoringService
             $hasNicheBrief = trim($brief->customPrompt) !== '' || trim($brief->description) !== '';
             $briefNouns = $hasNicheBrief ? $this->briefNounOverlap($brief, $companyPayload) : [];
             if ($briefNouns !== []) {
-                $parts = ['Matches your search for ' . implode(' / ', array_map(
-                    static fn(string $n): string => mb_convert_case($n, MB_CASE_TITLE, 'UTF-8'),
+                $parts = ['Matches your search for '.implode(' / ', array_map(
+                    static fn (string $n): string => mb_convert_case($n, MB_CASE_TITLE, 'UTF-8'),
                     $briefNouns,
                 ))];
                 if ($canClaimTerritory) {
                     $parts[] = "in {$territoryLabel}";
                 }
 
-                return implode(' ', $parts) . '.';
+                return implode(' ', $parts).'.';
             }
 
             $parts = ["Fits your {$industryLabel} focus"];
@@ -414,7 +646,7 @@ class ScoringService
                 $parts[] = "aligned with {$buyerLabel}";
             }
 
-            return implode(' ', $parts) . '.';
+            return implode(' ', $parts).'.';
         }
 
         $hasNicheBrief = trim($brief->customPrompt) !== '' || trim($brief->description) !== '';
@@ -424,10 +656,10 @@ class ScoringService
                 ? '; limited firmographic overlap with your ICP filters.'
                 : '; location not confirmed against your territories.';
 
-            return 'Matches your search for ' . implode(' / ', array_map(
-                static fn(string $n): string => mb_convert_case($n, MB_CASE_TITLE, 'UTF-8'),
+            return 'Matches your search for '.implode(' / ', array_map(
+                static fn (string $n): string => mb_convert_case($n, MB_CASE_TITLE, 'UTF-8'),
                 $briefNouns,
-            )) . $suffix;
+            )).$suffix;
         }
 
         if ($territories !== [] && ! $canClaimTerritory) {
@@ -667,16 +899,13 @@ class ScoringService
             return 50.0;
         }
 
-        $haystack = mb_strtolower(implode(' ', array_filter([
-            (string) ($payload['name'] ?? ''),
-            (string) ($payload['summary'] ?? ''),
-            (string) ($payload['sector'] ?? ''),
-            (string) ($payload['title'] ?? ''),
-            (string) ($payload['company'] ?? ''),
-        ])));
+        $haystack = $this->payloadText($payload).' '.mb_strtolower((string) ($payload['location'] ?? ''));
 
+        $stopWords = ['the', 'and', 'for', 'with', 'that', 'who', 'are', 'from', 'into', 'their', 'find', 'give', 'show', 'list', 'get', 'need', 'want', 'leads', 'lead', 'prospects', 'prospect', 'people', 'companies', 'company', 'businesses', 'only', 'some', 'any', 'more'];
         $tokens = preg_split('/\s+/u', preg_replace('/[^\p{L}\p{N}\s]/u', ' ', $normalizedQuery) ?? '') ?: [];
-        $tokens = array_values(array_filter($tokens, fn(string $t) => mb_strlen($t) >= 3));
+        $tokens = array_values(array_filter($tokens, fn (string $t) => mb_strlen($t) >= 3 && ! in_array($t, $stopWords, true)));
+        // Light stemming: "startups" matches "startup", "exporters" matches "exporting".
+        $tokens = array_map(static fn (string $t): string => mb_strlen($t) > 5 ? mb_substr($t, 0, mb_strlen($t) - 2) : $t, $tokens);
 
         if ($tokens === []) {
             return 55.0;

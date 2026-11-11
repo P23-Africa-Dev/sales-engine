@@ -3,6 +3,8 @@
 namespace Tests\Unit\Enrichment;
 
 use App\Services\Enrichment\ProfileUrlValidator;
+use GuzzleHttp\Psr7\Response;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
@@ -37,7 +39,7 @@ class ProfileUrlValidatorTest extends TestCase
     {
         Http::fake(function () {
             return new \Illuminate\Http\Client\Response(
-                new \GuzzleHttp\Psr7\Response(999, [], '')
+                new Response(999, [], '')
             );
         });
 
@@ -50,7 +52,7 @@ class ProfileUrlValidatorTest extends TestCase
     public function test_timeout_keeps_linkedin_in_slug_only(): void
     {
         Http::fake(function () {
-            throw new \Illuminate\Http\Client\ConnectionException('timeout');
+            throw new ConnectionException('timeout');
         });
 
         $validator = new ProfileUrlValidator;

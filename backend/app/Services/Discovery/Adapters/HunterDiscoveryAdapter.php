@@ -56,7 +56,8 @@ class HunterDiscoveryAdapter implements DiscoverySourceInterface
             $response = Http::timeout(30)
                 ->acceptJson()
                 ->asJson()
-                ->post('https://api.hunter.io/v2/discover?api_key='.urlencode($apiKey), $payload);
+                ->withHeaders(['X-API-KEY' => $apiKey])
+                ->post('https://api.hunter.io/v2/discover', $payload);
 
             try {
                 ApiUsage::query()->create([
@@ -98,7 +99,7 @@ class HunterDiscoveryAdapter implements DiscoverySourceInterface
 
             return collect($items)
                 ->take($registryCap)
-                ->map(function ($item) use ($brief) {
+                ->map(function ($item) {
                     $row = is_array($item) ? $item : [];
                     $name = trim((string) ($row['organization'] ?? $row['company'] ?? $row['name'] ?? ''));
                     if ($name === '') {

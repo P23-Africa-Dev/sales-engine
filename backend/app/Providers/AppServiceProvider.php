@@ -2,6 +2,8 @@
 
 namespace App\Providers;
 
+use App\Services\Chat\IcpChatContextBuilder;
+use App\Services\CompanyCache\CompanyCacheService;
 use App\Services\Discovery\Adapters\ApolloDiscoveryAdapter;
 use App\Services\Discovery\Adapters\FylingsDiscoveryAdapter;
 use App\Services\Discovery\Adapters\HunterDiscoveryAdapter;
@@ -9,12 +11,33 @@ use App\Services\Discovery\Adapters\MetaPagesDiscoveryAdapter;
 use App\Services\Discovery\Adapters\MonoDiscoveryAdapter;
 use App\Services\Discovery\Adapters\RedditDiscoveryAdapter;
 use App\Services\Discovery\Adapters\SerperDiscoveryAdapter;
+use App\Services\Discovery\Adapters\SerperPlacesDiscoveryAdapter;
 use App\Services\Discovery\Adapters\XDiscoveryAdapter;
 use App\Services\Discovery\Adapters\YoutubeDiscoveryAdapter;
+use App\Services\Discovery\CompanyNameValidator;
 use App\Services\Discovery\DiscoveryOrchestrator;
-use App\Services\Research\ResearchOrchestrator;
-use App\Services\CompanyCache\CompanyCacheService;
+use App\Services\Discovery\DiscoveryProviderHealth;
+use App\Services\Discovery\FactualListSynthesizer;
+use App\Services\Discovery\LeadQueryNormalizer;
+use App\Services\Discovery\PersonNameValidator;
+use App\Services\Discovery\QueryIntentService;
+use App\Services\Discovery\QueryVariationGenerator;
+use App\Services\Enrichment\LeadProfileEnrichmentService;
+use App\Services\Enrichment\ProfileUrlValidator;
 use App\Services\Extraction\ExtractionService;
+use App\Services\Intent\Adapters\MetaGraphPagesAdapter;
+use App\Services\Intent\Adapters\RedditNativeSocialAdapter;
+use App\Services\Intent\Adapters\SerperLinkedInAdapter;
+use App\Services\Intent\Adapters\SerperMetaAdapter;
+use App\Services\Intent\Adapters\SerperRedditAdapter;
+use App\Services\Intent\Adapters\SerperXAdapter;
+use App\Services\Intent\Adapters\XNativeSocialAdapter;
+use App\Services\Intent\Adapters\YoutubeSocialAdapter;
+use App\Services\Intent\SocialListeningOrchestrator;
+use App\Services\Intent\SocialSignalEnricher;
+use App\Services\Intent\SocialSourceHealth;
+use App\Services\Llm\GlmClient;
+use App\Services\Research\ResearchOrchestrator;
 use App\Services\Scoring\ScoringService;
 use Illuminate\Support\ServiceProvider;
 
@@ -23,13 +46,14 @@ class AppServiceProvider extends ServiceProvider
     public function register(): void
     {
         // Shared per-run retrieval health: adapters record, the orchestrator reports.
-        $this->app->singleton(\App\Services\Discovery\DiscoveryProviderHealth::class);
-        $this->app->singleton(\App\Services\Intent\SocialSourceHealth::class);
+        $this->app->singleton(DiscoveryProviderHealth::class);
+        $this->app->singleton(SocialSourceHealth::class);
 
         $this->app->singleton(DiscoveryOrchestrator::class, function ($app) {
             return new DiscoveryOrchestrator(
                 sources: [
                     $app->make(SerperDiscoveryAdapter::class),
+                    $app->make(SerperPlacesDiscoveryAdapter::class),
                     $app->make(MonoDiscoveryAdapter::class),
                     $app->make(FylingsDiscoveryAdapter::class),
                     $app->make(ApolloDiscoveryAdapter::class),
@@ -42,15 +66,15 @@ class AppServiceProvider extends ServiceProvider
                 cache: $app->make(CompanyCacheService::class),
                 extraction: $app->make(ExtractionService::class),
                 scoring: $app->make(ScoringService::class),
-                queryIntent: $app->make(\App\Services\Discovery\QueryIntentService::class),
-                personNameValidator: $app->make(\App\Services\Discovery\PersonNameValidator::class),
-                companyNameValidator: $app->make(\App\Services\Discovery\CompanyNameValidator::class),
-                factualListSynthesizer: $app->make(\App\Services\Discovery\FactualListSynthesizer::class),
-                enrichment: $app->make(\App\Services\Enrichment\LeadProfileEnrichmentService::class),
-                queryVariationGenerator: $app->make(\App\Services\Discovery\QueryVariationGenerator::class),
-                profileUrlValidator: $app->make(\App\Services\Enrichment\ProfileUrlValidator::class),
-                leadQueryNormalizer: $app->make(\App\Services\Discovery\LeadQueryNormalizer::class),
-                providerHealth: $app->make(\App\Services\Discovery\DiscoveryProviderHealth::class),
+                queryIntent: $app->make(QueryIntentService::class),
+                personNameValidator: $app->make(PersonNameValidator::class),
+                companyNameValidator: $app->make(CompanyNameValidator::class),
+                factualListSynthesizer: $app->make(FactualListSynthesizer::class),
+                enrichment: $app->make(LeadProfileEnrichmentService::class),
+                queryVariationGenerator: $app->make(QueryVariationGenerator::class),
+                profileUrlValidator: $app->make(ProfileUrlValidator::class),
+                leadQueryNormalizer: $app->make(LeadQueryNormalizer::class),
+                providerHealth: $app->make(DiscoveryProviderHealth::class),
             );
         });
 
@@ -67,25 +91,25 @@ class AppServiceProvider extends ServiceProvider
                     $app->make(RedditDiscoveryAdapter::class),
                     $app->make(MetaPagesDiscoveryAdapter::class),
                 ],
-                glm: $app->make(\App\Services\Llm\GlmClient::class),
-                icpChatContext: $app->make(\App\Services\Chat\IcpChatContextBuilder::class),
+                glm: $app->make(GlmClient::class),
+                icpChatContext: $app->make(IcpChatContextBuilder::class),
             );
         });
 
-        $this->app->singleton(\App\Services\Intent\SocialListeningOrchestrator::class, function ($app) {
-            return new \App\Services\Intent\SocialListeningOrchestrator(
+        $this->app->singleton(SocialListeningOrchestrator::class, function ($app) {
+            return new SocialListeningOrchestrator(
                 sources: [
-                    $app->make(\App\Services\Intent\Adapters\SerperLinkedInAdapter::class),
-                    $app->make(\App\Services\Intent\Adapters\SerperXAdapter::class),
-                    $app->make(\App\Services\Intent\Adapters\SerperRedditAdapter::class),
-                    $app->make(\App\Services\Intent\Adapters\SerperMetaAdapter::class),
-                    $app->make(\App\Services\Intent\Adapters\MetaGraphPagesAdapter::class),
-                    $app->make(\App\Services\Intent\Adapters\YoutubeSocialAdapter::class),
-                    $app->make(\App\Services\Intent\Adapters\XNativeSocialAdapter::class),
-                    $app->make(\App\Services\Intent\Adapters\RedditNativeSocialAdapter::class),
+                    $app->make(SerperLinkedInAdapter::class),
+                    $app->make(SerperXAdapter::class),
+                    $app->make(SerperRedditAdapter::class),
+                    $app->make(SerperMetaAdapter::class),
+                    $app->make(MetaGraphPagesAdapter::class),
+                    $app->make(YoutubeSocialAdapter::class),
+                    $app->make(XNativeSocialAdapter::class),
+                    $app->make(RedditNativeSocialAdapter::class),
                 ],
-                enricher: $app->make(\App\Services\Intent\SocialSignalEnricher::class),
-                glm: $app->make(\App\Services\Llm\GlmClient::class),
+                enricher: $app->make(SocialSignalEnricher::class),
+                glm: $app->make(GlmClient::class),
             );
         });
     }

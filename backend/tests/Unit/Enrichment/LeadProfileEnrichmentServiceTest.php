@@ -3,13 +3,8 @@
 namespace Tests\Unit\Enrichment;
 
 use App\Models\IcpProfile;
-use App\Models\Organization;
-use App\Services\Discovery\QueryIntentService;
-use App\Services\Enrichment\ApolloPersonEnricher;
-use App\Services\Enrichment\HunterEmailEnricher;
+use App\Services\Enrichment\DTO\EnrichedLeadProfile;
 use App\Services\Enrichment\LeadProfileEnrichmentService;
-use App\Services\Enrichment\SerperPersonSearchAdapter;
-use App\Services\Llm\GlmClient;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
@@ -65,6 +60,8 @@ class LeadProfileEnrichmentServiceTest extends TestCase
                     ],
                 ]],
             ], 200),
+            'google.serper.dev/places' => Http::response(['places' => []], 200),
+            'tesla.com/*' => Http::response('', 404),
         ]);
 
         $icp = IcpProfile::query()->create([
@@ -110,7 +107,7 @@ class LeadProfileEnrichmentServiceTest extends TestCase
 
     public function test_merge_into_extraction_overwrites_empty_fields(): void
     {
-        $profile = new \App\Services\Enrichment\DTO\EnrichedLeadProfile(
+        $profile = new EnrichedLeadProfile(
             title: 'Founder',
             companyName: 'Acme',
             profileUrls: ['https://linkedin.com/in/jane'],
@@ -132,8 +129,8 @@ class LeadProfileEnrichmentServiceTest extends TestCase
 
     public function test_merge_into_extraction_carries_enrichment_attempted_flag(): void
     {
-        $attempted = new \App\Services\Enrichment\DTO\EnrichedLeadProfile(title: 'Founder', enrichmentAttempted: true);
-        $notAttempted = new \App\Services\Enrichment\DTO\EnrichedLeadProfile(enrichmentAttempted: false);
+        $attempted = new EnrichedLeadProfile(title: 'Founder', enrichmentAttempted: true);
+        $notAttempted = new EnrichedLeadProfile(enrichmentAttempted: false);
 
         $this->assertTrue($attempted->mergeIntoExtraction([])['enrichment_attempted']);
         $this->assertFalse($notAttempted->mergeIntoExtraction([])['enrichment_attempted']);
@@ -141,7 +138,7 @@ class LeadProfileEnrichmentServiceTest extends TestCase
 
     public function test_with_enrichment_attempted_returns_an_immutable_copy(): void
     {
-        $original = new \App\Services\Enrichment\DTO\EnrichedLeadProfile(title: 'Founder', enrichmentAttempted: false);
+        $original = new EnrichedLeadProfile(title: 'Founder', enrichmentAttempted: false);
         $updated = $original->withEnrichmentAttempted(true);
 
         $this->assertFalse($original->enrichmentAttempted);

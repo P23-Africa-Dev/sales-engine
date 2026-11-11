@@ -41,7 +41,7 @@ spec:
               php artisan config:clear
               php artisan config:cache
               exec php artisan queue:work redis \
-                --queue=discovery,research \
+                --queue=discovery,research,enrichment \
                 --sleep=2 \
                 --tries=1 \
                 --timeout=320 \

@@ -10,6 +10,7 @@ import {
   listChatMessages,
   sendChatMessage,
   SalesEngineApiError,
+  type ChatEntityMode,
   type ChatIntent,
   type ChatMessageApi,
   type DiscoveryStageInfo,
@@ -73,15 +74,109 @@ export function isForegroundChatWaiting(isPending: boolean, waitMode: ChatWaitMo
   return isPending && waitMode !== "background";
 }
 
+function readEntityMode(value: unknown): ChatEntityMode | undefined {
+  return value === "both" || value === "companies" || value === "people" ? value : undefined;
+}
+
 export function mapApiMessagesToUi(messages: ChatMessageApi[]) {
-  return messages.map((message, index) => ({
-    id: message.id ?? index + 2,
-    role: message.role,
-    body: message.body,
-    intent: message.intent,
-    leads: message.leads ?? undefined,
-    meta: message.meta ?? undefined,
-  }));
+  return messages.map((message, index) => {
+    const meta = message.meta ?? undefined;
+    const entityMode = readEntityMode(meta?.entity_mode);
+    const searchCaption =
+      typeof meta?.search_caption === "string" && meta.search_caption.trim() !== ""
+        ? meta.search_caption
+        : undefined;
+    const targetCount =
+      typeof meta?.count === "number" && meta.count > 0 ? meta.count : undefined;
+
+    return {
+      id: message.id ?? index + 2,
+      role: message.role,
+      body: message.body,
+      intent: message.intent,
+      leads: message.leads ?? undefined,
+      meta,
+      ...(entityMode ? { entityMode } : {}),
+      ...(searchCaption ? { searchCaption } : {}),
+      ...(targetCount != null ? { targetCount } : {}),
+    };
+  });
+}
+
+/** Minimal shape needed to merge client-only chat messages into refreshed server history. */
+export type MergeableChatMessage = {
+  id: number;
+  role: "assistant" | "user";
+  body: string;
+  intent?: ChatIntent;
+  kind?: "confirm-icp";
+  /** Set on messages that exist only in the client until the server echoes them back. */
+  localOnly?: boolean;
+  entityMode?: ChatEntityMode;
+  searchCaption?: string;
+  targetCount?: number;
+  failed?: boolean;
+};
+
+/**
+ * Replace the transcript with server history without dropping client-only messages
+ * (the ICP confirm card, the prompt it belongs to, captions on just-sent prompts).
+ *
+ * - A local user message that the server now has (same role + body) is dropped, and its
+ *   caption fields (Mode / Searching / count) are copied onto the server copy when the
+ *   server did not send them in `meta`.
+ * - A local assistant message is kept only while it is an unconfirmed confirm card, or while
+ *   the local user message it follows has not reached the server yet.
+ * - Surviving local messages are appended after server history in their original order.
+ */
+export function mergeServerHistoryWithLocal<T extends MergeableChatMessage>(
+  serverMessages: T[],
+  currentMessages: T[]
+): T[] {
+  const merged = serverMessages.map((message) => ({ ...message }));
+  const claimedServerIndexes = new Set<number>();
+  const survivors: T[] = [];
+  let lastLocalUserSurvived = false;
+
+  for (const local of currentMessages) {
+    if (!local.localOnly) continue;
+
+    if (local.role === "user") {
+      let matchIndex = -1;
+      for (let index = merged.length - 1; index >= 0; index -= 1) {
+        const candidate = merged[index];
+        if (
+          !claimedServerIndexes.has(index) &&
+          candidate.role === "user" &&
+          candidate.body.trim() === local.body.trim()
+        ) {
+          matchIndex = index;
+          break;
+        }
+      }
+
+      if (matchIndex >= 0) {
+        claimedServerIndexes.add(matchIndex);
+        const target = merged[matchIndex];
+        if (!target.entityMode && local.entityMode) target.entityMode = local.entityMode;
+        if (!target.searchCaption && local.searchCaption) target.searchCaption = local.searchCaption;
+        if (target.targetCount == null && local.targetCount != null) target.targetCount = local.targetCount;
+        if (!target.intent && local.intent) target.intent = local.intent;
+        lastLocalUserSurvived = false;
+        continue;
+      }
+
+      survivors.push(local);
+      lastLocalUserSurvived = true;
+      continue;
+    }
+
+    if (local.kind === "confirm-icp" || lastLocalUserSurvived) {
+      survivors.push(local);
+    }
+  }
+
+  return [...merged, ...survivors];
 }
 
 const sessionIdsByIcp = new Map<string, number>();
@@ -164,6 +259,10 @@ export function useChatHistory(icpProfileId?: string) {
 type SendMessageVariables = {
   body: string;
   intent: ChatIntent;
+  /** Lead-gen only: structured entity mix (replaces the old "(companies only)" prompt cue). */
+  entityMode?: ChatEntityMode;
+  /** Lead-gen only: requested prospect count. */
+  count?: number;
 };
 
 type SendMessageOptions = {
@@ -336,7 +435,7 @@ export function useSendChatMessage(icpProfileId?: string, options?: SendMessageO
   }, [clearProcessingTimers, icpProfileId, queryClient]);
 
   const mutation = useMutation({
-    mutationFn: async ({ body, intent }: SendMessageVariables) => {
+    mutationFn: async ({ body, intent, entityMode, count }: SendMessageVariables) => {
       setWaitMode("foreground");
       pendingRunIdRef.current = null;
       extraWaitMsRef.current = 0;
@@ -357,9 +456,15 @@ export function useSendChatMessage(icpProfileId?: string, options?: SendMessageO
 
       const sessionId = await ensureSession(icpProfileId);
 
+      const isLeadGen = intent === "generate_leads" || intent === "generate_more_leads";
       const result = await sendChatMessage(
         sessionId,
-        { body, intent },
+        {
+          body,
+          intent,
+          ...(isLeadGen && entityMode ? { entity_mode: entityMode } : {}),
+          ...(isLeadGen && typeof count === "number" ? { count } : {}),
+        },
         {
           onStage: handleBackendStage,
           onDiscoveryRun: (runId) => {

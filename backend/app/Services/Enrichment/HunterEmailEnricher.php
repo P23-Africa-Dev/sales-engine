@@ -28,11 +28,11 @@ class HunterEmailEnricher
 
         try {
             $response = Http::timeout(15)
+                ->withHeaders(['X-API-KEY' => (string) config('services.hunter.api_key')])
                 ->get('https://api.hunter.io/v2/email-finder', [
                     'domain' => $domain,
                     'first_name' => $firstName,
                     'last_name' => $lastName,
-                    'api_key' => (string) config('services.hunter.api_key'),
                 ]);
 
             if (! $response->successful()) {
@@ -61,7 +61,7 @@ class HunterEmailEnricher
         $host = parse_url($website, PHP_URL_HOST);
 
         if (! is_string($host) || $host === '') {
-            $host = parse_url('https://' . ltrim($website, '/'), PHP_URL_HOST);
+            $host = parse_url('https://'.ltrim($website, '/'), PHP_URL_HOST);
         }
 
         $host = is_string($host) ? mb_strtolower($host) : null;

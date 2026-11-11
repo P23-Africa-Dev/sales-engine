@@ -3,10 +3,10 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
+use App\Jobs\EnrichLeadContactsJob;
 use App\Models\ChatMessage;
 use App\Models\DiscoveryRun;
 use App\Services\Discovery\DiscoveryOrchestrator;
-use App\Services\Discovery\QueryIntentService;
 use App\Services\Icp\IcpProfileService;
 use App\Services\Usage\UsageService;
 use App\Support\OrgContext;
@@ -26,6 +26,7 @@ class DiscoveryController extends Controller
             'query' => ['nullable', 'string', 'max:1000'],
             'intent' => ['nullable', 'string', 'in:quick_research,generate_leads'],
             'limit' => ['nullable', 'integer', 'min:1', 'max:150'],
+            'entity_mode' => ['nullable', 'string', 'in:both,companies,people'],
         ]);
 
         $org = OrgContext::require();
@@ -45,8 +46,18 @@ class DiscoveryController extends Controller
             $data['query'] ?? '',
             $data['intent'] ?? 'generate_leads',
             null,
-            $data['limit'] ?? QueryIntentService::DEFAULT_LEAD_LIMIT,
+            $data['limit'] ?? 0,
+            entityMode: $data['entity_mode'] ?? null,
         );
+
+        $leadIds = array_values(array_filter(array_map(
+            static fn (array $lead): int => (int) ($lead['id'] ?? 0),
+            $result['leads'],
+        )));
+        $enrichContacts = (bool) (($icp->config ?? [])['enrichContactDetails'] ?? true);
+        if ($leadIds !== [] && $enrichContacts && (bool) config('services.contact_finder.async', true)) {
+            EnrichLeadContactsJob::dispatch($org->id, $leadIds);
+        }
 
         return response()->json([
             'data' => [
