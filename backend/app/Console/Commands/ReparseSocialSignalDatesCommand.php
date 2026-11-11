@@ -31,7 +31,7 @@ class ReparseSocialSignalDatesCommand extends Command
         $dismissStale = (bool) $this->option('dismiss-stale');
         $orgId = $this->option('organization');
 
-        $query = SocialSignal::query()->where('status', '!=', 'dismissed');
+        $query = SocialSignal::query()->whereNotIn('status', SocialSignal::HIDDEN_STATUSES);
         if ($orgId) {
             $query->where('organization_id', (int) $orgId);
         }
@@ -69,6 +69,7 @@ class ReparseSocialSignalDatesCommand extends Command
 
                 if ($parsed === null && ! $looksFake) {
                     $unchanged++;
+
                     continue;
                 }
 
@@ -114,7 +115,7 @@ class ReparseSocialSignalDatesCommand extends Command
             }
         });
 
-        $this->info(($dryRun ? '[dry-run] ' : '') . "Updated {$updated}, dismissed {$dismissed}, unchanged {$unchanged}");
+        $this->info(($dryRun ? '[dry-run] ' : '')."Updated {$updated}, dismissed {$dismissed}, unchanged {$unchanged}");
 
         return self::SUCCESS;
     }

@@ -30,9 +30,9 @@ class AdminSocialListeningService
         $base = SocialSignal::query()
             ->when($organizationId, fn (Builder $q) => $q->where('organization_id', $organizationId));
 
-        $needsReview = (clone $base)->whereNotIn('status', ['reviewed', 'dismissed'])->count();
+        $needsReview = (clone $base)->whereNotIn('status', ['reviewed', 'dismissed', 'retired'])->count();
         $approved = (clone $base)->where('status', 'reviewed')->count();
-        $suppressed = (clone $base)->where('status', 'dismissed')->count();
+        $suppressed = (clone $base)->whereIn('status', ['dismissed', 'retired'])->count();
         $synced = (clone $base)->where('status', 'synced')->count();
 
         $bySource = (clone $base)
@@ -103,7 +103,7 @@ class AdminSocialListeningService
         if (! empty($filters['status']) && $filters['status'] !== 'all') {
             $status = $this->mapUiStatus((string) $filters['status']);
             if (in_array($status, ['needs_review'], true) || $filters['status'] === 'Needs review') {
-                $query->whereNotIn('status', ['reviewed', 'dismissed']);
+                $query->whereNotIn('status', ['reviewed', 'dismissed', 'retired']);
             } else {
                 $query->where('status', $status);
             }

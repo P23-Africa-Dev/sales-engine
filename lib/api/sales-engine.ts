@@ -639,6 +639,9 @@ export type ChatLead = {
   query_match?: boolean;
   icp_relevance_reason?: string | null;
   location_status?: "unknown" | "confirmed" | "resolved" | "outside_territory" | string | null;
+  /** The company's own inbox / switchboard, shown when the person has no direct contact. */
+  company_email?: string | null;
+  company_phone?: string | null;
   /** Chat lead payloads carry these at the top level; `meta` is the Lead resource shape. */
   fit_breakdown?: LeadFitBreakdownItem[] | null;
   partial_match?: boolean | null;

@@ -187,6 +187,26 @@ const CONTACT_CONFIDENCE_LABELS: Record<string, string> = {
   provider: "Provider",
 };
 
+/**
+ * When a person has no direct email or phone, show the company's own inbox / switchboard instead,
+ * labelled as such. A generic company inbox is never presented as the person's own address.
+ */
+export function withCompanyContactFallback(lead: ChatLead): ChatLead {
+  const email = lead.email || lead.company_email || null;
+  const phone = lead.phone || lead.company_phone || null;
+  if (email === (lead.email ?? null) && phone === (lead.phone ?? null)) return lead;
+
+  const sources = { ...(lead.contact_sources ?? lead.meta?.contact_sources ?? {}) };
+  if (!lead.email && lead.company_email) {
+    sources.email = { value: lead.company_email, type: "company_inbox", confidence: "on_page" };
+  }
+  if (!lead.phone && lead.company_phone) {
+    sources.phone = { ...(sources.phone ?? {}), value: lead.company_phone, type: sources.phone?.type === "hq_line" ? "hq_line" : "company_line" };
+  }
+
+  return { ...lead, email, phone, contact_sources: sources };
+}
+
 /** Small provenance chip for an email/phone value from `contact_sources` (top-level or `meta`). */
 export function leadContactSourceChip(lead: ChatLead, field: "email" | "phone"): ContactSourceChip | null {
   const source: LeadContactSource | null | undefined =
@@ -198,6 +218,8 @@ export function leadContactSourceChip(lead: ChatLead, field: "email" | "phone"):
       ? "Company line"
       : source.type === "hq_line"
         ? "Head-office line"
+        : source.type === "company_inbox"
+          ? "Company inbox"
       : source.confidence
         ? CONTACT_CONFIDENCE_LABELS[String(source.confidence)]
         : undefined;

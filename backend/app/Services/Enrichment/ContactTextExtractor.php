@@ -40,7 +40,7 @@ class ContactTextExtractor
      */
     private const PLACEHOLDER_LOCAL_PARTS = [
         'jdoe', 'johndoe', 'john.doe', 'john_doe',
-        'name', 'yourname', 'your.name', 'your_name', 'firstname', 'firstname.lastname', 'first.last', 'firstlast',
+        'name', 'yourname', 'your.name', 'your_name', 'firstname', 'lastname', 'firstname.lastname', 'first.last', 'first_last', 'firstlast', 'flast', 'firstl', 'f.last', 'first',
         'youremail', 'your.email', 'your_email', 'email', 'example', 'sample', 'test', 'testing', 'user', 'username',
         'someone', 'somebody', 'xxx', 'xxxx', 'abc', 'abc123', 'yourmail', 'me', 'myname', 'demo', 'placeholder',
     ];

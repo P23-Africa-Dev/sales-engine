@@ -202,7 +202,25 @@ class EnrichLeadContactsJob implements ShouldQueue
         $lead->refresh();
         $meta = is_array($lead->meta) ? $lead->meta : [];
 
-        foreach (['email', 'phone', 'linkedin_url', 'title', 'company_email', 'company_phone', 'address'] as $key) {
+        // The search stage may have attached an email/phone before any checks ran (a foreign
+        // head-office number, another company's mailbox). The checker saw it as a seed; if it
+        // did not keep it, it does not belong on this lead.
+        if ($contacts !== []) {
+            foreach (['email', 'phone'] as $key) {
+                $existing = trim((string) ($meta[$key] ?? ''));
+                $checked = trim((string) ($contacts[$key] ?? ''));
+                if ($existing !== '' && $checked === '') {
+                    unset($meta[$key]);
+                    if (isset($meta['contact_sources'][$key])) {
+                        unset($meta['contact_sources'][$key]);
+                    }
+                } elseif ($checked !== '') {
+                    $meta[$key] = $checked;
+                }
+            }
+        }
+
+        foreach (['linkedin_url', 'title', 'company_email', 'company_phone', 'address'] as $key) {
             $value = trim((string) ($contacts[$key] ?? ''));
             if ($value !== '' && trim((string) ($meta[$key] ?? '')) === '') {
                 $meta[$key] = $value;

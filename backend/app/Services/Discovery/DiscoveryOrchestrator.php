@@ -234,7 +234,7 @@ class DiscoveryOrchestrator
             $backfillPasses = 0;
             $seenLeadNames = [];
             foreach ($excludeLeadNames as $excluded) {
-                $key = mb_strtolower(trim((string) $excluded));
+                $key = self::leadKey((string) $excluded);
                 if ($key !== '') {
                     $seenLeadNames[$key] = true;
                 }
@@ -452,7 +452,7 @@ class DiscoveryOrchestrator
                     }
 
                     foreach ($passLeads as $lead) {
-                        $nameKey = mb_strtolower(trim((string) ($lead['name'] ?? '')));
+                        $nameKey = self::leadKey((string) ($lead['name'] ?? ''));
                         if ($nameKey !== '') {
                             $seenLeadNames[$nameKey] = true;
                         }
@@ -539,7 +539,7 @@ class DiscoveryOrchestrator
                     );
 
                     foreach ($passLeads as $lead) {
-                        $nameKey = mb_strtolower(trim((string) ($lead['name'] ?? '')));
+                        $nameKey = self::leadKey((string) ($lead['name'] ?? ''));
                         if ($nameKey !== '') {
                             $seenLeadNames[$nameKey] = true;
                         }
@@ -604,7 +604,7 @@ class DiscoveryOrchestrator
                     );
 
                     foreach ($passLeads as $lead) {
-                        $nameKey = mb_strtolower(trim((string) ($lead['name'] ?? '')));
+                        $nameKey = self::leadKey((string) ($lead['name'] ?? ''));
                         if ($nameKey !== '') {
                             $seenLeadNames[$nameKey] = true;
                         }
@@ -628,6 +628,7 @@ class DiscoveryOrchestrator
                     static fn (array $lead): bool => (float) ($lead['score'] ?? 0) >= self::MIN_SHOWN_SCORE,
                 ));
             }
+            $leadsPayload = $this->dedupeLeads($leadsPayload);
             $leadsPayload = $this->sortLeadsPayload($this->applyAdvisoryCap($leadsPayload, $effectiveLimit));
             if ($brief->isBothSearch()) {
                 $leadsPayload = $this->interleaveEntityTypes($leadsPayload);
@@ -1082,7 +1083,7 @@ class DiscoveryOrchestrator
 
             foreach ($extractions as $extracted) {
                 $displayName = trim((string) ($extracted['person_name'] ?? $extracted['name'] ?? ''));
-                $nameKey = mb_strtolower($displayName);
+                $nameKey = self::leadKey($displayName);
 
                 if ($displayName === '' || mb_strtolower($displayName) === mb_strtolower($brief->name)) {
                     continue;
@@ -1213,7 +1214,7 @@ class DiscoveryOrchestrator
 
             foreach ($extractionsByHit[$hitIndex] ?? [] as $extracted) {
                 $displayName = trim((string) ($extracted['person_name'] ?? $extracted['name'] ?? $hit->name));
-                $nameKey = mb_strtolower($displayName);
+                $nameKey = self::leadKey($displayName);
 
                 if ($displayName === '' || mb_strtolower($displayName) === mb_strtolower($brief->name)) {
                     $this->gateStats['gather_empty_extract']++;
@@ -2612,6 +2613,44 @@ class DiscoveryOrchestrator
     }
 
     /**
+     * One person or company, however it was spelled: "Femi Adefaka" (headline) and
+     * "Femiadefaka" (URL slug) are the same lead.
+     */
+    public static function leadKey(string $name): string
+    {
+        return preg_replace('/[^\p{L}\p{N}]+/u', '', mb_strtolower(trim($name))) ?? '';
+    }
+
+    /**
+     * Drop repeats of the same lead (same letters in the name, or the same LinkedIn profile),
+     * keeping the higher-scoring row.
+     *
+     * @param  list<array<string, mixed>>  $leadsPayload
+     * @return list<array<string, mixed>>
+     */
+    private function dedupeLeads(array $leadsPayload): array
+    {
+        usort($leadsPayload, static fn (array $a, array $b): int => ($b['score'] ?? 0) <=> ($a['score'] ?? 0));
+        $seen = [];
+        $kept = [];
+        foreach ($leadsPayload as $lead) {
+            $keys = array_filter([
+                'n:'.self::leadKey((string) ($lead['name'] ?? '')),
+                filled($lead['linkedin_url'] ?? null) ? 'u:'.rtrim(mb_strtolower((string) preg_replace('#^https?://[a-z]{2,3}\.#i', 'https://www.', (string) $lead['linkedin_url'])), '/') : null,
+            ], static fn (?string $key): bool => $key !== null && $key !== 'n:');
+            if (array_intersect($keys, array_keys($seen)) !== []) {
+                continue;
+            }
+            foreach ($keys as $key) {
+                $seen[$key] = true;
+            }
+            $kept[] = $lead;
+        }
+
+        return $kept;
+    }
+
+    /**
      * Over-fetching to replace partial matches persists more draft leads than the user sees.
      * Drop the ones this run created but trimmed, so they do not pile up or inflate lead_count.
      *
@@ -3034,7 +3073,7 @@ class DiscoveryOrchestrator
         $used = [];
         foreach ($leadsPayload as $lead) {
             $url = mb_strtolower(trim((string) ($lead['source_url'] ?? $lead['linkedin_url'] ?? $lead['website'] ?? '')));
-            $name = mb_strtolower(trim((string) ($lead['name'] ?? '')));
+            $name = self::leadKey((string) ($lead['name'] ?? ''));
             if ($url !== '') {
                 $used['url:'.$url] = true;
             }

@@ -214,7 +214,7 @@ class AdminSmartLeadsService
 
         $signals = SocialSignal::query()
             ->where('organization_id', $organization->id)
-            ->where('status', '!=', 'dismissed')
+            ->whereNotIn('status', SocialSignal::HIDDEN_STATUSES)
             ->get(['signal_type_key', 'signal_type', 'intent_label']);
 
         $breakdown = [

@@ -225,6 +225,12 @@ class SocialListeningOrchestrator
                 );
                 if (! $gate->admitted) {
                     $groundingRejected[$gate->reason] = ($groundingRejected[$gate->reason] ?? 0) + 1;
+                    Log::debug('Social post dropped by grounding gate', [
+                        'run_id' => $run->id,
+                        'reason' => $gate->reason,
+                        'platform' => $hit->platform,
+                        'url' => $hit->postUrl,
+                    ]);
 
                     continue;
                 }

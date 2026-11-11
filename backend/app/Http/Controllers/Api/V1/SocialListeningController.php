@@ -58,7 +58,7 @@ class SocialListeningController extends Controller
             ->with('enrichmentLogs')
             ->where('organization_id', $org->id)
             ->where('icp_profile_id', $icp->id)
-            ->where('status', '!=', 'dismissed')
+            ->whereNotIn('status', SocialSignal::HIDDEN_STATUSES)
             ->orderByDesc('score')
             ->orderByRaw('posted_at IS NULL ASC')
             ->orderByDesc('posted_at')
@@ -136,7 +136,7 @@ class SocialListeningController extends Controller
         $base = SocialSignal::query()
             ->where('organization_id', $org->id)
             ->where('icp_profile_id', $icp->id)
-            ->where('status', '!=', 'dismissed');
+            ->whereNotIn('status', SocialSignal::HIDDEN_STATUSES);
 
         $sources = (clone $base)
             ->select('source_label')
@@ -186,7 +186,7 @@ class SocialListeningController extends Controller
         $base = SocialSignal::query()
             ->where('organization_id', $org->id)
             ->where('icp_profile_id', $icp->id)
-            ->where('status', '!=', 'dismissed');
+            ->whereNotIn('status', SocialSignal::HIDDEN_STATUSES);
 
         $detected = (clone $base)->count();
         $high = (clone $base)->where('score', '>=', $minScore)->count();

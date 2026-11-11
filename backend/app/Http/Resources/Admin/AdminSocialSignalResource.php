@@ -14,6 +14,7 @@ class AdminSocialSignalResource extends JsonResource
         $uiStatus = match ($this->status) {
             'reviewed' => 'Approved',
             'dismissed' => 'Suppressed',
+            'retired' => 'Retired (no longer a fit)',
             default => 'Needs review',
         };
 

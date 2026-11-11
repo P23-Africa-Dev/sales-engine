@@ -91,6 +91,7 @@ import {
   formatLeadRoleLine,
   isLeadContactPending,
   isLeadPartialMatch,
+  withCompanyContactFallback,
   leadContactSourceChip,
   leadEntityBadge,
   leadFitTooltip,
@@ -739,7 +740,7 @@ function LeadInlineResults({
   const unsavedIds = leads
     .filter((lead) => !lead.native_crm_saved && !lead.native_crm_lead_id)
     .map((lead) => lead.id);
-  const visibleLeads = leads.slice(0, displayCount);
+  const visibleLeads = leads.slice(0, displayCount).map(withCompanyContactFallback);
   const hasMore = displayCount < leads.length;
   const remaining = Math.max(leads.length - displayCount, 0);
 

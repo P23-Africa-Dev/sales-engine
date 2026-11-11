@@ -8,7 +8,16 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class SocialSignal extends Model
 {
-    public const STATUSES = ['new', 'reviewed', 'outreached', 'synced', 'dismissed'];
+    public const STATUSES = ['new', 'reviewed', 'outreached', 'synced', 'dismissed', 'retired'];
+
+    /** Retired by re-qualification (no longer an opening for the account's need). Reversible. */
+    public const STATUS_RETIRED = 'retired';
+
+    /**
+     * Never shown in the feed, metrics or chat context. "retired" is kept apart from
+     * "dismissed" so system clean-ups never teach the scanner what the user dislikes.
+     */
+    public const HIDDEN_STATUSES = ['dismissed', 'retired'];
 
     public const ENRICHMENT_NOT_ATTEMPTED = 'not_attempted';
 
