@@ -926,7 +926,8 @@ export async function pollDiscoveryRunUntilComplete(
       }
 
       // Not a validation/ICP 422 — use 502 so UI does not treat this as "select an ICP".
-      throw new SalesEngineApiError(rechecked.error ?? "Discovery run failed.", 502);
+      // The run error can carry system details; the user gets a plain message.
+      throw new SalesEngineApiError("We couldn't finish this search. Please try again in a moment.", 502);
     }
 
     if (options?.signal?.aborted) {
@@ -1425,7 +1426,8 @@ export function normalizeRecommendedAction(
 export type SocialListeningRunResultSummary = {
   totalChecked: number;
   qualified: number;
-  rejected: {
+  /** Server-side diagnostics; no longer sent to the browser. */
+  rejected?: {
     icpMismatch: number;
     missingSourceUrl: number;
     missingSourceDate: number;
@@ -1480,6 +1482,14 @@ export type SocialListeningProfileSummary = {
   avoid?: string[];
 };
 
+/** Whether a source the user can choose is offered and working. No provider or key details. */
+export type SocialSourceAvailability = {
+  key: string;
+  offered: boolean;
+  available: boolean;
+  needs_pages?: boolean;
+};
+
 export type SocialSourceHealthItem = {
   key: string;
   label: string;
@@ -1506,7 +1516,7 @@ export type SocialListeningRunStatus = {
 export function isStructuredRunSummary(
   value: SocialListeningRunStatus["result_summary"]
 ): value is SocialListeningRunResultSummary {
-  return typeof value === "object" && value !== null && "rejected" in value;
+  return typeof value === "object" && value !== null && "totalChecked" in value;
 }
 
 export type SocialListeningMetrics = {
@@ -1520,7 +1530,7 @@ export type SocialListeningMetrics = {
   last_run_at?: string | null;
   cadence_days?: number | null;
   freshness_window_days?: number | null;
-  source_health?: SocialSourceHealthItem[];
+  source_availability?: SocialSourceAvailability[];
   latest_run?: SocialListeningRunStatus | null;
 };
 
@@ -1540,7 +1550,7 @@ export type SocialListeningSettings = {
   org_verified_domain?: string | null;
   verification_status: "pending" | "verified" | "failed";
   last_run_at?: string | null;
-  source_health?: SocialSourceHealthItem[];
+  source_availability?: SocialSourceAvailability[];
 };
 
 export type OutreachSenderMode = "platform" | "organization";

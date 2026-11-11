@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Jobs\EnrichLeadContactsJob;
+use App\Models\DiscoveryRun;
 use App\Models\IcpProfile;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
@@ -68,7 +69,8 @@ class HighCapacityDiscoveryTest extends TestCase
         $response->assertCreated()
             ->assertJsonPath('data.status', 'completed');
 
-        $summary = $response->json('data.result_summary');
+        // Diagnostics are server-side only; the public API returns a trimmed summary.
+        $summary = DiscoveryRun::query()->findOrFail($response->json('data.id'))->result_summary;
         $leads = $response->json('data.leads') ?? [];
 
         $this->assertTrue((bool) ($summary['fan_out_strategy_used'] ?? false));
@@ -144,7 +146,8 @@ class HighCapacityDiscoveryTest extends TestCase
         $response->assertCreated()
             ->assertJsonPath('data.status', 'completed');
 
-        $summary = $response->json('data.result_summary');
+        // Diagnostics are server-side only; the public API returns a trimmed summary.
+        $summary = DiscoveryRun::query()->findOrFail($response->json('data.id'))->result_summary;
         $leads = $response->json('data.leads') ?? [];
 
         $this->assertTrue((bool) ($summary['fan_out_strategy_used'] ?? false));

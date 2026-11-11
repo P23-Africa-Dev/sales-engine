@@ -2,7 +2,6 @@ import {
   isStructuredRunSummary,
   type SocialListeningRunStatus,
 } from "@/lib/api/sales-engine";
-import { describeScanRejections } from "@/lib/social-listening-run-summary";
 import { SOCIAL_LISTENING_TIPS } from "@/lib/social-listening-processing-labels";
 
 export type SocialListeningEmptyVariant =
@@ -50,7 +49,8 @@ export function getSocialListeningEmptyState(
     return {
       variant: "scan_failed",
       title: "Scan couldn't complete",
-      description: latestRun.error ?? "The last scan failed. Try Scan now to retry.",
+      // Never echo the backend error text: it can carry provider or system details.
+      description: "We couldn't finish this scan. Try Scan now again in a few minutes.",
       tip: SOCIAL_LISTENING_TIPS[4],
       showActions: true,
     };
@@ -92,26 +92,22 @@ export function getSocialListeningEmptyState(
       ? latestRun.result_summary
       : null;
     const checked = summary?.totalChecked ?? 0;
-    const parts = summary ? describeScanRejections(summary) : [];
-    if (summary?.budget_exhausted) parts.push("the daily search budget was used up");
 
     let description: string;
     if (summary?.model_unavailable) {
+      description = "We couldn't review new posts just now. Try Scan now again shortly.";
+    } else if (summary?.budget_exhausted) {
+      description = "You've reached today's scan limit. We'll pick up where we left off on the next scan.";
+    } else if (!summary || checked > 0) {
       description =
-        "The scan found posts but the AI that qualifies them isn't available right now, so none could be checked. Try Scan now again shortly.";
-    } else if (!summary) {
-      description = "Your scan finished, but no high-intent posts met your score threshold yet.";
-    } else if (checked === 0) {
-      description = "The scan searched your active ICP and the live sources returned no recent posts.";
+        "We reviewed the latest conversations for what you're looking for and nothing was a strong enough opening to show you. We'll keep listening.";
     } else {
-      description = `The scan checked ${checked} recent posts for this ICP and kept 0.${
-        parts.length ? ` Dropped: ${parts.join(", ")}.` : ""
-      }`;
+      description = "No recent conversations matched what you're looking for yet. We'll keep listening.";
     }
 
     return {
       variant: "no_match_after_scan",
-      title: summary && checked === 0 ? "No recent posts found" : "No opportunities kept",
+      title: summary && checked === 0 ? "Quiet for now" : "Nothing new worth your time yet",
       description,
       tip,
       showActions: true,

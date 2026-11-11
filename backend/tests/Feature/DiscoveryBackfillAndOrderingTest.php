@@ -2,7 +2,9 @@
 
 namespace Tests\Feature;
 
+use App\Models\DiscoveryRun;
 use App\Models\IcpProfile;
+use App\Services\Discovery\DiscoveryOrchestrator;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
@@ -80,7 +82,8 @@ class DiscoveryBackfillAndOrderingTest extends TestCase
         $response->assertCreated()
             ->assertJsonPath('data.status', 'completed');
 
-        $summary = $response->json('data.result_summary');
+        // Diagnostics are server-side only; the public API returns a trimmed summary.
+        $summary = DiscoveryRun::query()->findOrFail($response->json('data.id'))->result_summary;
         $leads = $response->json('data.leads') ?? [];
 
         $this->assertGreaterThanOrEqual(1, (int) ($summary['backfill_passes'] ?? 0));
@@ -162,7 +165,7 @@ class DiscoveryBackfillAndOrderingTest extends TestCase
                 ], 200);
             }
 
-            return Http::response(['error' => 'unexpected ' . $url], 500);
+            return Http::response(['error' => 'unexpected '.$url], 500);
         });
 
         $response = $this->withHeaders($this->orgHeaders($org))
@@ -184,7 +187,7 @@ class DiscoveryBackfillAndOrderingTest extends TestCase
 
     public function test_leads_ordered_icp_recommended_first(): void
     {
-        $orchestrator = app(\App\Services\Discovery\DiscoveryOrchestrator::class);
+        $orchestrator = app(DiscoveryOrchestrator::class);
         $method = new \ReflectionMethod($orchestrator, 'sortLeadsPayload');
         $method->setAccessible(true);
 

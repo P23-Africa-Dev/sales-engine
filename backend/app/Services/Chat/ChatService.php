@@ -23,6 +23,8 @@ use App\Services\Llm\GlmClient;
 use App\Services\Outreach\OutreachDraftService;
 use App\Services\Research\ResearchOrchestrator;
 use App\Services\Usage\UsageService;
+use App\Support\UserFacingError;
+use Illuminate\Support\Facades\Log;
 use InvalidArgumentException;
 
 class ChatService
@@ -690,19 +692,21 @@ class ChatService
         } catch (\Throwable $e) {
             $placeholder = $this->assistantMessageForRun($session->id, $userMessage->id, $run->id);
 
+            // The raw exception goes to the log; the user gets words they can act on.
+            $userError = UserFacingError::from($e, "Sorry, that request didn't go through. Please try again in a moment.", ['run_id' => $run->id]);
             if ($placeholder) {
                 $placeholder->update([
-                    'body' => 'Sorry, that request failed: '.$e->getMessage(),
+                    'body' => $userError,
                     'intent' => $intent,
-                    'meta' => array_merge($meta, ['error' => $e->getMessage(), 'pending' => false]),
+                    'meta' => array_merge($meta, ['error' => $userError, 'pending' => false]),
                 ]);
             } else {
                 ChatMessage::query()->create([
                     'chat_session_id' => $session->id,
                     'role' => 'assistant',
-                    'body' => 'Sorry, that request failed: '.$e->getMessage(),
+                    'body' => $userError,
                     'intent' => $intent,
-                    'meta' => array_merge($meta, ['error' => $e->getMessage(), 'pending' => false]),
+                    'meta' => array_merge($meta, ['error' => $userError, 'pending' => false]),
                 ]);
             }
             $session->touch();
@@ -1244,14 +1248,10 @@ class ChatService
 
     private function retrievalDegradedNotice(string $reason): string
     {
-        $cause = match ($reason) {
-            DiscoveryProviderHealth::REASON_CREDITS => 'the web search plan is out of credits',
-            DiscoveryProviderHealth::REASON_UNAUTHORIZED => 'the web search key was rejected',
-            DiscoveryProviderHealth::REASON_RATE_LIMITED => 'web search hit its rate limit',
-            default => 'web search failed on every query',
-        };
+        // The cause (credits, key, rate limit) is an operations problem: log it, don't show it.
+        Log::warning('Discovery ran without live web search', ['reason' => $reason]);
 
-        return "Heads up: {$cause}, so nothing below came from a live web search — only the company database, which cannot confirm location or match your search brief closely. Treat these as unverified until web search is restored.";
+        return 'Heads up: live web search was unavailable for this run, so these results come only from our company database. Their location and fit could not be fully confirmed — run the search again a little later for verified results.';
     }
 
     /**
@@ -1405,7 +1405,7 @@ class ChatService
             $lines[] = '';
         }
 
-        $lines[] = 'Review the cards below (Overall / Search / ICP / Intent scores) and save selected leads to CRM.'.$advisoryNote;
+        $lines[] = 'Review the cards below and save the ones you want to your CRM.'.$advisoryNote;
 
         return trim(implode("\n", $lines));
     }
@@ -1421,7 +1421,7 @@ class ChatService
         }
 
         if ($strongCount === 0) {
-            return " {$total} need review — compare Search / ICP / Intent % on each card before saving.";
+            return " {$total} need review — check the ICP fit on each card before saving.";
         }
 
         return " {$strongCount} strong matches, {$reviewCount} need review.";
@@ -1437,7 +1437,9 @@ class ChatService
         ?int $excludeMessageId = null,
     ): string {
         if (! $this->glm->isConfigured()) {
-            return 'Sales Engine is ready. Configure GLM_API_KEY for full chat, or use generate_leads / quick_research intents once Serper (and optional registries) are keyed.';
+            Log::warning('Chat model is not configured (GLM_API_KEY missing).');
+
+            return 'Chat is temporarily unavailable. You can still use Generate New Prospects, or try again shortly.';
         }
 
         $window = max(1, (int) config('services.chat.history_window', 20));
@@ -1465,7 +1467,7 @@ class ChatService
         try {
             return $this->listNumbering->normalize($this->glm->chat($messages, 'chat', $organization));
         } catch (\Throwable $e) {
-            return 'Chat temporarily unavailable: '.$e->getMessage();
+            return UserFacingError::from($e, 'Chat is temporarily unavailable. Please try again in a moment.', ['session_id' => $session->id]);
         }
     }
 }

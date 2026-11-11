@@ -55,7 +55,7 @@ describe("social-listening-empty-state", () => {
     expect(state?.showActions).toBe(true);
   });
 
-  it("returns scan_failed with run error message", () => {
+  it("returns scan_failed without echoing system error text", () => {
     const latestRun: SocialListeningRunStatus = {
       id: 2,
       status: "failed",
@@ -65,7 +65,8 @@ describe("social-listening-empty-state", () => {
     const state = getSocialListeningEmptyState(latestRun, "2026-01-01T00:00:00Z", false);
 
     expect(state?.variant).toBe("scan_failed");
-    expect(state?.description).toContain("Serper quota exceeded");
+    expect(state?.description).not.toContain("Serper");
+    expect(state?.description).toContain("couldn't finish this scan");
     expect(state?.showActions).toBe(true);
   });
 
@@ -98,35 +99,19 @@ describe("social-listening-empty-state", () => {
       "We monitor public posts for buying signals that fit your active ICP."
     );
   });
-  it("breaks down posts the AI judged not to be openings", () => {
+  it("does not list why posts were dropped", () => {
     const latestRun: SocialListeningRunStatus = {
       id: 4,
       status: "completed",
       signals_created: 0,
-      result_summary: {
-        totalChecked: 12,
-        qualified: 0,
-        rejected: {
-          icpMismatch: 0,
-          missingSourceUrl: 0,
-          missingSourceDate: 0,
-          stale: 0,
-          notActionable: 9,
-          duplicate: 3,
-          total: 12,
-        },
-        rejectedDetail: { not_a_buyer: 4, self_promotion: 2 },
-      },
+      result_summary: { totalChecked: 12, qualified: 0 },
     };
 
     const state = getSocialListeningEmptyState(latestRun, "2026-01-01T00:00:00Z", false);
 
-    expect(state?.title).toBe("No opportunities kept");
-    expect(state?.description).toContain("checked 12 recent posts");
-    expect(state?.description).toContain("4 were vendors, recruiters or news, not buyers");
-    expect(state?.description).toContain("2 were vendor promotions");
-    expect(state?.description).toContain("3 weren't a concrete opening");
-    expect(state?.description).toContain("3 were already in your feed");
+    expect(state?.title).toBe("Nothing new worth your time yet");
+    expect(state?.description).toContain("We'll keep listening");
+    expect(state?.description).not.toMatch(/vendors|rejected|dropped|\d+ were/i);
   });
 
   it("says when the qualifying model was unavailable", () => {
@@ -137,13 +122,13 @@ describe("social-listening-empty-state", () => {
       result_summary: {
         totalChecked: 6,
         qualified: 0,
-        rejected: { icpMismatch: 0, missingSourceUrl: 0, missingSourceDate: 0, stale: 0, notActionable: 6, total: 6 },
         model_unavailable: true,
       },
     };
 
     const state = getSocialListeningEmptyState(latestRun, "2026-01-01T00:00:00Z", false);
 
-    expect(state?.description).toContain("isn't available right now");
+    expect(state?.description).toContain("couldn't review new posts");
+    expect(state?.description).not.toContain("AI");
   });
 });

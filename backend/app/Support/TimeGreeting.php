@@ -53,8 +53,8 @@ class TimeGreeting
 
         return sprintf(
             'Current user local time: %s (%s). Clock shows %s. '
-                . 'When you mention the current time or date, always use exactly this local time (%s) and always write times in 12-hour AM/PM form (e.g. "10:16 PM") — never a 24-hour clock. '
-                . 'Use "%s" (or "Hello") when greeting — never "Good morning" after 11:59, never "Good afternoon" before noon or after 17:00, never "Good evening" before 17:00.',
+                .'When you mention the current time or date, always use exactly this local time (%s) and always write times in 12-hour AM/PM form (e.g. "10:16 PM") — never a 24-hour clock. '
+                .'Use "%s" (or "Hello") when greeting — never "Good morning" after 11:59, never "Good afternoon" before noon or after 17:00, never "Good evening" before 17:00.',
             $dated,
             $tz,
             $clock,

@@ -239,7 +239,6 @@ class EnrichLeadContactsJob implements ShouldQueue
             'contact_status' => $meta['contact_status'],
             'contact_ready' => $meta['contact_ready'],
             'contact_enrichment_tier' => $meta['contact_enrichment_tier'] ?? null,
-            'contact_enrichment_provider' => $meta['contact_enrichment_provider'] ?? null,
         ], fn ($value) => $value !== null && $value !== '');
     }
 

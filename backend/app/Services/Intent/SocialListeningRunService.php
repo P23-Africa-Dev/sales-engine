@@ -6,8 +6,8 @@ use App\Jobs\RunSocialListeningJob;
 use App\Models\IcpProfile;
 use App\Models\Organization;
 use App\Models\SocialListeningRun;
-use App\Models\SocialListeningSetting;
 use App\Models\User;
+use App\Support\UserFacingError;
 
 class SocialListeningRunService
 {
@@ -119,11 +119,33 @@ class SocialListeningRunService
             'status' => $run->status,
             'stages' => $run->stages,
             'signals_created' => $run->signals_created,
-            'result_summary' => $run->result_summary,
-            'error' => $run->error,
+            'result_summary' => SocialListeningRunService::publicSummary($run->result_summary),
+            'error' => UserFacingError::fromStored($run->error, 'We couldn\'t finish this scan. Please try Scan now again in a few minutes.'),
             'started_at' => $run->started_at?->toIso8601String(),
             'finished_at' => $run->finished_at?->toIso8601String(),
         ];
+    }
+
+    /**
+     * The scan outcome a user needs (how many posts were reviewed, how many qualified,
+     * contact lookups). Rejection buckets, sources and feedback stay server-side.
+     *
+     * @return array<string, mixed>|string|null
+     */
+    public static function publicSummary(mixed $summary): array|string|null
+    {
+        if (! is_array($summary)) {
+            // Legacy runs stored a sentence; it never carried diagnostics worth hiding.
+            return is_string($summary) ? null : $summary;
+        }
+
+        return array_intersect_key($summary, array_flip([
+            'totalChecked',
+            'qualified',
+            'enrichment',
+            'budget_exhausted',
+            'model_unavailable',
+        ]));
     }
 
     private function failStaleQueuedRuns(Organization $organization, IcpProfile $icp): void

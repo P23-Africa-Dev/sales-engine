@@ -60,9 +60,7 @@ class LeadResource extends JsonResource
             'contact_enrichment_tier' => isset($meta['contact_enrichment_tier']) && trim((string) $meta['contact_enrichment_tier']) !== ''
                 ? trim((string) $meta['contact_enrichment_tier'])
                 : null,
-            'contact_enrichment_provider' => isset($meta['contact_enrichment_provider']) && trim((string) $meta['contact_enrichment_provider']) !== ''
-                ? trim((string) $meta['contact_enrichment_provider'])
-                : null,
+            // Which vendor found a contact is operations data; users see contact_sources instead.
             'icp_relevance_reason' => isset($meta['icp_relevance_reason']) && trim((string) $meta['icp_relevance_reason']) !== ''
                 ? trim((string) $meta['icp_relevance_reason'])
                 : null,

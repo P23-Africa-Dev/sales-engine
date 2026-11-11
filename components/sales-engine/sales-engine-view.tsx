@@ -360,11 +360,11 @@ const INTENT_MODE_CONFIG: Record<
 
 const weekDays = ["Mon", "Tues", "Weds", "Thurs", "Fri", "Sat"];
 const SOURCE_SETTING_OPTIONS = [
-  { key: "linkedin_public", label: "LinkedIn public index" },
-  { key: "x_mentions", label: "X/Twitter mentions" },
-  { key: "reddit", label: "Reddit communities" },
-  { key: "meta_pages", label: "Meta business pages" },
-  { key: "meta_graph_pages", label: "Meta pages (direct monitoring)" },
+  { key: "linkedin_public", label: "LinkedIn" },
+  { key: "x_mentions", label: "X (Twitter)" },
+  { key: "reddit", label: "Reddit" },
+  { key: "meta_pages", label: "Facebook & Instagram pages" },
+  { key: "meta_graph_pages", label: "Specific Facebook pages you choose" },
 ] as const;
 
 const INTENT_SETTING_OPTIONS = [
@@ -1052,11 +1052,7 @@ function LeadInlineResults({
                       {lead.contact_enrichment_tier && lead.contact_enrichment_tier !== "seed" && (
                         <span
                           className="inline-flex w-fit rounded-full bg-[#eef6f2] px-1 py-0.2 text-[6.5px] font-semibold text-[#087652]"
-                          title={
-                            lead.contact_enrichment_provider
-                              ? `Contact via ${lead.contact_enrichment_provider}`
-                              : "Contact enrichment source"
-                          }
+                          title="How we found these contact details"
                         >
                           {lead.contact_enrichment_tier === "tier1"
                             ? "Web"
@@ -1158,11 +1154,7 @@ function LeadInlineResults({
                       {lead.contact_enrichment_tier && lead.contact_enrichment_tier !== "seed" && (
                         <span
                           className="mt-0.5 inline-flex w-fit rounded-full bg-[#eef6f2] px-1.5 py-0.5 text-[7px] font-semibold text-[#087652]"
-                          title={
-                            lead.contact_enrichment_provider
-                              ? `Contact via ${lead.contact_enrichment_provider}`
-                              : "Contact enrichment source"
-                          }
+                          title="How we found these contact details"
                         >
                           {lead.contact_enrichment_tier === "tier1"
                             ? "Contact from web"
@@ -4150,28 +4142,37 @@ function ListeningSettingsModal({
               <section className="rounded-[18px] border border-white/10 bg-white/[0.04] p-4">
                 <p className="text-[13px] font-semibold">Sources monitored</p>
                 <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                  {SOURCE_SETTING_OPTIONS.map((sourceOption) => (
-                    <label
-                      key={sourceOption.key}
-                      className="flex items-center gap-2 rounded-[12px] bg-white/[0.05] px-3 py-2 text-[12px] text-white/75"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={enabledSources.includes(sourceOption.key)}
-                        onChange={() => toggleSource(sourceOption.key)}
-                        className="accent-[#8dec66]"
-                      />
-                      {sourceOption.label}
-                    </label>
-                  ))}
+                  {SOURCE_SETTING_OPTIONS.filter(
+                    (sourceOption) =>
+                      settings?.source_availability?.find((item) => item.key === sourceOption.key)?.offered !== false
+                  ).map((sourceOption) => {
+                    const availability = settings?.source_availability?.find((item) => item.key === sourceOption.key);
+                    const temporarilyDown =
+                      enabledSources.includes(sourceOption.key) && availability?.available === false;
+                    return (
+                      <label
+                        key={sourceOption.key}
+                        className="flex items-center gap-2 rounded-[12px] bg-white/[0.05] px-3 py-2 text-[12px] text-white/75"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={enabledSources.includes(sourceOption.key)}
+                          onChange={() => toggleSource(sourceOption.key)}
+                          className="accent-[#8dec66]"
+                        />
+                        <span className="min-w-0 flex-1">{sourceOption.label}</span>
+                        {temporarilyDown && (
+                          <span
+                            className="shrink-0 rounded-full bg-white/10 px-2 py-0.5 text-[10px] text-white/55"
+                            title="We'll keep scanning your other sources and pick this one up again automatically."
+                          >
+                            Temporarily unavailable
+                          </span>
+                        )}
+                      </label>
+                    );
+                  })}
                 </div>
-                {(settings?.source_health ?? []).length > 0 && (
-                  <ul className="mt-3 space-y-1 text-[11px] text-white/70">
-                    {settings?.source_health?.map((item) => (
-                      <li key={item.key}>{item.label}: {item.status}{item.reason ? ` · ${item.reason}` : ""}</li>
-                    ))}
-                  </ul>
-                )}
                 {enabledSources.includes("meta_graph_pages") && (
                   <div className="mt-4">
                     <label
@@ -4181,7 +4182,7 @@ function ListeningSettingsModal({
                       Meta Pages to monitor
                     </label>
                     <p className="mt-1 text-[11px] leading-[15px] text-white/45">
-                      Page ID or @username, one per line. Direct Graph API monitoring of these pages.
+                      Page name, @username or ID — one per line. We'll watch these pages for new posts.
                     </p>
                     <textarea
                       id="meta-page-ids"

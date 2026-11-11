@@ -10,6 +10,7 @@ use App\Services\Discovery\DiscoveryOrchestrator;
 use App\Services\Icp\IcpProfileService;
 use App\Services\Usage\UsageService;
 use App\Support\OrgContext;
+use App\Support\UserFacingError;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -19,6 +20,30 @@ class DiscoveryController extends Controller
         private readonly DiscoveryOrchestrator $discovery,
         private readonly IcpProfileService $icps,
     ) {}
+
+    /**
+     * What the app shows while a search runs. Diagnostics (queries, gate stats, provider
+     * failures, cached hits) stay server-side for developers.
+     *
+     * @return array<string, mixed>|null
+     */
+    public static function publicSummary(mixed $summary): ?array
+    {
+        if (! is_array($summary)) {
+            return null;
+        }
+
+        return array_intersect_key($summary, array_flip([
+            'lead_count',
+            'requested_lead_count',
+            'partial_leads',
+            'partial_lead_count',
+            'progress_message',
+            'searching_countries',
+            'leads_by_country',
+            'continuation_queued',
+        ]));
+    }
 
     public function store(Request $request): JsonResponse
     {
@@ -65,7 +90,7 @@ class DiscoveryController extends Controller
                 'status' => $result['run']->status,
                 'stages' => $result['run']->stages,
                 'leads' => $result['leads'],
-                'result_summary' => $result['run']->result_summary,
+                'result_summary' => self::publicSummary($result['run']->result_summary),
             ],
         ], 201);
     }
@@ -84,9 +109,9 @@ class DiscoveryController extends Controller
                 'query' => $run->query,
                 'intent' => $run->intent,
                 'stages' => $run->stages,
-                'result_summary' => $run->result_summary,
+                'result_summary' => self::publicSummary($run->result_summary),
                 'progress' => $this->resolveProgress($run),
-                'error' => $run->error,
+                'error' => UserFacingError::fromStored($run->error),
                 'started_at' => $run->started_at?->toIso8601String(),
                 'finished_at' => $run->finished_at?->toIso8601String(),
             ],

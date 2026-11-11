@@ -2448,7 +2448,6 @@ class DiscoveryOrchestrator
                 'contact_ready' => $contactReady,
                 'contact_status' => $contactStatus,
                 'contact_enrichment_tier' => $extracted['contact_enrichment_tier'] ?? null,
-                'contact_enrichment_provider' => $extracted['contact_enrichment_provider'] ?? null,
                 'next_action' => $nextAction,
                 'source_url' => $sourceUrl !== '' ? $sourceUrl : null,
                 'save_status' => $lead->save_status,

@@ -19,6 +19,7 @@ use App\Services\Intent\SocialSourceHealth;
 use App\Services\Outreach\OutreachDraftService;
 use App\Services\Outreach\OutreachSendService;
 use App\Support\OrgContext;
+use App\Support\UserFacingError;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -216,7 +217,7 @@ class SocialListeningController extends Controller
                 'last_run_at' => $settings->last_run_at?->toIso8601String(),
                 'cadence_days' => $settings->cadence_days,
                 'freshness_window_days' => min(30, (int) ($settings->freshness_window_days ?? 30)),
-                'source_health' => SocialSourceHealth::describe(
+                'source_availability' => SocialSourceHealth::forUsers(
                     $settings,
                     is_array($latestRun?->result_summary) ? ($latestRun->result_summary['sources'] ?? null) : null,
                 ),
@@ -345,8 +346,8 @@ class SocialListeningController extends Controller
                 'status' => $run->status,
                 'stages' => $run->stages,
                 'signals_created' => $run->signals_created,
-                'result_summary' => $run->result_summary,
-                'error' => $run->error,
+                'result_summary' => SocialListeningRunService::publicSummary($run->result_summary),
+                'error' => UserFacingError::fromStored($run->error, 'We couldn\'t finish this scan. Please try Scan now again in a few minutes.'),
                 'started_at' => $run->started_at?->toIso8601String(),
                 'finished_at' => $run->finished_at?->toIso8601String(),
             ],
@@ -497,7 +498,7 @@ class SocialListeningController extends Controller
             'org_verified_domain' => $setting->org_verified_domain,
             'verification_status' => $setting->verification_status,
             'last_run_at' => $setting->last_run_at?->toIso8601String(),
-            'source_health' => SocialSourceHealth::describe($setting),
+            'source_availability' => SocialSourceHealth::forUsers($setting),
         ];
     }
 

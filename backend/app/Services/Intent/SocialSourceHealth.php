@@ -124,6 +124,34 @@ class SocialSourceHealth
      * @param  list<array<string, mixed>>|null  $runSources
      * @return list<array{key: string, label: string, status: string, attempts: int, hits: int, last_status: int|null, reason: string|null}>
      */
+    /**
+     * What the Listen Settings screen may show: only the sources a user can choose, whether
+     * the platform offers them, and whether they are working right now. Key names, provider
+     * status codes and failure reasons stay server-side (see describe()).
+     *
+     * @return list<array{key: string, offered: bool, available: bool, needs_pages?: bool}>
+     */
+    public static function forUsers(SocialListeningSetting $settings, ?array $runSources = null): array
+    {
+        $selectable = ['linkedin_public', 'x_mentions', 'reddit', 'meta_pages', 'meta_graph_pages'];
+        $rows = [];
+        foreach (self::describe($settings, $runSources) as $row) {
+            $key = (string) ($row['key'] ?? '');
+            if (! in_array($key, $selectable, true)) {
+                continue;
+            }
+            $status = (string) ($row['status'] ?? '');
+            $rows[] = array_filter([
+                'key' => $key,
+                'offered' => $status !== self::MISSING_KEY,
+                'available' => in_array($status, ['ready', self::DISABLED, self::NEEDS_PAGE_IDS], true),
+                'needs_pages' => $status === self::NEEDS_PAGE_IDS ? true : null,
+            ], static fn ($value): bool => $value !== null);
+        }
+
+        return $rows;
+    }
+
     public static function describe(SocialListeningSetting $settings, ?array $runSources = null): array
     {
         $enabled = $settings->enabled_sources ?? SocialListeningSetting::DEFAULT_SOURCES;

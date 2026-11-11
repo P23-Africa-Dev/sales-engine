@@ -8,32 +8,39 @@ function makeRun(overrides: Partial<SocialListeningRunStatus> = {}): SocialListe
   return {
     id: 1,
     status: "completed",
-    result_summary: {
-      totalChecked: 10,
-      qualified: 4,
-      rejected: {
-        icpMismatch: 3,
-        missingSourceUrl: 0,
-        missingSourceDate: 2,
-        stale: 1,
-        total: 6,
-      },
-    },
+    result_summary: { totalChecked: 10, qualified: 4 },
     ...overrides,
   };
 }
 
 describe("ScanRunSummaryPanel", () => {
-  it("renders the checked/qualified/rejected breakdown for a structured run", () => {
+  it("announces new opportunities in plain words", () => {
     const html = renderToStaticMarkup(<ScanRunSummaryPanel run={makeRun()} />);
 
-    expect(html).toContain("Checked 10 potential signals");
-    expect(html).toContain("4 qualified");
-    expect(html).toContain("6 rejected");
-    expect(html).toContain("3 didn&#x27;t match your ICP filters");
-    expect(html).toContain("2 had no publish date");
-    expect(html).toContain("1 were too old");
-    expect(html).not.toContain("had no source link");
+    expect(html).toContain("4 new opportunities from your latest scan");
+    expect(html).not.toContain("rejected");
+    expect(html).not.toContain("potential signals");
+  });
+
+  it("keeps an empty scan reassuring, without diagnostics", () => {
+    const html = renderToStaticMarkup(
+      <ScanRunSummaryPanel run={makeRun({ result_summary: { totalChecked: 100, qualified: 0 } })} />
+    );
+
+    expect(html).toContain("Nothing new worth your time yet");
+    expect(html).toContain("keep listening");
+    expect(html).not.toContain("100");
+  });
+
+  it("mentions contact lookups when there are any", () => {
+    const html = renderToStaticMarkup(
+      <ScanRunSummaryPanel
+        run={makeRun({ result_summary: { totalChecked: 12, qualified: 3, enrichment: { found: 2, notFound: 1, pending: 1 } } })}
+      />
+    );
+
+    expect(html).toContain("Contact details found for 2");
+    expect(html).toContain("still looking for 1");
   });
 
   it("renders nothing for a legacy string result_summary", () => {
@@ -45,102 +52,18 @@ describe("ScanRunSummaryPanel", () => {
   });
 
   it("renders nothing while a run is still in progress", () => {
-    const html = renderToStaticMarkup(<ScanRunSummaryPanel run={makeRun({ status: "running" })} />);
-
-    expect(html).toBe("");
+    expect(renderToStaticMarkup(<ScanRunSummaryPanel run={makeRun({ status: "running" })} />)).toBe("");
   });
 
   it("renders nothing when there is no run yet", () => {
-    const html = renderToStaticMarkup(<ScanRunSummaryPanel run={null} />);
-
-    expect(html).toBe("");
+    expect(renderToStaticMarkup(<ScanRunSummaryPanel run={null} />)).toBe("");
   });
 
-  it("renders nothing when the run checked zero hits", () => {
+  it("renders nothing when the run checked zero posts", () => {
     const html = renderToStaticMarkup(
-      <ScanRunSummaryPanel
-        run={makeRun({
-          result_summary: {
-            totalChecked: 0,
-            qualified: 0,
-            rejected: { icpMismatch: 0, missingSourceUrl: 0, missingSourceDate: 0, stale: 0, total: 0 },
-          },
-        })}
-      />
+      <ScanRunSummaryPanel run={makeRun({ result_summary: { totalChecked: 0, qualified: 0 } })} />
     );
 
     expect(html).toBe("");
-  });
-
-  it("includes type-mismatch rejections and contact enrichment counts", () => {
-    const html = renderToStaticMarkup(
-      <ScanRunSummaryPanel
-        run={makeRun({
-          result_summary: {
-            totalChecked: 12,
-            qualified: 3,
-            rejected: {
-              icpMismatch: 2,
-              missingSourceUrl: 0,
-              missingSourceDate: 0,
-              stale: 1,
-              typeMismatch: 4,
-              total: 7,
-            },
-            enrichment: { found: 2, notFound: 1, pending: 0 },
-          },
-        })}
-      />
-    );
-
-    expect(html).toContain("4 weren&#x27;t a real match for the event type");
-    expect(html).toContain("2 contacts found");
-    expect(html).toContain("1 not found");
-  });
-
-  it("says none qualified when every checked hit was rejected", () => {
-    const html = renderToStaticMarkup(
-      <ScanRunSummaryPanel
-        run={makeRun({
-          result_summary: {
-            totalChecked: 5,
-            qualified: 0,
-            rejected: { icpMismatch: 5, missingSourceUrl: 0, missingSourceDate: 0, stale: 0, total: 5 },
-          },
-        })}
-      />
-    );
-
-    expect(html).toContain("None qualified");
-  });
-  it("explains AI rejections and duplicates so the parts add up to the total", () => {
-    const html = renderToStaticMarkup(<ScanRunSummaryPanel run={{
-      id: 9,
-      status: "completed",
-      signals_created: 1,
-      result_summary: {
-        totalChecked: 10,
-        qualified: 1,
-        rejected: {
-          icpMismatch: 0,
-          missingSourceUrl: 0,
-          missingSourceDate: 1,
-          stale: 0,
-          belowMinScore: 1,
-          duplicate: 2,
-          notActionable: 5,
-          total: 9,
-        },
-        rejectedDetail: { not_a_buyer: 2, muted_author: 1, over_enrich_cap: 1 },
-      },
-    }} />);
-
-    expect(html).toContain("9 rejected");
-    expect(html).toContain("1 scored below your minimum score");
-    expect(html).toContain("2 were already in your feed");
-    expect(html).toContain("2 were vendors, recruiters or news, not buyers");
-    expect(html).toContain("1 came from authors you keep dismissing");
-    expect(html).toContain("1 lower-priority post was left for the next scan");
-    expect(html).toContain("1 weren&#x27;t a concrete opening");
   });
 });
