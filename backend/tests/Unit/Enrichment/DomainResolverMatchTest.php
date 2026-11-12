@@ -25,6 +25,8 @@ class DomainResolverMatchTest extends TestCase
             'distinctive word that is not first' => ['paytech.ng', 'Payment Technology Limited (PAYTECH)', true],
             'listing site is not the company' => ['capboard.io', 'Exponential Impact', false],
             'all-generic name is not a substring match' => ['centralbanking.com', 'Central Bank of Nigeria', false],
+            'industry word is not the company (live case)' => ['engineeringnews.co.za', 'Malben Engineering', false],
+            'distinctive word still matches' => ['malben.co.za', 'Malben Engineering', true],
             'name plus legal suffix in host' => ['eesolutionslimited.africa', 'EE SOLUTIONS LTD', true],
         ];
     }

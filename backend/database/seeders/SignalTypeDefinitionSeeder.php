@@ -149,6 +149,44 @@ class SignalTypeDefinitionSeeder extends Seeder
                 'default_recency_window_days' => 180,
                 'active' => true,
             ],
+            [
+                'key' => 'hiring_job_post',
+                'label' => 'Hiring / Job Post',
+                'trigger_description' => 'A named company advertises an open role in the target territory or in a specialisation '
+                    .'the account serves, showing it is building that capability now.',
+                'example_valid' => '"Company X is hiring a Sales Manager, East Africa (Nairobi)" job post, dated, company named.',
+                'example_invalid' => 'A recruitment agency ad with the employer withheld, or a generic "jobs in Kenya" list — reject.',
+                'pack' => SignalTypeDefinition::PACK_DEFAULT,
+                'feeds_enrichment' => false,
+                'default_recency_window_days' => 45,
+                'active' => true,
+            ],
+
+            // --- Manufacturing template: manufacturers building a presence abroad ---
+            [
+                'key' => 'trade_fair_exhibitor',
+                'label' => 'Trade Fair Exhibitor',
+                'trigger_description' => 'A named company announces it is exhibiting at, or attending as a delegation, a trade '
+                    .'fair or industry expo in the target territory, showing it is building business there.',
+                'example_valid' => '"Company X will exhibit its packaging lines at Propak West Africa in Lagos" (dated, company named).',
+                'example_invalid' => 'An event organiser listing "200 exhibitors expected" with no named company — reject.',
+                'pack' => SignalTypeDefinition::PACK_MANUFACTURING,
+                'feeds_enrichment' => false,
+                'default_recency_window_days' => 120,
+                'active' => true,
+            ],
+            [
+                'key' => 'local_plant_or_assembly',
+                'label' => 'Local Plant or Assembly',
+                'trigger_description' => 'A named company announces a factory, assembly line, warehouse or service centre in '
+                    .'the target territory.',
+                'example_valid' => '"Company X opens a tractor assembly plant in Kenya" (dated, company named).',
+                'example_invalid' => 'A government report on "industrial parks attracting investors" with no named company — reject.',
+                'pack' => SignalTypeDefinition::PACK_MANUFACTURING,
+                'feeds_enrichment' => false,
+                'default_recency_window_days' => 180,
+                'active' => true,
+            ],
 
             // --- Case Study 1: software development company targeting UK/US businesses ---
             [

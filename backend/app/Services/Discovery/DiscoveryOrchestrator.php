@@ -148,7 +148,7 @@ class DiscoveryOrchestrator
         array $seedHitSnapshots = [],
         ?string $entityMode = null,
     ): array {
-        $briefSeed = IcpBrief::fromIcpProfile($icp, $query, $entityMode);
+        $briefSeed = IcpBrief::fromIcpProfile($icp, $query, $entityMode)->forCompanySearch();
         if ($searchQueryOverride !== null && trim($searchQueryOverride) !== '') {
             $briefSeed = $briefSeed->withSearchQueryOverride(trim($searchQueryOverride));
         }

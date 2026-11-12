@@ -552,6 +552,7 @@ class ScoringService
             decisionMakers: $brief->decisionMakers,
             exclusions: $brief->exclusions,
             minMatchScore: $brief->minMatchScore,
+            companyLocations: $brief->companyLocations,
         );
     }
 

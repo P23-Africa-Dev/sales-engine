@@ -38,6 +38,11 @@ readonly class IcpBrief
         public array $exclusions = [],
         /** True when the user chose the entity mode explicitly (UI picker) — never re-guessed or switched. */
         public bool $targetLocked = false,
+        /**
+         * @var list<string> Where the target companies are based (e.g. Germany, Netherlands). Optional:
+         *                   `territories` stays the market they sell into / expand into / where events happen.
+         */
+        public array $companyLocations = [],
     ) {}
 
     /**
@@ -82,6 +87,10 @@ readonly class IcpBrief
                 $config['exclusions'] ?? [],
             ))),
             targetLocked: $explicitTarget !== null,
+            companyLocations: array_values(array_filter(array_map(
+                static fn ($location) => is_string($location) ? trim($location) : '',
+                $config['companyLocations'] ?? [],
+            ))),
         );
     }
 
@@ -109,7 +118,18 @@ readonly class IcpBrief
             searchKeywords: $this->searchKeywords,
             exclusions: $this->exclusions,
             targetLocked: $this->targetLocked,
+            companyLocations: $this->companyLocations,
         );
+    }
+
+    /**
+     * For finding companies directly (lead search): when the ICP says where the companies are
+     * based, that is where to look; the target territory ("expanding into Africa") stays in the
+     * ICP's own wording and in signal search, not in the company geography.
+     */
+    public function forCompanySearch(): self
+    {
+        return $this->companyLocations === [] ? $this : $this->withTerritories($this->companyLocations);
     }
 
     /**
@@ -138,6 +158,7 @@ readonly class IcpBrief
             searchKeywords: $this->searchKeywords,
             exclusions: $this->exclusions,
             targetLocked: $this->targetLocked,
+            companyLocations: $this->companyLocations,
         );
     }
 
@@ -165,6 +186,7 @@ readonly class IcpBrief
             searchKeywords: $this->searchKeywords,
             exclusions: $this->exclusions,
             targetLocked: $this->targetLocked,
+            companyLocations: $this->companyLocations,
         );
     }
 

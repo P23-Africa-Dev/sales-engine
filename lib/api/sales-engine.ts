@@ -537,6 +537,8 @@ export function suggestIcpSearchBrief(payload: {
   description?: string;
   industries?: string[];
   territories?: string[];
+  /** Where the target companies are based (optional). */
+  companyLocations?: string[];
   decisionMakers?: string[];
   companySizes?: string[];
   minMatchScore?: number;
@@ -1435,6 +1437,8 @@ export type SocialListeningRunResultSummary = {
   sources_unavailable?: boolean;
   /** Real openings that scored under the minimum, kept as "possible openings". */
   possible?: number;
+  /** Verified company events from ICP-fitting companies, listed on the Opportunities screen. */
+  opportunities?: number;
   /** Server-side diagnostics; no longer sent to the browser. */
   rejected?: {
     icpMismatch: number;
@@ -1793,7 +1797,49 @@ export type SignalTypeDefinitionApi = {
   triggerDescription?: string;
   feedsEnrichment?: boolean;
   recencyWindowDays?: number;
+  exampleValid?: string | null;
+  exampleInvalid?: string | null;
+  active?: boolean;
+  /** Who to contact for this event; empty = the ICP's decision makers. */
+  targetRoles?: string[];
+  /** News search wording with {industry} / {territory} / {role} placeholders. */
+  searchPhrases?: string[];
+  /** The account's own row: a custom type, or its edit of a built-in one. */
+  isOwn?: boolean;
 };
+
+export type SignalTypeInput = {
+  label?: string;
+  triggerDescription?: string;
+  recencyWindowDays?: number;
+  active?: boolean;
+  pack?: string;
+  targetRoles?: string[];
+  searchPhrases?: string[];
+};
+
+/** Every event type the account can edit (built-in and its own), including switched-off ones. */
+export function listManagedSignalTypes(): Promise<SignalTypeDefinitionApi[]> {
+  return withSessionRetry(async () => {
+    const data = await seRequest<SignalTypeDefinitionApi[]>({ method: "GET", path: "/signal-types/manage" });
+    return data ?? [];
+  });
+}
+
+export function createSignalType(input: SignalTypeInput): Promise<SignalTypeDefinitionApi> {
+  return withSessionRetry(() => seRequest<SignalTypeDefinitionApi>({ method: "POST", path: "/signal-types", body: input }));
+}
+
+export function updateSignalType(key: string, input: SignalTypeInput): Promise<SignalTypeDefinitionApi> {
+  return withSessionRetry(() =>
+    seRequest<SignalTypeDefinitionApi>({ method: "PUT", path: `/signal-types/${encodeURIComponent(key)}`, body: input })
+  );
+}
+
+/** Deletes a custom type, or puts an edited built-in type back to the built-in version. */
+export function deleteSignalType(key: string): Promise<unknown> {
+  return withSessionRetry(() => seRequest({ method: "DELETE", path: `/signal-types/${encodeURIComponent(key)}` }));
+}
 
 export function listSignalTypes(icpProfileId?: string): Promise<SignalTypeDefinitionApi[]> {
   return withSessionRetry(async () => {
@@ -2126,4 +2172,87 @@ export async function fetchPendingReviewLeads(icpProfileId?: string): Promise<Ch
     }
     return items;
   });
+}
+
+// ── Opportunities: verified company events whose company fits the ICP ─────────
+
+export type OpportunityContactStatus = "enriched" | "company_only" | "no_contact_found" | "searching";
+
+export type OpportunityApi = {
+  id: number;
+  company: string | null;
+  signal: string | null;
+  signalTypeKey: string | null;
+  detail: string | null;
+  territory: string | null;
+  signalDate: string | null;
+  sourceUrl: string | null;
+  source: string | null;
+  /** "qualified" = every ICP check confirmed; "partial" = none failed, some unknown. */
+  icpStatus: "qualified" | "partial" | string | null;
+  icpChecks: Record<string, "verified" | "unknown" | "contradicted" | string>;
+  companyProfile: {
+    industry: string | null;
+    size: string | null;
+    headquarters: string | null;
+    website: string | null;
+    linkedinUrl: string | null;
+  };
+  contact: {
+    name: string | null;
+    role: string | null;
+    email: string | null;
+    /** verified | likely | found_on_website | search_result */
+    emailStatus: string | null;
+    phone: string | null;
+    linkedinUrl: string | null;
+  };
+  contactStatus: OpportunityContactStatus | string;
+  status: string;
+  savedAsLead: boolean;
+};
+
+export type OpportunityFilters = {
+  icp_status?: "qualified" | "partial";
+  contact_status?: OpportunityContactStatus;
+  signal_type?: string;
+  page?: number;
+};
+
+function opportunityQuery(filters: OpportunityFilters): string {
+  const query = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== "") query.set(key, String(value));
+  });
+  const qs = query.toString();
+  return qs ? `?${qs}` : "";
+}
+
+export function fetchOpportunities(
+  filters: OpportunityFilters = {},
+): Promise<{ items: OpportunityApi[]; meta: PaginatedMeta }> {
+  return withSessionRetry(async () => {
+    const result = await seRequestPaginated<OpportunityApi>({ method: "GET", path: `/opportunities${opportunityQuery(filters)}` });
+    return { items: result.data ?? [], meta: result.meta };
+  });
+}
+
+/** The current list as a CSV file (same filters as the screen). */
+export async function downloadOpportunitiesCsv(filters: OpportunityFilters = {}): Promise<{ blob: Blob; filename: string }> {
+  const token = getSalesEngineToken();
+  if (!token) {
+    throw new SalesEngineApiError("Sales Engine session is not ready.", 401);
+  }
+  const orgId = getSalesEngineOrgId();
+  const { page: _page, ...rest } = filters;
+  void _page;
+  const response = await fetch(`${SALES_ENGINE_API_BASE_URL}/opportunities/export${opportunityQuery(rest)}`, {
+    method: "GET",
+    headers: { Authorization: `Bearer ${token}`, Accept: "text/csv", ...(orgId ? { "X-Organization-Id": orgId } : {}) },
+  });
+  if (!response.ok) {
+    throw new SalesEngineApiError(`Export failed (${response.status}).`, response.status);
+  }
+
+  return { blob: await response.blob(), filename: "opportunities.csv" };
 }

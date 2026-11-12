@@ -97,6 +97,8 @@ return [
         'evidence_check' => (bool) env('LEAD_EVIDENCE_CHECK', true),
         // Fill missing role/employer of people from their own LinkedIn result before scoring.
         'person_headlines' => (bool) env('LEAD_PERSON_HEADLINES', true),
+        // Check the one contact email on a signal with Hunter's verifier (needs HUNTER_API_KEY).
+        'verify_emails' => (bool) env('CONTACT_VERIFY_EMAILS', true),
     ],
 
     'bytemine' => [

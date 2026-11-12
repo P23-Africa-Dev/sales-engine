@@ -58,6 +58,12 @@ export function ScanRunSummaryPanel({ run }: ScanRunSummaryPanelProps) {
           <p className="text-[10px] font-semibold leading-[13px]">{title}</p>
           <p className="mt-1 text-[9px] leading-[12px] text-[#616263]">{description}</p>
           {contactLine && <p className="mt-1 text-[9px] leading-[12px] text-[#616263]">{contactLine}</p>}
+          {(run.result_summary.opportunities ?? 0) > 0 && (
+            <p className="mt-1 text-[9px] font-medium leading-[12px] text-[#09232d]">
+              {run.result_summary.opportunities} {run.result_summary.opportunities === 1 ? "is a company event" : "are company events"} from
+              companies that fit your ICP: see Opportunities.
+            </p>
+          )}
         </div>
       </div>
     </div>

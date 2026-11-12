@@ -21,6 +21,13 @@ class SignalTypeDefinitionResource extends JsonResource
             'triggerDescription' => $this->trigger_description,
             'feedsEnrichment' => (bool) $this->feeds_enrichment,
             'recencyWindowDays' => (int) $this->default_recency_window_days,
+            'exampleValid' => $this->example_valid,
+            'exampleInvalid' => $this->example_invalid,
+            'active' => (bool) $this->active,
+            'targetRoles' => $this->target_roles ?? [],
+            'searchPhrases' => $this->search_phrases ?? [],
+            // The organisation's own row: a custom type, or its edit of a built-in one.
+            'isOwn' => $this->organization_id !== null,
         ];
     }
 }

@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Jobs\RunSocialListeningJob;
 use App\Models\IcpProfile;
 use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
@@ -58,7 +59,7 @@ class IcpProfileTest extends TestCase
         $this->assertTrue($b->fresh()->is_active);
         $this->assertSame(1, IcpProfile::query()->where('organization_id', $org->id)->where('is_active', true)->count());
 
-        Queue::assertPushed(\App\Jobs\RunSocialListeningJob::class);
+        Queue::assertPushed(RunSocialListeningJob::class);
     }
 
     public function test_org_isolation_blocks_cross_org_icp_access(): void
@@ -94,5 +95,23 @@ class IcpProfileTest extends TestCase
             ->assertJsonPath('data.name', 'Original (Copy)')
             ->assertJsonPath('data.isActive', false)
             ->assertJsonPath('data.config.industries.0', 'Fintech');
+    }
+
+    public function test_where_companies_are_based_is_saved_with_the_icp(): void
+    {
+        [, $org] = $this->actingAsOrgMember();
+
+        $response = $this->withHeaders($this->orgHeaders($org))
+            ->postJson('/api/v1/icp-profiles', [
+                'name' => 'Exporters into Africa',
+                'config' => [
+                    'industries' => ['Industrial Manufacturing'],
+                    'territories' => ['Africa'],
+                    'companyLocations' => ['Germany', 'Netherlands'],
+                ],
+            ]);
+
+        $response->assertCreated();
+        $this->assertSame(['Germany', 'Netherlands'], IcpProfile::query()->latest('id')->first()->config['companyLocations']);
     }
 }

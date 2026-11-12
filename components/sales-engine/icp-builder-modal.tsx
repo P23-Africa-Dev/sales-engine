@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { SignalTypeEditor } from "@/components/sales-engine/signal-type-editor";
 import {
   X,
   Sparkles,
@@ -57,6 +58,8 @@ export type IcpConfig = {
   companySizes: string[];
   revenueRanges: string[];
   territories: string[];
+  /** Where the target companies are based (optional). `territories` = where they sell / expand / act. */
+  companyLocations?: string[];
   decisionMakers: string[];
   minMatchScore: number;
   autoSyncCrm: boolean;
@@ -89,6 +92,7 @@ const BLANK_ICP_CONFIG: IcpConfig = {
   companySizes: ["51-200"],
   revenueRanges: ["$1M - $10M"],
   territories: ["Lagos, Nigeria"],
+  companyLocations: [],
   decisionMakers: ["Head of Sales"],
   minMatchScore: 60,
   autoSyncCrm: true,
@@ -107,6 +111,7 @@ export function normalizeIcpConfig(config?: Partial<IcpConfig> | null): IcpConfi
     companySizes: Array.isArray(config?.companySizes) ? config.companySizes : BLANK_ICP_CONFIG.companySizes,
     revenueRanges: Array.isArray(config?.revenueRanges) ? config.revenueRanges : BLANK_ICP_CONFIG.revenueRanges,
     territories: Array.isArray(config?.territories) ? config.territories : BLANK_ICP_CONFIG.territories,
+    companyLocations: Array.isArray(config?.companyLocations) ? config.companyLocations : [],
     decisionMakers: Array.isArray(config?.decisionMakers) ? config.decisionMakers : BLANK_ICP_CONFIG.decisionMakers,
     minMatchScore: typeof config?.minMatchScore === "number" ? config.minMatchScore : 60,
     autoSyncCrm: config?.autoSyncCrm ?? true,
@@ -210,6 +215,11 @@ const AVAILABLE_SIGNAL_TYPE_PACKS: Array<{ value: string; label: string; descrip
     description: "For raising money: new funds and investment theses, plus grant, accelerator and competition calls.",
   },
   {
+    value: "manufacturing_export",
+    label: "Manufacturing Expansion",
+    description: "Manufacturers exhibiting at trade fairs, or opening plants and assembly, in your territories.",
+  },
+  {
     value: "lagos_corporate_transport",
     label: "Lagos Corporate Transport",
     description: "New embassy/consulate presence, expat relocation, Lagos-based leadership hires, foreign market entry into Lagos.",
@@ -240,6 +250,7 @@ export function IcpBuilderModal({
   const [customIndustryInput, setCustomIndustryInput] = useState("");
   const [customRoleInput, setCustomRoleInput] = useState("");
   const [customTerritoryInput, setCustomTerritoryInput] = useState("");
+  const [companyLocationInput, setCompanyLocationInput] = useState("");
   const [geoSuggestions, setGeoSuggestions] = useState<
     Array<{ label: string; type: string; country: string; gl: string }>
   >([]);
@@ -518,6 +529,25 @@ export function IcpBuilderModal({
       return;
     }
     activateProfile.mutate(profile.id);
+  };
+
+  const addCompanyLocation = () => {
+    const value = companyLocationInput.trim();
+    if (!value) return;
+    setFormConfig((prev) => {
+      const current = prev.companyLocations ?? [];
+      return current.some((place) => place.toLowerCase() === value.toLowerCase())
+        ? prev
+        : { ...prev, companyLocations: [...current, value] };
+    });
+    setCompanyLocationInput("");
+  };
+
+  const removeCompanyLocation = (place: string) => {
+    setFormConfig((prev) => ({
+      ...prev,
+      companyLocations: (prev.companyLocations ?? []).filter((item) => item !== place),
+    }));
   };
 
   const toggleArrayItem = (key: keyof IcpConfig, item: string) => {
@@ -1378,6 +1408,9 @@ export function IcpBuilderModal({
                       <Users size={15} className="text-gray-400" />
                       Target Company Size (Employees)
                     </label>
+                    <p className="text-[10px] text-gray-500">
+                      Checked against the company&apos;s public profile when it shows a size. An unknown size never rules a company out.
+                    </p>
                     <div className="grid grid-cols-5 gap-2">
                       {AVAILABLE_COMPANY_SIZES.map((size) => {
                         const isSelected = formConfig.companySizes.includes(size.label);
@@ -1411,6 +1444,9 @@ export function IcpBuilderModal({
                     <label className="text-[12px] font-semibold text-gray-700">
                       Estimated Annual Revenue Range
                     </label>
+                    <p className="text-[10px] text-gray-500">
+                      Only used when revenue is publicly available (rare for private companies). Unknown never rules a company out.
+                    </p>
                     <div className="flex flex-wrap gap-2">
                       {AVAILABLE_REVENUE_RANGES.map((rev) => {
                         const isSelected = formConfig.revenueRanges.includes(rev);
@@ -1429,6 +1465,56 @@ export function IcpBuilderModal({
                           </button>
                         );
                       })}
+                    </div>
+                  </div>
+
+                  {/* Where the companies are based (optional) */}
+                  <div className="space-y-2.5">
+                    <label className="flex items-center gap-1.5 text-[12px] font-semibold text-gray-700">
+                      <Building2 size={15} className="text-gray-400" />
+                      Where are these companies based? (optional)
+                    </label>
+                    <p className="text-[10px] text-gray-500">
+                      Use this when the companies are based somewhere other than the market below, e.g. based in Germany, expanding into Africa. Leave empty if they are in the same place.
+                    </p>
+                    {(formConfig.companyLocations ?? []).length > 0 && (
+                      <div className="flex flex-wrap gap-2">
+                        {(formConfig.companyLocations ?? []).map((place) => (
+                          <button
+                            key={place}
+                            type="button"
+                            onClick={() => removeCompanyLocation(place)}
+                            className="flex items-center gap-1 rounded-full bg-[#09232D] px-3 py-1.5 text-[12px] font-medium text-white cursor-pointer"
+                            aria-label={`Remove ${place}`}
+                          >
+                            {place}
+                            <X size={12} className="text-white/60" />
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={companyLocationInput}
+                        onChange={(e) => setCompanyLocationInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            addCompanyLocation();
+                          }
+                        }}
+                        placeholder="Country or region (e.g. Germany, Netherlands, Europe)…"
+                        className="flex-1 rounded-xl border border-gray-200 bg-[#F6F6F6] px-3.5 py-2 text-[12px] text-[#09232D] outline-none placeholder:text-gray-400 focus:border-[#09232D]/30 focus:bg-white"
+                        autoComplete="off"
+                      />
+                      <button
+                        type="button"
+                        onClick={addCompanyLocation}
+                        className="rounded-xl border border-gray-300 bg-white px-3 py-2 text-[12px] font-medium text-gray-700 hover:bg-gray-50 cursor-pointer"
+                      >
+                        Add
+                      </button>
                     </div>
                   </div>
 
@@ -1621,6 +1707,7 @@ export function IcpBuilderModal({
                         );
                       })}
                     </div>
+                    <SignalTypeEditor packs={formConfig.signalTypePacks ?? []} />
                   </div>
 
                   {/* What we search for */}

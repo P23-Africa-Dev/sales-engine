@@ -56,10 +56,11 @@ class SignalTypeRegistry
             return collect($global)->values();
         }
 
+        // Inactive org rows are kept here so an organisation can switch a built-in type off;
+        // inactive results are dropped after the merge below.
         $orgOverrides = SignalTypeDefinition::query()
             ->where('organization_id', $organizationId)
             ->whereIn('pack', $packs)
-            ->where('active', true)
             ->get()
             ->keyBy('key')
             ->all();
@@ -68,7 +69,32 @@ class SignalTypeRegistry
         // Collection::merge — the latter dedupes by model ID, so a same-key
         // override with a different ID would append instead of replacing);
         // anything only defined globally, or only defined by the org, stays as-is.
-        return collect(array_merge($global, $orgOverrides))->values();
+        return collect(array_merge($global, $orgOverrides))
+            ->filter(static fn (SignalTypeDefinition $definition): bool => (bool) $definition->active)
+            ->values();
+    }
+
+    /**
+     * Every signal type an organisation can see or edit, across all packs: built-in rows with
+     * the organisation's own rows (edits, switched-off types and custom types) laid over them.
+     *
+     * @return Collection<int, SignalTypeDefinition>
+     */
+    public function allForOrganization(int $organizationId): Collection
+    {
+        $this->ensureDefaults();
+
+        $global = SignalTypeDefinition::query()->whereNull('organization_id')->get()->keyBy('key')->all();
+        $own = SignalTypeDefinition::query()->where('organization_id', $organizationId)->get()->keyBy('key')->all();
+
+        return collect(array_merge($global, $own))
+            ->sortBy(static fn (SignalTypeDefinition $definition): string => $definition->pack.'|'.$definition->label)
+            ->values();
+    }
+
+    public function isBuiltIn(string $key): bool
+    {
+        return SignalTypeDefinition::query()->whereNull('organization_id')->where('key', $key)->exists();
     }
 
     public function find(?int $organizationId, string $key): ?SignalTypeDefinition

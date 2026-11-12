@@ -143,6 +143,7 @@ class SocialListeningRunService
             'totalChecked',
             'qualified',
             'possible',
+            'opportunities',
             'enrichment',
             'budget_exhausted',
             'model_unavailable',

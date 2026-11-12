@@ -32,6 +32,7 @@ class IcpChatContextBuilder
             decisionMakers: array_values(array_filter($config['decisionMakers'] ?? [], 'is_string')),
             exclusions: array_values(array_filter($config['exclusions'] ?? [], 'is_string')),
             minMatchScore: (int) ($config['minMatchScore'] ?? 60),
+            companyLocations: array_values(array_filter($config['companyLocations'] ?? [], 'is_string')),
         );
     }
 

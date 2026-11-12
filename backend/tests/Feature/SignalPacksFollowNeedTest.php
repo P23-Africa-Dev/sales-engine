@@ -41,6 +41,12 @@ class SignalPacksFollowNeedTest extends TestCase
         $this->assertGreaterThan(0, $this->definitions('sell'));
     }
 
+    public function test_partner_needs_watch_the_same_company_events(): void
+    {
+        $this->assertContains('distribution_partnership_announcement', $this->keys('partner'));
+        $this->assertContains('new_market_entry', $this->keys('partner'));
+    }
+
     public function test_supplier_and_funding_needs_get_their_own_packs_not_buyer_signals(): void
     {
         $this->assertSame(['new_supply_availability', 'supplier_export_readiness'], $this->keys('source'));

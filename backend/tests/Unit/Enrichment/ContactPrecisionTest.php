@@ -140,6 +140,24 @@ class ContactPrecisionTest extends TestCase
         $this->assertSame('+6563394100', $contact['company_phone']);
     }
 
+    public function test_the_publishers_reporter_is_never_the_companys_contact(): void
+    {
+        // Live case: Malben Engineering's "company inbox" came back as the news site's reporter.
+        $result = $this->enrich('', [
+            'company' => 'Malben Engineering',
+            'location' => 'Egypt',
+            'exclude_hosts' => ['https://www.engineeringnews.co.za/article/malben-elaraby-2026-10-12'],
+        ], [[
+            'title' => 'Malben, Elaraby eye partnership - Engineering News',
+            'snippet' => 'Contact the editor: yolande@engineeringnews.co.za, +27 11 447 9716',
+            'url' => 'https://www.engineeringnews.co.za/article/malben-elaraby-2026-10-12',
+        ]]);
+
+        $this->assertSame('', $result['company_email']);
+        $this->assertSame('', $result['email']);
+        $this->assertNotSame('engineeringnews.co.za', $result['domain']);
+    }
+
     public function test_truncated_phone_is_rejected(): void
     {
         $result = $this->enrich('Ronald Musundi', ['company' => 'AV Ventures', 'location' => 'Nairobi, Kenya', 'phone' => '+1 202-469'], []);
@@ -168,5 +186,39 @@ class ContactPrecisionTest extends TestCase
         $this->assertTrue($phones->belongsToCountry('+233244123456', 'GH'));
         $this->assertFalse($phones->belongsToCountry('+6563394100', 'GH'));
         $this->assertTrue($phones->belongsToCountry('+6563394100', null));
+    }
+
+    public function test_a_named_persons_company_email_must_carry_their_own_name(): void
+    {
+        // Live case: ara.cook@fsdkenya.org was taken for Tamara Cook.
+        $wrong = $this->enrich('Tamara Cook', ['company' => 'FSD Kenya', 'website' => 'https://fsdkenya.org', 'location' => 'Nairobi, Kenya', 'email' => 'ara.cook@fsdkenya.org'], []);
+        $this->assertSame('', $wrong['email']);
+
+        $right = $this->enrich('Tamara Cook', ['company' => 'FSD Kenya', 'website' => 'https://fsdkenya.org', 'location' => 'Nairobi, Kenya', 'email' => 'tcook@fsdkenya.org'], []);
+        $this->assertSame('tcook@fsdkenya.org', $right['email']);
+
+        $orchestrator = app(ContactEnrichmentOrchestrator::class);
+        foreach (['tamara.cook', 'tamara', 'cook.tamara', 't.cook', 'tamarac', 'tam.cook', 'tamara.j.cook'] as $local) {
+            $this->assertTrue($orchestrator->emailLocalIsPersonsName($local.'@fsdkenya.org', 'Tamara Cook'), $local);
+        }
+        foreach (['ara.cook', 'aracook', 'mara', 'info', 'tc', 'john.cook'] as $local) {
+            $this->assertFalse($orchestrator->emailLocalIsPersonsName($local.'@fsdkenya.org', 'Tamara Cook'), $local);
+        }
+    }
+
+    public function test_broker_listed_and_pattern_emails_are_never_verified_without_hunter(): void
+    {
+        $orchestrator = app(ContactEnrichmentOrchestrator::class);
+
+        foreach (['https://contactout.com/jane-doe-123', 'https://rocketreach.co/jane-doe', 'https://www.signalhire.com/profiles/jane', 'https://www.lusha.com/business/acme'] as $url) {
+            $this->assertTrue($orchestrator->isBrokerSource($url), $url);
+            $this->assertSame('unconfirmed', $orchestrator->emailStatusFor(['confidence' => 'on_page', 'source_url' => $url]));
+            $this->assertSame('unconfirmed', $orchestrator->emailStatusFor(['confidence' => 'snippet', 'source_url' => $url]));
+        }
+
+        $this->assertSame('likely', $orchestrator->emailStatusFor(['confidence' => 'pattern', 'source_url' => null]));
+        $this->assertSame('found_on_website', $orchestrator->emailStatusFor(['confidence' => 'on_page', 'source_url' => 'https://acme.com/team']));
+        $this->assertSame('search_result', $orchestrator->emailStatusFor(['confidence' => 'snippet', 'source_url' => 'https://news.example.com/a']));
+        $this->assertFalse($orchestrator->isBrokerSource('https://notlusha.com.example.org/x'));
     }
 }

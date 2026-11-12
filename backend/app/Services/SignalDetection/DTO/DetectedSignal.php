@@ -25,5 +25,9 @@ readonly class DetectedSignal
         public ?string $revenue = null,
         public ?string $industry = null,
         public ?string $rejectReason = null,
+        /** True when the model (not keyword heuristics) confirmed the event. */
+        public bool $confirmedByModel = false,
+        /** When the event itself happened, if the post says (may differ from the post date). */
+        public ?CarbonInterface $eventDate = null,
     ) {}
 }

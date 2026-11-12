@@ -40,32 +40,89 @@ class SignalExtractor
         return $this->applyPostGates($detected, $hit, $type, $organization, $brief);
     }
 
+    /**
+     * Several posts at once: one concurrent batch of model calls instead of one call per post.
+     * A post whose call fails falls back to the heuristic, like extract().
+     *
+     * @param  list<array{hit: RawSocialHit, type: SignalTypeDefinition}>  $items
+     * @return list<DetectedSignal> Same order as $items.
+     */
+    public function extractMany(array $items, Organization $organization, ?IcpBrief $brief = null): array
+    {
+        $results = [];
+        if ($items !== [] && $this->glm->isConfigured()) {
+            $requests = [];
+            foreach ($items as $index => $item) {
+                $requests[$index] = ['messages' => $this->llmMessages($item['hit'], $item['type'], $organization, $brief)];
+            }
+            try {
+                $responses = $this->glm->chatJsonPool($requests, 'extract', $organization);
+            } catch (\Throwable) {
+                $responses = [];
+            }
+            foreach ($items as $index => $item) {
+                $json = $responses[$index] ?? null;
+                $results[$index] = is_array($json)
+                    ? $this->fromLlmJson($json, $item['hit'], $item['type'])
+                    : $this->extractHeuristic($item['hit'], $item['type']);
+            }
+        } else {
+            foreach ($items as $index => $item) {
+                $results[$index] = $this->extractHeuristic($item['hit'], $item['type']);
+            }
+        }
+
+        $out = [];
+        foreach ($items as $index => $item) {
+            $out[] = $this->applyPostGates($results[$index], $item['hit'], $item['type'], $organization, $brief);
+        }
+
+        return $out;
+    }
+
     private function extractWithLlm(
         RawSocialHit $hit,
         SignalTypeDefinition $type,
         Organization $organization,
         ?IcpBrief $brief,
     ): DetectedSignal {
+        $json = $this->glm->chatJson($this->llmMessages($hit, $type, $organization, $brief), 'extract', $organization);
+
+        return $this->fromLlmJson($json, $hit, $type);
+    }
+
+    /**
+     * @return list<array{role: string, content: string}>
+     */
+    private function llmMessages(RawSocialHit $hit, SignalTypeDefinition $type, Organization $organization, ?IcpBrief $brief): array
+    {
         $watch = $type->key === 'open_developer_roles_unfilled'
             ? $this->touchJobPostingWatch($organization, $hit)
             : null;
 
-        $json = $this->glm->chatJson([
+        return [
             [
                 'role' => 'system',
                 'content' => 'Decide whether a post is a genuine match for ONE discrete buyer-signal type. '
                     .'Do not force a fit. If it is a performance story, listicle, vague commentary, or a different event, set matched=false. '
                     .'For export_trade_activity_mention, matched=true only when the trade direction is into the ICP territories (or unspecified). Reject exports from ICP territories into unrelated markets. '
                     .'For open_developer_roles_unfilled, matched=true only when the posting has been live for 60+ days. '
+                    .'company = the business the event is about (never the news outlet, job board or recruiter); '
+                    .'if the post names no specific company, set matched=false with reject_reason "no_company" — general industry news is not a signal. '
+                    .'territory = where the event happens (the market entered, the post location). '
+                    .'Do NOT reject a post because of its territory (except the export direction rule above): just report the territory. '
+                    .'Whether it fits the ICP territories is checked separately, and regions such as "Africa" include every country in them. '
                     .'Extract company_size and revenue only when the post itself states them — never copy ICP filter values. '
                     .'Return JSON only: {"matched":bool,"reject_reason":string,"company":string,"description":string,'
-                    .'"source_url":string,"source_date":"YYYY-MM-DD or empty","territory":string,'
+                    .'"source_url":string,"source_date":"YYYY-MM-DD or empty","event_date":"YYYY-MM-DD or empty","territory":string,'
                     .'"named_people":[],"company_size":string,"revenue":string,"industry":string}. '
-                    .'named_people = full names of real people taking an action in the post (empty if none).',
+                    .'named_people = full names of real people taking an action in the post (empty if none). '
+                    .'event_date = when the event itself happened or was announced, if the post says (a recent post about a 2022 move has event_date in 2022); empty if unclear. '
+                    .'The post may be in German, Dutch, French or another language: judge it the same way, and always write description, territory and industry in English.',
             ],
             [
                 'role' => 'user',
-                'content' => json_encode([
+                'content' => (string) json_encode([
                     'signal_type' => [
                         'key' => $type->key,
                         'label' => $type->label,
@@ -87,9 +144,23 @@ class SignalExtractor
                     ],
                 ]),
             ],
-        ], 'extract', $organization);
+        ];
+    }
 
+    /**
+     * @param  array<string, mixed>  $json
+     */
+    private function fromLlmJson(array $json, RawSocialHit $hit, SignalTypeDefinition $type): DetectedSignal
+    {
         $matched = (bool) ($json['matched'] ?? false);
+        // Territory fit is the ICP qualifier's call (it knows "Africa" includes Kenya); a
+        // rejection whose only reason is territory is overruled, except the export-direction rule.
+        $reason = mb_strtolower((string) ($json['reject_reason'] ?? ''));
+        if (! $matched && $type->key !== 'export_trade_activity_mention' && filled($json['company'] ?? null)
+            && preg_match('/territor|region|location|country|icp/', $reason)) {
+            $matched = true;
+            $json['reject_reason'] = '';
+        }
         $sourceDate = $this->parseDate((string) ($json['source_date'] ?? '')) ?? $hit->postedAt;
         [$size, $revenue] = $this->extractFirmographics($hit);
 
@@ -106,6 +177,8 @@ class SignalExtractor
             revenue: $this->nonEmpty($json['revenue'] ?? null) ?? $revenue,
             industry: $this->nonEmpty($json['industry'] ?? null),
             rejectReason: $matched ? null : ($this->nonEmpty($json['reject_reason'] ?? null) ?? 'type_mismatch'),
+            confirmedByModel: $matched,
+            eventDate: $this->parseDate((string) ($json['event_date'] ?? '')),
         );
     }
 
@@ -118,7 +191,9 @@ class SignalExtractor
         return new DetectedSignal(
             matched: $matched,
             signalTypeKey: $type->key,
-            company: $this->nonEmpty($hit->title) ?? $this->nonEmpty($hit->authorName),
+            // A headline or publisher is not the company behind the event; without the model the
+            // company stays unknown and the signal is rejected as not company-specific.
+            company: in_array($hit->platform, ['news', 'jobs'], true) ? null : $this->nonEmpty($hit->authorName),
             description: mb_substr($hit->postText, 0, 400),
             sourceUrl: $hit->postUrl,
             sourceDate: $hit->postedAt,
@@ -140,6 +215,12 @@ class SignalExtractor
     ): DetectedSignal {
         if (! $detected->matched) {
             return $detected;
+        }
+
+        // A recent post about an old event ("our 2022 trade mission") is not a recent signal.
+        $window = max(1, (int) ($type->default_recency_window_days ?: 30));
+        if ($detected->eventDate !== null && $detected->eventDate->lt(now()->subDays($window))) {
+            return $this->reject($detected, 'event_outside_window');
         }
 
         if ($type->key === 'open_developer_roles_unfilled' && ! $this->developerRoleHasBeenOpen($organization, $hit)) {
@@ -195,6 +276,9 @@ class SignalExtractor
             'distribution_partnership_announcement' => ['distributor', 'partner', 'appoints', 'exclusive'],
             'leadership_hire_in_territory', 'diplomatic_corporate_hiring_lagos' => ['appointed', 'hired', 'joins as', 'named', 'country manager', 'regional director'],
             'export_trade_activity_mention' => ['export', 'exporting'],
+            'hiring_job_post' => ['hiring', 'vacancy', 'job', 'position', 'apply', 'recruiting', 'opening'],
+            'trade_fair_exhibitor' => ['exhibit', 'exhibitor', 'expo', 'trade fair', 'trade show', 'booth', 'stand '],
+            'local_plant_or_assembly' => ['plant', 'factory', 'assembly', 'warehouse', 'service centre', 'service center', 'facility'],
             'engineering_team_disruption' => ['layoff', 'lays off', 'laid off', 'cto', 'vp eng', 'shutting down'],
             'public_complaints_about_software_quality' => ['crash', 'bug', 'outage', 'downtime', 'broken'],
             'technical_incident_outage_coverage' => ['outage', 'down', 'breach', 'incident'],

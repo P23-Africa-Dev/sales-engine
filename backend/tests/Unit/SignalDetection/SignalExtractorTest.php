@@ -2,11 +2,14 @@
 
 namespace Tests\Unit\SignalDetection;
 
+use App\Models\JobPostingWatch;
 use App\Models\Organization;
 use App\Models\SignalTypeDefinition;
+use App\Services\Discovery\DTO\IcpBrief;
 use App\Services\Intent\DTO\RawSocialHit;
 use App\Services\SignalDetection\SignalExtractor;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
 class SignalExtractorTest extends TestCase
@@ -93,7 +96,7 @@ class SignalExtractorTest extends TestCase
         $this->assertSame('job_posting_too_recent', $fresh->rejectReason);
         $this->assertDatabaseCount('job_posting_watches', 1);
 
-        \App\Models\JobPostingWatch::query()->update([
+        JobPostingWatch::query()->update([
             'first_seen_at' => now()->subDays(61),
         ]);
 
@@ -107,7 +110,7 @@ class SignalExtractorTest extends TestCase
         $type = $this->type('export_trade_activity_mention', 'Export/Trade Activity Mention', 'starting export activity');
         $extractor = new SignalExtractor;
         $org = new Organization(['id' => 1]);
-        $brief = new \App\Services\Discovery\DTO\IcpBrief(
+        $brief = new IcpBrief(
             name: 'Africa ICP',
             description: '',
             industries: [],
@@ -179,5 +182,26 @@ class SignalExtractorTest extends TestCase
             title: $title,
             postedAt: Carbon::now()->subDay(),
         );
+    }
+
+    public function test_a_rejection_on_territory_alone_is_overruled_except_for_export_direction(): void
+    {
+        config(['services.glm.api_key' => 'test-glm']);
+        Http::fake(['*' => Http::response(['choices' => [['message' => ['content' => json_encode([
+            'matched' => false,
+            'reject_reason' => 'territory_not_icp',
+            'company' => 'FEBO Group',
+            'territory' => 'Morocco',
+        ])]]]])]);
+        $org = Organization::query()->create(['name' => 'O', 'slug' => 'o-'.uniqid()]);
+        $hit = new RawSocialHit(platform: 'news', sourceLabel: 'News', sourceIcon: 'news', postText: 'FEBO Group opens a subsidiary in Tangier, Morocco.', postUrl: 'https://news.example/febo', snippet: null, title: 'FEBO Group opens Tangier subsidiary', postedAt: Carbon::now()->subDays(3));
+        $extractor = app(SignalExtractor::class);
+
+        $entry = $extractor->extract($hit, new SignalTypeDefinition(['key' => 'new_market_entry', 'label' => 'New Market Entry', 'default_recency_window_days' => 180]), $org);
+        $this->assertTrue($entry->matched);
+        $this->assertSame('Morocco', $entry->territory);
+
+        $export = $extractor->extract($hit, new SignalTypeDefinition(['key' => 'export_trade_activity_mention', 'label' => 'Export', 'default_recency_window_days' => 180]), $org);
+        $this->assertFalse($export->matched);
     }
 }

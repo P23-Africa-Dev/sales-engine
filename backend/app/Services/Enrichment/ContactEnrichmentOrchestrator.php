@@ -30,8 +30,16 @@ class ContactEnrichmentOrchestrator
      */
     private const PREFERRED_GENERIC_LOCALS = ['sales', 'info', 'contact', 'hello', 'enquiries', 'inquiries', 'business', 'office'];
 
+    /**
+     * People-data brokers: an address they list is a resale guess at best, never proof.
+     */
+    private const BROKER_HOST_PATTERN = '~(?:^|\.)(?:contactout\.com|rocketreach\.co|signalhire\.com|lusha\.com|zoominfo\.com|apollo\.io|seamless\.ai|leadiq\.com|adapt\.io|kaspr\.io|snov\.io|getemail\.io|voilanorbert\.com|anymailfinder\.com|findthatlead\.com|clearbit\.com|lead411\.com|salesintel\.io|uplead\.com|swordfish\.ai|nymeria\.io|aeroleads\.com|skrapp\.io|emailfinder\.io|datanyze\.com|rocketreach\.com)$~';
+
     /** Judgement context for the lead being enriched (set per enrichContacts call). */
     private ?string $gateDomain = null;
+
+    /** @var list<string> Hosts whose addresses never belong to this lead (the signal's publisher). */
+    private array $gateExcludedHosts = [];
 
     private ?string $gateCountry = null;
 
@@ -115,6 +123,14 @@ class ContactEnrichmentOrchestrator
         // Resolve the company domain first: every email below is judged against it.
         $location = isset($seed['location']) ? (string) $seed['location'] : null;
         $domain = $this->domainResolver->resolve($seed['website'] ?? null, $company, $snippets, $location, ! $isCompanyLead);
+        // The site that published the signal (a news outlet, a job board) is never the company's.
+        $this->gateExcludedHosts = array_values(array_filter(array_map(
+            fn ($host): string => (string) $this->domainResolver->hostFrom((string) $host),
+            (array) ($seed['exclude_hosts'] ?? []),
+        )));
+        if ($domain !== null && in_array($domain, $this->gateExcludedHosts, true)) {
+            $domain = null;
+        }
         $contacts['domain'] = $domain;
         $country ??= $this->countryFromDomain($domain);
         $this->gateDomain = $domain;
@@ -615,7 +631,7 @@ class ContactEnrichmentOrchestrator
      */
     private function emailBelongsToCompany(string $email): bool
     {
-        if ($this->text->isWebmail($email)) {
+        if ($this->text->isWebmail($email) || $this->onExcludedHost($email)) {
             return false;
         }
 
@@ -623,20 +639,129 @@ class ContactEnrichmentOrchestrator
     }
 
     /**
+     * An address at the outlet or job board that published the signal (a reporter's inbox).
+     */
+    private function onExcludedHost(string $email): bool
+    {
+        foreach ($this->gateExcludedHosts as $host) {
+            if ($this->text->isOnDomain($email, $host)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * The lead's own address. Company leads: only the company's mailboxes. People: an address on
-     * the company domain, or webmail / another domain only when it carries the person's name.
+     * any domain only when its local part is made of the person's own name.
      */
     private function emailAllowedForLead(string $email): bool
     {
+        if ($this->onExcludedHost($email)) {
+            return false;
+        }
         if ($this->gatePerson === '') {
             return $this->emailBelongsToCompany($email);
         }
 
-        if ($this->gateDomain !== null && $this->text->isOnDomain($email, $this->gateDomain)) {
+        // On the company domain or not, the mailbox must be made of the person's own name:
+        // ara.cook@fsdkenya.org is not Tamara Cook's address just because "cook" appears in it.
+        return $this->emailLocalIsPersonsName($email, $this->gatePerson);
+    }
+
+    /**
+     * Every part of the local part is the person's first or last name or one of their initials
+     * (jane.doe, jdoe, janed, doe.jane, jane, j.doe), with at least one full name in it.
+     */
+    public function emailLocalIsPersonsName(string $email, string $personName): bool
+    {
+        [$first, $last] = $this->text->nameParts($personName);
+        if ($first === '') {
+            return false;
+        }
+
+        $local = mb_strtolower(explode('@', $email)[0] ?? '');
+        $tokens = array_values(array_filter(
+            array_map(fn (string $t): string => preg_replace('/[^a-z]/', '', $t) ?? '', preg_split('/[._\-+]+/', $local) ?: []),
+            fn (string $t): bool => $t !== '',
+        ));
+        if ($tokens === []) {
+            return false;
+        }
+
+        // A first name may be shortened (Ron for Ronald) but never cut from the middle (ara ≠ Tamara).
+        $firstForms = [$first[0]];
+        for ($length = 3; $length <= mb_strlen($first); $length++) {
+            $firstForms[] = mb_substr($first, 0, $length);
+        }
+        $lastForms = $last !== '' ? [$last, $last[0]] : [];
+        $isNamePart = fn (string $part): bool => in_array($part, $firstForms, true) || in_array($part, $lastForms, true);
+
+        if (count($tokens) > 1) {
+            $hasFullName = false;
+            foreach ($tokens as $token) {
+                if (mb_strlen($token) === 1) {
+                    // Initials, middle names included.
+                    continue;
+                }
+                if (! $isNamePart($token)) {
+                    return false;
+                }
+                $hasFullName = true;
+            }
+
+            return $hasFullName;
+        }
+
+        $token = $tokens[0];
+        if (mb_strlen($token) > 1 && $isNamePart($token)) {
             return true;
         }
 
-        return $this->text->emailMatchesPerson($email, $this->gatePerson);
+        for ($split = 1; $split < mb_strlen($token); $split++) {
+            $head = mb_substr($token, 0, $split);
+            $tail = mb_substr($token, $split);
+            $firstThenLast = in_array($head, $firstForms, true) && in_array($tail, $lastForms, true);
+            $lastThenFirst = in_array($head, $lastForms, true) && in_array($tail, $firstForms, true);
+            if (($firstThenLast || $lastThenFirst) && mb_strlen($token) > 2) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Email status before (or without) a mailbox check. Nothing here is ever "verified":
+     * only Hunter's verifier can say that. Broker-listed and pattern-guessed addresses are "likely".
+     *
+     * @param  array<string, mixed>|null  $emailSource  A contact_sources entry.
+     */
+    public function emailStatusFor(?array $emailSource): ?string
+    {
+        if ($emailSource === null) {
+            return null;
+        }
+
+        // A people-data broker resells guesses: shown as unconfirmed unless Hunter verifies it.
+        if ($this->isBrokerSource(isset($emailSource['source_url']) ? (string) $emailSource['source_url'] : null)) {
+            return 'unconfirmed';
+        }
+
+        return match ((string) ($emailSource['confidence'] ?? '')) {
+            'on_page' => 'found_on_website',
+            'snippet' => 'search_result',
+            'pattern', 'provider' => 'likely',
+            default => null,
+        };
+    }
+
+    public function isBrokerSource(?string $sourceUrl): bool
+    {
+        $host = mb_strtolower((string) parse_url(trim((string) $sourceUrl), PHP_URL_HOST));
+
+        return $host !== '' && (bool) preg_match(self::BROKER_HOST_PATTERN, $host);
     }
 
     /**
@@ -752,6 +877,7 @@ class ContactEnrichmentOrchestrator
         }
 
         $this->gateDomain = null;
+        $this->gateExcludedHosts = [];
         $this->gateCountry = null;
         $this->gatePerson = '';
 

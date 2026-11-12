@@ -26,6 +26,7 @@ return [
         ['value' => 'software_dev_vertical', 'label' => 'Software', 'description' => 'Hiring, tooling, and vendor-switch signals for software teams.'],
         ['value' => 'supply_sourcing', 'label' => 'Supply & sourcing', 'description' => 'New stock, harvests, capacity or price lists, and suppliers becoming export-ready.'],
         ['value' => 'funding_opportunities', 'label' => 'Funding opportunities', 'description' => 'New funds and investment theses, plus grant, accelerator and competition calls.'],
+        ['value' => 'manufacturing_export', 'label' => 'Manufacturing expansion', 'description' => 'Manufacturers exhibiting at trade fairs or opening plants and assembly in the territory.'],
         ['value' => 'lagos_corporate_transport', 'label' => 'Lagos corporate transport', 'description' => 'Fleet, shuttle, and staff-mobility signals.'],
         ['value' => 'none', 'label' => 'None', 'description' => 'Do not add discrete signal-type searches.'],
     ],

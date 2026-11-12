@@ -4,6 +4,7 @@ namespace App\Services\Intent;
 
 use App\Jobs\EnrichSocialSignalJob;
 use App\Models\ApiUsage;
+use App\Models\Company;
 use App\Models\IcpProfile;
 use App\Models\Organization;
 use App\Models\SignalTypeDefinition;
@@ -12,8 +13,9 @@ use App\Models\SocialListeningSetting;
 use App\Models\SocialSignal;
 use App\Models\User;
 use App\Services\Discovery\DTO\IcpBrief;
-use App\Services\IcpFiltering\DTO\CandidateCompany;
-use App\Services\IcpFiltering\IcpFilterService;
+use App\Services\Enrichment\CompanyFirmographicsResolver;
+use App\Services\IcpFiltering\DTO\IcpFilterResult;
+use App\Services\IcpFiltering\IcpQualifier;
 use App\Services\Intent\Contracts\SocialSourceInterface;
 use App\Services\Intent\DTO\ListeningProfile;
 use App\Services\Intent\DTO\RawSocialHit;
@@ -38,7 +40,7 @@ class SocialListeningOrchestrator
 
     private const DEFAULT_SURVIVOR_TARGET = 45;
 
-    private const DEFAULT_ENRICH_CAP = 60;
+    private const DEFAULT_ENRICH_CAP = 90;
 
     private const DEFAULT_PAGE_DATE_CAP = 12;
 
@@ -61,6 +63,24 @@ class SocialListeningOrchestrator
 
     private const LAST_RESORT_SOURCES = ['youtube', 'meta_graph_pages'];
 
+    /** Company-event sources: only signal-type queries routed to them are searched here. */
+    private const EVENT_SOURCES = ['news', 'job_boards'];
+
+    /** Signal types whose evidence is a job post rather than a news story. */
+    private const HIRING_SIGNAL_KEYS = ['hiring_job_post', 'open_developer_roles_unfilled', 'diplomatic_corporate_hiring_lagos'];
+
+    /** A company event already saved within this many days is not saved again. */
+    private const EVENT_DEDUPE_DAYS = 30;
+
+    /** Review slots reserved for company-event posts out of the per-run review budget. */
+    private const DEFAULT_EVENT_REVIEW_SHARE = 60;
+
+    /** Companies looked up (industry, size, headquarters) per run. */
+    private const DEFAULT_FIRMOGRAPHIC_LOOKUPS = 20;
+
+    /** News/job-board calls per run, on top of the social search budget. */
+    private const DEFAULT_MAX_EVENT_CALLS = 30;
+
     private const ROTATION_TTL_DAYS = 30;
 
     private const MAX_FRESHNESS_WINDOW_DAYS = 30;
@@ -82,7 +102,7 @@ class SocialListeningOrchestrator
         private readonly SocialSignalEnricher $enricher,
         private readonly GlmClient $glm,
         private readonly SignalFreshnessScorer $freshness = new SignalFreshnessScorer,
-        private readonly IcpFilterService $icpFilter = new IcpFilterService,
+        private readonly IcpQualifier $icpQualifier = new IcpQualifier,
         private readonly SignalGroundingGate $groundingGate = new SignalGroundingGate,
         private readonly SignalTypeRegistry $signalTypeRegistry = new SignalTypeRegistry,
         private readonly SignalQueryBuilder $signalQueryBuilder = new SignalQueryBuilder,
@@ -182,6 +202,8 @@ class SocialListeningOrchestrator
             $possible = 0;
             $icpRejected = 0;
             $unlabeled = 0;
+            $typeMismatch = 0;
+            $opportunities = 0;
             $belowMinScore = 0;
             $duplicate = 0;
             $notActionable = 0;
@@ -212,6 +234,11 @@ class SocialListeningOrchestrator
                 $candidates[] = $entry;
             }
 
+            // A company event is judged against its own type's window (e.g. 180 days).
+            $eventWindows = $definitions->mapWithKeys(
+                fn (SignalTypeDefinition $definition): array => [$definition->key => $this->eventWindowDays($definition, $appliedWindow)],
+            )->all();
+
             $candidates = $this->hydrateReddit($candidates);
             $candidates = $this->hydratePageDates($candidates);
 
@@ -227,7 +254,7 @@ class SocialListeningOrchestrator
                 $gate = $this->groundingGate->admit(
                     $hit->postUrl,
                     $postedAt,
-                    $appliedWindow,
+                    $eventWindows[$entry['signalTypeKey'] ?? ''] ?? $appliedWindow,
                     null,
                     allowInferredDate: false,
                 );
@@ -243,7 +270,12 @@ class SocialListeningOrchestrator
                     continue;
                 }
 
-                $reason = $this->prefilter->rejection($hit, $profile, requireTopicCue: $entry['signalTypeKey'] === null);
+                $reason = $this->prefilter->rejection(
+                    $hit,
+                    $profile,
+                    requireTopicCue: $entry['signalTypeKey'] === null,
+                    companyEvent: $entry['signalTypeKey'] !== null,
+                );
                 if ($reason !== null) {
                     $notActionable++;
                     $rejectedDetail[$reason] = ($rejectedDetail[$reason] ?? 0) + 1;
@@ -265,7 +297,7 @@ class SocialListeningOrchestrator
                 $overflow = count($ready) - $enrichCap;
                 $notActionable += $overflow;
                 $rejectedDetail['over_enrich_cap'] = $overflow;
-                $ready = array_slice($ready, 0, $enrichCap);
+                $ready = $this->withinReviewBudget($ready, $enrichCap);
             }
 
             if ($modelUnavailable) {
@@ -273,19 +305,42 @@ class SocialListeningOrchestrator
                 $ready = [];
             }
 
+            // Event checks for every typed post in one concurrent batch.
+            $definitionsFor = [];
+            $extractionItems = [];
+            foreach ($ready as $index => $entry) {
+                $definition = $entry['signalTypeKey'] !== null
+                    ? $this->signalTypeRegistry->find($organization->id, $entry['signalTypeKey'])
+                    : null;
+                $definitionsFor[$index] = $definition;
+                if ($definition !== null) {
+                    $extractionItems[$index] = ['hit' => $entry['hit'], 'type' => $definition];
+                }
+            }
+            $extracted = $extractionItems === []
+                ? []
+                : array_combine(array_keys($extractionItems), $this->signalExtractor->extractMany(array_values($extractionItems), $organization, $brief));
+
             $prepared = [];
-            foreach ($ready as $entry) {
+            foreach ($ready as $index => $entry) {
                 /** @var RawSocialHit $hit */
                 $hit = $entry['hit'];
                 $postedAt = $entry['postedAt'];
                 $signalTypeKey = $entry['signalTypeKey'];
-                $signalTypeDefinition = $signalTypeKey !== null
-                    ? $this->signalTypeRegistry->find($organization->id, $signalTypeKey)
-                    : null;
+                $signalTypeDefinition = $definitionsFor[$index];
 
                 $detected = null;
                 if ($signalTypeDefinition !== null) {
-                    $detected = $this->signalExtractor->extract($hit, $signalTypeDefinition, $organization, $brief);
+                    $detected = $extracted[$index];
+                    if (! $detected->matched && in_array($hit->platform, ['news', 'jobs'], true)) {
+                        // A news story or job post is only evidence of the event it was searched
+                        // for; one that isn't that event is rejected, not reviewed as a buyer post.
+                        $typeMismatch++;
+                        $reason = preg_match('/^[a-z_]{3,40}$/', (string) $detected->rejectReason) ? $detected->rejectReason : 'mismatch';
+                        $rejectedDetail['type_'.$reason] = ($rejectedDetail['type_'.$reason] ?? 0) + 1;
+
+                        continue;
+                    }
                     if (! $detected->matched) {
                         $unlabeled++;
                         $signalTypeKey = null;
@@ -327,6 +382,7 @@ class SocialListeningOrchestrator
                 $profile,
             );
 
+            $passedGate = [];
             foreach ($prepared as $index => $item) {
                 /** @var RawSocialHit $hit */
                 $hit = $item['hit'];
@@ -360,6 +416,11 @@ class SocialListeningOrchestrator
 
                 if ($detected !== null) {
                     $enriched = $this->mergeDetectedIntoEnriched($enriched, $detected);
+                    // The model already confirmed this event (company, event, source, date); a
+                    // failed second, buyer-oriented review must not throw it away.
+                    if ($detected->confirmedByModel) {
+                        unset($enriched['from_heuristic']);
+                    }
                 }
 
                 $quoteHaystack = trim($hit->postText."\n".($hit->title ?? '')."\n".($hit->snippet ?? ''));
@@ -389,16 +450,99 @@ class SocialListeningOrchestrator
                     continue;
                 }
 
-                $icpFilterResult = $this->icpFilter->passes(
-                    $brief,
-                    new CandidateCompany(
-                        industry: null,
-                        companySize: null,
-                        revenue: null,
-                        territory: null,
-                    ),
-                    [],
-                );
+                // An event signal must be about a named company; general industry news is not one.
+                if ($signalTypeDefinition !== null && trim((string) ($enriched['company_name'] ?? '')) === '') {
+                    $notActionable++;
+                    $rejectedDetail['no_company'] = ($rejectedDetail['no_company'] ?? 0) + 1;
+
+                    continue;
+                }
+
+                $passedGate[] = compact('hit', 'postedAt', 'signalTypeKey', 'signalTypeDefinition', 'detected', 'enriched', 'score', 'hash', 'relevance') + ['family' => $item['family']];
+            }
+
+            // Who each company is (industry, size, headquarters) from public sources, looked up
+            // in one batch, then a real ICP check: a company that contradicts the ICP is dropped.
+            // Kill switch: with the ICP check off nothing is looked up or judged.
+            $icpCheckEnabled = (bool) ($settings->icp_filter_enabled ?? true);
+            // The "doesn't match the ICP → don't qualify" rule is about companies the account sells
+            // to or partners with. A supplier or funder outside the territory can still be a real
+            // opening, so for other needs a mismatch is shown, not dropped.
+            $enforceIcp = in_array($profile->mode, ['sell', 'partner'], true);
+            $firmographics = $icpCheckEnabled ? $this->firmographicsFor($passedGate) : [];
+
+            $eventsThisRun = [];
+            foreach ($passedGate as $candidate) {
+                [
+                    'hit' => $hit, 'postedAt' => $postedAt, 'signalTypeKey' => $signalTypeKey,
+                    'signalTypeDefinition' => $signalTypeDefinition, 'detected' => $detected,
+                    'enriched' => $enriched, 'score' => $score, 'hash' => $hash, 'relevance' => $relevance,
+                ] = $candidate;
+                $item = ['family' => $candidate['family']];
+
+                $companyName = trim((string) ($enriched['company_name'] ?? ''));
+                $isCompany = $companyName !== '' && mb_strtolower((string) ($enriched['entity_type'] ?? '')) !== 'individual';
+
+                // One company event reported by several outlets is one opportunity.
+                if ($signalTypeKey !== null && $companyName !== '') {
+                    $eventKey = Company::normalizeName($companyName).'|'.$signalTypeKey;
+                    if (isset($eventsThisRun[$eventKey]) || $this->eventAlreadySaved($organization->id, $icp->id, $companyName, $signalTypeKey)) {
+                        $duplicate++;
+
+                        continue;
+                    }
+                    $eventsThisRun[$eventKey] = true;
+                }
+                $firmo = $isCompany ? ($firmographics[$companyName] ?? CompanyFirmographicsResolver::empty()) : CompanyFirmographicsResolver::empty();
+                $qualification = $isCompany && $icpCheckEnabled
+                    ? $this->icpQualifier->qualify($brief, $firmo, [
+                        'industry' => $enriched['industry'] ?? null,
+                        'territory' => $detected?->territory ?? ($enriched['location_text'] ?? null),
+                        'company_size' => $enriched['company_size'] ?? null,
+                        'revenue' => $detected?->revenue,
+                    ])
+                    : ['status' => $icpCheckEnabled ? IcpQualifier::PARTIAL : 'not_checked', 'dimensions' => []];
+                if ($qualification['status'] === IcpQualifier::NOT_QUALIFIED && $enforceIcp) {
+                    $icpRejected++;
+                    foreach ($qualification['dimensions'] as $dimension => $verdict) {
+                        if ($verdict === IcpQualifier::CONTRADICTED) {
+                            $rejectedDetail['icp_'.$dimension] = ($rejectedDetail['icp_'.$dimension] ?? 0) + 1;
+                        }
+                    }
+
+                    continue;
+                }
+                $icpFilterResult = $icpCheckEnabled
+                    ? new IcpFilterResult(
+                        passed: $qualification['status'] !== IcpQualifier::NOT_QUALIFIED,
+                        reasons: array_map(static fn (string $verdict): bool => $verdict !== IcpQualifier::CONTRADICTED, $qualification['dimensions']),
+                    )
+                    // Nothing was evaluated: say so, never a fabricated pass per field.
+                    : new IcpFilterResult(passed: true, reasons: ['industry' => true, 'companySize' => true, 'revenue' => true, 'territory' => true]);
+                if (blank($enriched['industry'] ?? null) && filled($firmo['industry'])) {
+                    $enriched['industry'] = $firmo['industry'];
+                }
+                // A verified company event is worth acting on in proportion to how well the
+                // company fits; buyer-intent wording (what the base score measures) isn't the test.
+                if ($signalTypeDefinition !== null && $icpCheckEnabled) {
+                    $floor = match ($qualification['status']) {
+                        IcpQualifier::QUALIFIED => 85.0,
+                        IcpQualifier::PARTIAL => 65.0,
+                        default => 0.0,
+                    };
+                    $score = max($score, $floor);
+                }
+
+                // Shown on the Opportunities list: a verified company event whose company fits. A news
+                // story or job post is about the company by construction; a social post only counts
+                // when the company's own profile was found and the territory is confirmed, not unknown.
+                $fromEventSource = in_array($hit->platform, ['news', 'jobs'], true);
+                $companyFound = filled($firmo['linkedin_url'] ?? null) || filled($firmo['industry'] ?? null);
+                $territoryConfirmed = ! array_key_exists('territory', $qualification['dimensions'])
+                    || $qualification['dimensions']['territory'] === IcpQualifier::VERIFIED;
+                $isOpportunity = $signalTypeKey !== null
+                    && in_array($qualification['status'], [IcpQualifier::QUALIFIED, IcpQualifier::PARTIAL], true)
+                    && ($fromEventSource || ($companyFound && $territoryConfirmed));
 
                 // A real opening (it passed every check above) that scores under the account's
                 // minimum is kept as a clearly-labelled "possible opening" instead of thrown away.
@@ -485,6 +629,17 @@ class SocialListeningOrchestrator
                         'opportunity_kind' => $enriched['opportunity_kind'] ?? null,
                         'query_family' => $item['family'],
                         'listening_mode' => $profile->mode,
+                        'icp_status' => $qualification['status'],
+                        'opportunity' => $isOpportunity,
+                        'icp_dimensions' => $qualification['dimensions'],
+                        'firmographics' => $isCompany ? array_filter([
+                            'industry' => $firmo['industry'],
+                            'employee_range' => $firmo['employee_range'],
+                            'headquarters' => $firmo['headquarters'],
+                            'revenue' => $firmo['revenue'],
+                            'linkedin_url' => $firmo['linkedin_url'],
+                            'website' => $firmo['website'],
+                        ], static fn ($value): bool => filled($value)) : [],
                     ],
                 ]);
 
@@ -493,6 +648,9 @@ class SocialListeningOrchestrator
                 $created++;
                 if ($tier === 'possible') {
                     $possible++;
+                }
+                if ($isOpportunity) {
+                    $opportunities++;
                 }
             }
 
@@ -507,16 +665,18 @@ class SocialListeningOrchestrator
                     'totalChecked' => $taggedHits->count(),
                     'qualified' => $created - $possible,
                     'possible' => $possible,
+                    // Verified company events whose company fits the ICP (the Opportunities list).
+                    'opportunities' => $opportunities,
                     'rejected' => [
                         'icpMismatch' => $icpRejected,
                         'missingSourceUrl' => $groundingRejected['missing_source_url'],
                         'missingSourceDate' => $groundingRejected['missing_source_date'],
                         'stale' => $groundingRejected['stale'],
-                        'typeMismatch' => 0,
+                        'typeMismatch' => $typeMismatch,
                         'belowMinScore' => $belowMinScore,
                         'duplicate' => $duplicate,
                         'notActionable' => $notActionable,
-                        'total' => $icpRejected + $groundingRejectedTotal + $belowMinScore + $duplicate + $notActionable,
+                        'total' => $icpRejected + $groundingRejectedTotal + $belowMinScore + $duplicate + $notActionable + $typeMismatch,
                     ],
                     'rejectedDetail' => $rejectedDetail,
                     'unlabeled' => $unlabeled,
@@ -549,6 +709,77 @@ class SocialListeningOrchestrator
     }
 
     /**
+     * How far back to look for one event type: its own recency window, never shorter than the
+     * scan window and never longer than a year.
+     */
+    private function eventWindowDays(SignalTypeDefinition $definition, int $scanWindow): int
+    {
+        return max($scanWindow, min(365, (int) ($definition->default_recency_window_days ?: $scanWindow)));
+    }
+
+    /**
+     * The same company event (company + signal type) was already saved for this ICP recently.
+     */
+    private function eventAlreadySaved(int $organizationId, int $icpId, string $companyName, string $signalTypeKey): bool
+    {
+        return SocialSignal::query()
+            ->where('organization_id', $organizationId)
+            ->where('icp_profile_id', $icpId)
+            ->where('signal_type_key', $signalTypeKey)
+            ->whereRaw('LOWER(company_name) = ?', [mb_strtolower($companyName)])
+            ->where('created_at', '>=', now()->subDays(self::EVENT_DEDUPE_DAYS))
+            ->exists();
+    }
+
+    /**
+     * The posts that get a model review this run. Company-event posts (news, job boards,
+     * typed social posts) are ranked on different cues than first-person asks, so they get a
+     * reserved share of the budget instead of losing every slot to social posts.
+     *
+     * @param  list<array<string, mixed>>  $ranked  Best first.
+     * @return list<array<string, mixed>>
+     */
+    private function withinReviewBudget(array $ranked, int $cap): array
+    {
+        $events = array_values(array_filter($ranked, static fn (array $entry): bool => ($entry['signalTypeKey'] ?? null) !== null));
+        $others = array_values(array_filter($ranked, static fn (array $entry): bool => ($entry['signalTypeKey'] ?? null) === null));
+        $eventShare = min(count($events), $this->budget('event_review_share', self::DEFAULT_EVENT_REVIEW_SHARE), $cap);
+        $selected = array_merge(array_slice($events, 0, $eventShare), array_slice($others, 0, $cap - $eventShare));
+        if (count($selected) < $cap) {
+            $selected = array_merge($selected, array_slice($events, $eventShare, $cap - count($selected)));
+        }
+
+        return $selected;
+    }
+
+    /**
+     * Company facts for every company behind a gate-passing signal, in one batch.
+     *
+     * @param  list<array<string, mixed>>  $candidates
+     * @return array<string, array<string, mixed>>
+     */
+    private function firmographicsFor(array $candidates): array
+    {
+        $names = [];
+        foreach ($candidates as $candidate) {
+            $enriched = $candidate['enriched'] ?? [];
+            $name = trim((string) ($enriched['company_name'] ?? ''));
+            if ($name !== '' && mb_strtolower((string) ($enriched['entity_type'] ?? '')) !== 'individual') {
+                $names[$name] = true;
+            }
+        }
+        $names = array_slice(array_keys($names), 0, $this->budget('max_firmographic_lookups_per_run', self::DEFAULT_FIRMOGRAPHIC_LOOKUPS));
+
+        try {
+            return app(CompanyFirmographicsResolver::class)->resolveMany($names);
+        } catch (\Throwable $e) {
+            Log::warning('Company lookup failed', ['error' => $e->getMessage()]);
+
+            return [];
+        }
+    }
+
+    /**
      * @return Collection<int, SignalTypeDefinition>
      */
     private function activeDefinitions(int $organizationId, IcpBrief $brief, ?ListeningProfile $profile = null): Collection
@@ -570,7 +801,9 @@ class SocialListeningOrchestrator
         if ($profile !== null && $explicitPacks === []) {
             // No packs chosen: use the events that matter for this kind of need.
             $packs = match ($profile->mode) {
-                'sell' => $packs,
+                // Company events (market entry, distributor appointments, leadership hires) are
+                // openings both for selling to a company and for partnering/distributing for it.
+                'sell', 'partner' => $packs,
                 'source' => [SignalTypeDefinition::PACK_SUPPLY],
                 'raise' => [SignalTypeDefinition::PACK_FUNDING],
                 default => [],
@@ -631,6 +864,40 @@ class SocialListeningOrchestrator
 
         $queries = $this->mergeQueryLists($general, $typed);
 
+        // The same signal types, phrased as company announcements for news and job boards.
+        $perType = [];
+        foreach ($definitions as $definition) {
+            $isHiring = in_array($definition->key, self::HIRING_SIGNAL_KEYS, true);
+            $route = $isHiring ? ['job_boards'] : ['news'];
+            // Each event type searches its own window (180 days for a market entry), not the
+            // scan's 30-day window for social posts.
+            $typeTbs = $this->freshness->serperWindow($this->eventWindowDays($definition, $windowDays));
+            $english = [];
+            foreach ($this->signalQueryBuilder->buildEventQueries($definition, $brief) as $query) {
+                $english[] = ['query' => $query, 'native' => $query, 'family' => 'signal_type', 'only_sources' => $route, 'signalTypeKey' => $definition->key, 'tbs' => $typeTbs];
+            }
+            // The home-market press of where the companies are based, in its own language.
+            $local = [];
+            foreach ($isHiring ? [] : $this->signalQueryBuilder->buildLocalizedEventQueries($definition, $brief) as $localQuery) {
+                $local[] = ['query' => $localQuery['q'], 'native' => $localQuery['q'], 'family' => 'signal_type', 'only_sources' => ['news'], 'signalTypeKey' => $definition->key, 'tbs' => $typeTbs, 'geo' => ['gl' => $localQuery['gl'], 'hl' => $localQuery['hl']]];
+            }
+            // Alternate English and home-market queries so a capped budget searches both.
+            $entries = [];
+            for ($i = 0; $i < max(count($english), count($local)); $i++) {
+                array_push($entries, ...array_filter([$english[$i] ?? null, $local[$i] ?? null]));
+            }
+            $perType[] = $entries;
+        }
+        // Round-robin across types so a capped budget still covers every event type.
+        $eventPlan = [];
+        for ($round = 0; $perType !== [] && $round < max(array_map('count', $perType)); $round++) {
+            foreach ($perType as $entries) {
+                if (isset($entries[$round])) {
+                    $eventPlan[] = $entries[$round];
+                }
+            }
+        }
+
         $byKey = [];
         foreach ($this->sources as $source) {
             $byKey[$source->key()] = $source;
@@ -664,7 +931,7 @@ class SocialListeningOrchestrator
             }
         };
 
-        $searchPhase = function (array $keys, bool $requireListed) use (
+        $searchPhase = function (array $keys, bool $requireListed, ?array $plan = null, ?int $phaseCap = null) use (
             &$calls,
             &$survivors,
             &$generalUsed,
@@ -679,12 +946,21 @@ class SocialListeningOrchestrator
             $maxCalls,
             $survivorTarget,
         ): void {
-            foreach ($queries as $planned) {
+            $phaseCalls = 0;
+            foreach ($plan ?? $queries as $planned) {
                 foreach ($keys as $key) {
-                    if ($calls >= $maxCalls || $survivors >= $survivorTarget) {
+                    if ($phaseCap !== null) {
+                        // Event phase: its own budget, and it never stops early on survivors.
+                        if ($phaseCalls >= $phaseCap) {
+                            return;
+                        }
+                    } elseif ($calls >= $maxCalls || $survivors >= $survivorTarget) {
                         return;
                     }
                     if ($planned['only_sources'] !== null && ! in_array($key, $planned['only_sources'], true)) {
+                        continue;
+                    }
+                    if (in_array($key, self::EVENT_SOURCES, true) && ! in_array($key, (array) $planned['only_sources'], true)) {
                         continue;
                     }
                     $source = $byKey[$key] ?? null;
@@ -707,10 +983,14 @@ class SocialListeningOrchestrator
                         return;
                     }
                     $this->apiCallsThisRun++;
-                    $calls++;
+                    if ($phaseCap !== null) {
+                        $phaseCalls++;
+                    } else {
+                        $calls++;
+                    }
                     $query = in_array($key, self::FULL_TEXT_SOURCES, true) ? $planned['native'] : $planned['query'];
                     try {
-                        $hits = $source->search($brief, $query, $organization->id, self::RESULTS_PER_QUERY, $tbs, $context)->all();
+                        $hits = $source->search($brief, $query, $organization->id, self::RESULTS_PER_QUERY, $planned['tbs'] ?? $tbs, ($planned['geo'] ?? []) + $context)->all();
                     } catch (\Throwable $e) {
                         app(SocialSourceHealth::class)->recordAttempt($source->key(), 0, 0);
                         Log::warning('Social source search failed', [
@@ -728,6 +1008,9 @@ class SocialListeningOrchestrator
             }
         };
 
+        if ($eventPlan !== []) {
+            $searchPhase(self::EVENT_SOURCES, false, $eventPlan, $this->budget('max_event_search_calls_per_run', self::DEFAULT_MAX_EVENT_CALLS));
+        }
         $searchPhase(self::FULL_TEXT_SOURCES, false);
         $searchPhase(self::PRIMARY_SOURCES, true);
         if ($survivors < self::LOW_YIELD_FLOOR && $calls < $maxCalls) {
@@ -1064,6 +1347,8 @@ class SocialListeningOrchestrator
     {
         if ($detected->company) {
             $enriched['company_name'] = $detected->company;
+            // The event is about this company, whoever published it (outlet, job board, a person).
+            $enriched['entity_type'] = 'company';
         }
         if ($detected->description) {
             $enriched['summary'] = $detected->description;

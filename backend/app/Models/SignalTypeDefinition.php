@@ -19,6 +19,9 @@ class SignalTypeDefinition extends Model
     /** Events that matter when the account needs FUNDING (new funds, open calls). */
     public const PACK_FUNDING = 'funding_opportunities';
 
+    /** Manufacturers expanding abroad: trade fairs, local plants and assembly. */
+    public const PACK_MANUFACTURING = 'manufacturing_export';
+
     /** Explicit opt-out: Social Listening skips discrete type queries. */
     public const PACK_NONE = 'none';
 
@@ -33,6 +36,8 @@ class SignalTypeDefinition extends Model
         'feeds_enrichment',
         'default_recency_window_days',
         'active',
+        'target_roles',
+        'search_phrases',
     ];
 
     protected function casts(): array
@@ -41,6 +46,8 @@ class SignalTypeDefinition extends Model
             'feeds_enrichment' => 'boolean',
             'default_recency_window_days' => 'integer',
             'active' => 'boolean',
+            'target_roles' => 'array',
+            'search_phrases' => 'array',
         ];
     }
 

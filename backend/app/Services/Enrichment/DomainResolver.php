@@ -53,6 +53,10 @@ class DomainResolver
         'south', 'central', 'region', 'self', 'freelance', 'freelancer', 'independent', 'confidential', 'stealth',
         'software', 'marketing', 'board', 'ghana', 'kenya', 'lagos', 'accra', 'nairobi', 'uganda', 'tanzania',
         'rwanda', 'senegal', 'egypt', 'ethiopia', 'zambia', 'cameroon', 'impact', 'climate', 'innovation',
+        // Industry words: "Malben Engineering" must not match engineeringnews.co.za.
+        'engineering', 'manufacturing', 'manufacturers', 'industrial', 'machinery', 'equipment', 'automotive',
+        'construction', 'mining', 'chemicals', 'textiles', 'packaging', 'plastics', 'steel', 'motors', 'electric',
+        'electrical', 'news', 'media', 'africa', 'african', 'global',
     ];
 
     /**

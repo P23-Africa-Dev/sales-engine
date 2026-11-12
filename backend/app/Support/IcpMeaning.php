@@ -58,12 +58,15 @@ final class IcpMeaning
         array $decisionMakers = [],
         array $exclusions = [],
         ?int $minMatchScore = null,
+        array $companyLocations = [],
     ): array {
         return array_filter([
             'how_to_read' => self::SHORT,
             'name' => $name,
             'what_they_are_looking_for' => self::need($customPrompt, $description),
             'target_industries' => array_values($industries),
+            // Where the target companies are based vs the market they sell into or expand into.
+            'target_companies_based_in' => array_values($companyLocations),
             'target_territories' => array_values($territories),
             'target_company_sizes' => array_values($companySizes),
             'target_revenue_ranges' => array_values($revenueRanges),

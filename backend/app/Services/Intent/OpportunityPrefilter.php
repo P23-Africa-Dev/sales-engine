@@ -52,10 +52,15 @@ class OpportunityPrefilter
      *                                 company event ("opens a Nairobi office") carries no buyer cue,
      *                                 and the signal extractor judges whether it matches the type.
      */
-    public function rejection(RawSocialHit $hit, ListeningProfile $profile, bool $requireTopicCue = true): ?string
+    /**
+     * @param  bool  $companyEvent  The post was found for a company-event signal type (market
+     *                              entry, distributor, hiring...). Announcements and job posts are
+     *                              the evidence there, so the job and self-promotion blocks don't apply.
+     */
+    public function rejection(RawSocialHit $hit, ListeningProfile $profile, bool $requireTopicCue = true, bool $companyEvent = false): ?string
     {
         $url = mb_strtolower((string) $hit->postUrl);
-        if (str_contains($url, '/jobs') || str_contains($url, '/careers')) {
+        if (! $companyEvent && (str_contains($url, '/jobs') || str_contains($url, '/careers'))) {
             return 'not_an_opportunity';
         }
 
@@ -68,11 +73,11 @@ class OpportunityPrefilter
             return 'not_an_opportunity';
         }
 
-        if (! $profile->includeHiring && preg_match(self::JOB_BLOCK, $text)) {
+        if (! $companyEvent && ! $profile->includeHiring && preg_match(self::JOB_BLOCK, $text)) {
             return 'not_an_opportunity';
         }
 
-        if ($profile->mode === 'sell' && preg_match(self::PROMO_BLOCK, $text)) {
+        if (! $companyEvent && $profile->mode === 'sell' && preg_match(self::PROMO_BLOCK, $text)) {
             return 'self_promotion';
         }
 

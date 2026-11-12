@@ -30,6 +30,8 @@ class SocialSourceHealth
 
     /** @var array<string, string> */
     public const LABELS = [
+        'news' => 'News',
+        'job_boards' => 'Job boards',
         'linkedin_public' => 'LinkedIn',
         'x_mentions' => 'X (search)',
         'reddit' => 'Reddit (search)',

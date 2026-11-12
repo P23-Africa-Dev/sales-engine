@@ -162,6 +162,9 @@ class IcpFilterService
         }
 
         foreach ($allowedTerritories as $territory) {
+            if ($this->inRegion($territory, $candidateTerritory, $candidateTokens)) {
+                return true;
+            }
             $allowedTokens = $this->expandTerritoryTokens($territory);
             if (array_intersect($candidateTokens, $allowedTokens) !== []) {
                 return true;
@@ -170,6 +173,58 @@ class IcpFilterService
 
         return false;
     }
+
+    /**
+     * An ICP territory that names a region ("Africa", "East Africa", "Europe") accepts any
+     * place in it, so a company opening in Kenya fits an ICP aimed at Africa.
+     *
+     * @param  list<string>  $candidateTokens
+     */
+    private function inRegion(string $territory, string $candidate, array $candidateTokens): bool
+    {
+        $members = self::REGIONS[mb_strtolower(trim($territory))] ?? null;
+        if ($members === null) {
+            return false;
+        }
+
+        $normalized = mb_strtolower($candidate);
+        foreach ($members as $member) {
+            if (str_contains($member, ' ') ? str_contains($normalized, $member) : in_array($member, $candidateTokens, true)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private const WEST_AFRICA = ['nigeria', 'lagos', 'abuja', 'ghana', 'accra', 'senegal', 'dakar', "cote d'ivoire", 'ivory coast', 'abidjan', 'benin', 'togo', 'lome', 'burkina faso', 'mali', 'niger', 'guinea', 'sierra leone', 'liberia', 'gambia', 'cameroon', 'douala'];
+
+    private const EAST_AFRICA = ['kenya', 'nairobi', 'mombasa', 'uganda', 'kampala', 'tanzania', 'dar es salaam', 'rwanda', 'kigali', 'ethiopia', 'addis ababa', 'burundi', 'somalia', 'south sudan', 'djibouti'];
+
+    private const SOUTHERN_AFRICA = ['south africa', 'johannesburg', 'cape town', 'durban', 'botswana', 'namibia', 'zambia', 'lusaka', 'zimbabwe', 'harare', 'mozambique', 'malawi', 'angola', 'luanda', 'lesotho', 'eswatini', 'madagascar', 'mauritius'];
+
+    private const NORTH_AFRICA = ['egypt', 'cairo', 'morocco', 'casablanca', 'algeria', 'tunisia', 'libya', 'sudan'];
+
+    private const EUROPE = ['germany', 'netherlands', 'holland', 'france', 'sweden', 'denmark', 'norway', 'finland', 'belgium', 'spain', 'italy', 'portugal', 'austria', 'switzerland', 'poland', 'ireland', 'united kingdom', 'uk', 'england', 'scotland', 'wales', 'czech', 'hungary', 'romania', 'greece', 'berlin', 'munich', 'hamburg', 'amsterdam', 'rotterdam', 'paris', 'stockholm', 'london'];
+
+    private const MIDDLE_EAST = ['united arab emirates', 'uae', 'dubai', 'abu dhabi', 'saudi arabia', 'riyadh', 'qatar', 'doha', 'kuwait', 'bahrain', 'oman', 'jordan', 'israel', 'lebanon'];
+
+    /**
+     * @var array<string, list<string>>
+     */
+    private const REGIONS = [
+        'africa' => [...self::WEST_AFRICA, ...self::EAST_AFRICA, ...self::SOUTHERN_AFRICA, ...self::NORTH_AFRICA, 'africa', 'congo', 'drc', 'gabon', 'chad', 'eritrea'],
+        'sub-saharan africa' => [...self::WEST_AFRICA, ...self::EAST_AFRICA, ...self::SOUTHERN_AFRICA, 'congo', 'drc', 'gabon', 'chad'],
+        'west africa' => self::WEST_AFRICA,
+        'east africa' => self::EAST_AFRICA,
+        'southern africa' => self::SOUTHERN_AFRICA,
+        'north africa' => self::NORTH_AFRICA,
+        'europe' => self::EUROPE,
+        'eu' => self::EUROPE,
+        'middle east' => self::MIDDLE_EAST,
+        'gcc' => self::MIDDLE_EAST,
+        'mena' => [...self::MIDDLE_EAST, ...self::NORTH_AFRICA],
+    ];
 
     /**
      * Alias groups so ICP "england" matches UK / London / Britain, etc.

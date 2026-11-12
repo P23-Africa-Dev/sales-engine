@@ -9,7 +9,7 @@ use Tests\TestCase;
 
 class SignalTypeRegistryTest extends TestCase
 {
-    public function test_seeder_populates_the_four_core_spec_signal_types(): void
+    public function test_seeder_populates_the_five_core_spec_signal_types(): void
     {
         $this->seed(SignalTypeDefinitionSeeder::class);
 
@@ -24,6 +24,7 @@ class SignalTypeRegistryTest extends TestCase
             'distribution_partnership_announcement',
             'leadership_hire_in_territory',
             'export_trade_activity_mention',
+            'hiring_job_post',
         ], $keys);
     }
 
@@ -58,7 +59,7 @@ class SignalTypeRegistryTest extends TestCase
         $registry = new SignalTypeRegistry;
         $result = $registry->activeForPacks(null, []);
 
-        $this->assertCount(4, $result);
+        $this->assertCount(5, $result);
     }
 
     public function test_org_specific_row_overrides_the_global_row_with_the_same_key(): void
@@ -80,7 +81,7 @@ class SignalTypeRegistryTest extends TestCase
         $registry = new SignalTypeRegistry;
         $result = $registry->activeForPacks($org->id, [SignalTypeDefinition::PACK_DEFAULT]);
 
-        $this->assertCount(4, $result); // still 4 keys, not 5 — override, not addition
+        $this->assertCount(5, $result); // still 5 keys, not 6 — override, not addition
         $override = $result->firstWhere('key', 'new_market_entry');
         $this->assertSame('Custom New Market Entry', $override->label);
         $this->assertSame($org->id, $override->organization_id);

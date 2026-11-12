@@ -30,6 +30,21 @@ class SignalFreshnessScorer
         };
     }
 
+    /**
+     * Search time filter for an exact window: the coarse presets up to a month, then a custom
+     * date range (Google's cdr) so a 180-day signal type searches 180 days, not a whole year.
+     */
+    public function serperWindow(int $days, ?CarbonInterface $now = null): string
+    {
+        if ($days <= 31) {
+            return $this->serperTbs($days);
+        }
+
+        $now = $now ?? now();
+
+        return 'cdr:1,cd_min:'.$now->copy()->subDays($days)->format('n/j/Y').',cd_max:'.$now->format('n/j/Y');
+    }
+
     public function factor(?CarbonInterface $postedAt, int $windowDays, ?CarbonInterface $now = null): float
     {
         $now = $now ?? now();

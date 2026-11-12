@@ -45,6 +45,7 @@ class IcpProfile extends Model
             'companySizes' => [],
             'revenueRanges' => [],
             'territories' => [],
+            'companyLocations' => [],
             'decisionMakers' => [],
             'minMatchScore' => 60,
             'autoSyncCrm' => false,

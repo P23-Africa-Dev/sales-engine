@@ -4,6 +4,7 @@ namespace Tests\Unit;
 
 use App\Models\IcpProfile;
 use App\Services\Discovery\DTO\IcpBrief;
+use App\Services\Discovery\QueryVariationGenerator;
 use Tests\TestCase;
 
 class IcpBriefSearchQueryTest extends TestCase
@@ -39,10 +40,10 @@ class IcpBriefSearchQueryTest extends TestCase
         $this->assertStringNotContainsString('linkedin.com', $query);
         $this->assertStringNotContainsString('("CEO"', $query);
 
-        $variations = app(\App\Services\Discovery\QueryVariationGenerator::class)->generate($brief, 20);
+        $variations = app(QueryVariationGenerator::class)->generate($brief, 20);
         $linkedinVariants = array_filter(
             $variations,
-            fn(string $q) => str_contains(mb_strtolower($q), 'linkedin.com')
+            fn (string $q) => str_contains(mb_strtolower($q), 'linkedin.com')
         );
         $this->assertNotEmpty($linkedinVariants, 'Fan-out should still include LinkedIn profile variants');
     }
@@ -73,7 +74,7 @@ class IcpBriefSearchQueryTest extends TestCase
         $this->assertStringNotContainsString('Find 100 prospects', $query);
         $this->assertStringNotContainsString('relevant to my ICP', $query);
 
-        $variations = app(\App\Services\Discovery\QueryVariationGenerator::class)->generate($brief, 20);
+        $variations = app(QueryVariationGenerator::class)->generate($brief, 20);
         // ICP-brief mode geo-biases Serper with primary territory; personas stay out.
         $this->assertTrue(
             collect($variations)->contains(fn (string $v) => str_contains($v, 'Nigeria')),
@@ -203,7 +204,7 @@ class IcpBriefSearchQueryTest extends TestCase
         $this->assertTrue(collect($queries)->contains(fn (string $q) => str_contains(mb_strtolower($q), 'cold chain')));
         $this->assertTrue(collect($queries)->contains(fn (string $q) => str_contains(mb_strtolower($q), 'last mile')));
 
-        $variations = app(\App\Services\Discovery\QueryVariationGenerator::class)->generate($brief, 25);
+        $variations = app(QueryVariationGenerator::class)->generate($brief, 25);
         $joined = mb_strtolower(implode(' | ', $variations));
         $this->assertStringContainsString('cold chain', $joined);
         // Fan-out is capped; later clauses may be omitted — at least one extra clause must appear.
@@ -228,5 +229,22 @@ class IcpBriefSearchQueryTest extends TestCase
 
         $this->assertContains('payment rails', $queries);
         $this->assertContains('merchant acquiring', $queries);
+    }
+
+    public function test_company_search_looks_where_the_companies_are_based(): void
+    {
+        $profile = new IcpProfile(['name' => 'X', 'config' => array_merge(IcpProfile::defaultConfig(), [
+            'territories' => ['Africa'],
+            'companyLocations' => ['Germany', 'Netherlands'],
+        ])]);
+
+        $brief = IcpBrief::fromIcpProfile($profile);
+
+        $this->assertSame(['Africa'], $brief->territories);
+        $this->assertSame(['Germany', 'Netherlands'], $brief->forCompanySearch()->territories);
+        $this->assertSame(['Germany', 'Netherlands'], $brief->forCompanySearch()->companyLocations);
+
+        $plain = IcpBrief::fromIcpProfile(new IcpProfile(['name' => 'Y', 'config' => array_merge(IcpProfile::defaultConfig(), ['territories' => ['Lagos']])]));
+        $this->assertSame(['Lagos'], $plain->forCompanySearch()->territories);
     }
 }

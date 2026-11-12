@@ -27,8 +27,10 @@ use App\Services\Enrichment\ProfileUrlValidator;
 use App\Services\Extraction\ExtractionService;
 use App\Services\Intent\Adapters\MetaGraphPagesAdapter;
 use App\Services\Intent\Adapters\RedditNativeSocialAdapter;
+use App\Services\Intent\Adapters\SerperJobBoardsAdapter;
 use App\Services\Intent\Adapters\SerperLinkedInAdapter;
 use App\Services\Intent\Adapters\SerperMetaAdapter;
+use App\Services\Intent\Adapters\SerperNewsAdapter;
 use App\Services\Intent\Adapters\SerperRedditAdapter;
 use App\Services\Intent\Adapters\SerperXAdapter;
 use App\Services\Intent\Adapters\XNativeSocialAdapter;
@@ -99,6 +101,8 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(SocialListeningOrchestrator::class, function ($app) {
             return new SocialListeningOrchestrator(
                 sources: [
+                    $app->make(SerperNewsAdapter::class),
+                    $app->make(SerperJobBoardsAdapter::class),
                     $app->make(SerperLinkedInAdapter::class),
                     $app->make(SerperXAdapter::class),
                     $app->make(SerperRedditAdapter::class),

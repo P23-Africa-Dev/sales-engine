@@ -27,6 +27,7 @@ use App\Http\Controllers\Api\V1\LeadSyncController;
 use App\Http\Controllers\Api\V1\MetricsController;
 use App\Http\Controllers\Api\V1\NativeCrmController;
 use App\Http\Controllers\Api\V1\NativeCrmEmailController;
+use App\Http\Controllers\Api\V1\OpportunityController;
 use App\Http\Controllers\Api\V1\OrganizationController;
 use App\Http\Controllers\Api\V1\OrganizationMemberController;
 use App\Http\Controllers\Api\V1\OutreachController;
@@ -99,6 +100,10 @@ Route::middleware(['auth:sanctum', 'org.resolve'])->group(function () {
     Route::post('/organizations/current/invitations/{id}/resend', [OrganizationMemberController::class, 'resendInvitation']);
 
     Route::get('/signal-types', [SignalTypeController::class, 'index']);
+    Route::get('/signal-types/manage', [SignalTypeController::class, 'manage']);
+    Route::post('/signal-types', [SignalTypeController::class, 'store']);
+    Route::put('/signal-types/{key}', [SignalTypeController::class, 'update']);
+    Route::delete('/signal-types/{key}', [SignalTypeController::class, 'destroy']);
     Route::get('/geo/places', [GeoController::class, 'places']);
     Route::post('/icp-profiles/suggest-search-brief', [IcpProfileController::class, 'suggestSearchBrief'])
         ->middleware('throttle:20,1');
@@ -162,6 +167,8 @@ Route::middleware(['auth:sanctum', 'org.resolve'])->group(function () {
     Route::get('/outreach/setup-request', [OutreachSetupRequestController::class, 'show']);
     Route::post('/outreach/setup-request', [OutreachSetupRequestController::class, 'store']);
 
+    Route::get('/opportunities', [OpportunityController::class, 'index']);
+    Route::get('/opportunities/export', [OpportunityController::class, 'export'])->middleware('throttle:10,1');
     Route::get('/social-listening/signals', [SocialListeningController::class, 'indexSignals']);
     Route::get('/social-listening/filters', [SocialListeningController::class, 'filters']);
     Route::get('/social-listening/signals/{id}', [SocialListeningController::class, 'showSignal']);

@@ -33,6 +33,14 @@ class SocialSignalResource extends JsonResource
             'description' => $this->intent_description,
             'score' => (int) round((float) $this->score),
             // "possible": a real opening that scored under the account's minimum; shown labelled.
+            // ICP check of the company behind the signal: qualified | partial (partly verified) | not_qualified.
+            'icpStatus' => is_array($this->meta) ? ($this->meta['icp_status'] ?? null) : null,
+            'icpDimensions' => is_array($this->meta) ? ($this->meta['icp_dimensions'] ?? []) : [],
+            'companyProfile' => is_array($this->meta) ? ($this->meta['firmographics'] ?? []) : [],
+            // One best contact: {name, role, email, email_status, phone, linkedin_url, source_url, confidence}.
+            'contact' => is_array($this->meta) ? ($this->meta['contact'] ?? null) : null,
+            // enriched | company_only | no_contact_found (null until enrichment ran).
+            'contactStatus' => is_array($this->meta) ? ($this->meta['contact_status'] ?? null) : null,
             'opportunityTier' => (is_array($this->meta) ? ($this->meta['opportunity_tier'] ?? null) : null) ?? 'strong',
             'profile' => $this->profile_name,
             'author_profile_url' => $this->author_profile_url,
