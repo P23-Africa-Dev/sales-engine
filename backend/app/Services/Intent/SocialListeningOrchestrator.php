@@ -38,7 +38,12 @@ class SocialListeningOrchestrator
 
     private const DEFAULT_SURVIVOR_TARGET = 45;
 
-    private const DEFAULT_ENRICH_CAP = 40;
+    private const DEFAULT_ENRICH_CAP = 60;
+
+    private const DEFAULT_PAGE_DATE_CAP = 12;
+
+    /** Openings scoring between this and the account's minimum are kept as "possible openings". */
+    private const POSSIBLE_OPENING_FLOOR = 40.0;
 
     private const DEFAULT_HYDRATE_CAP = 20;
 
@@ -173,6 +178,8 @@ class SocialListeningOrchestrator
             $run->update(['stages' => ['analyzing_icp', 'searching_sources', 'enriching']]);
 
             $created = 0;
+
+            $possible = 0;
             $icpRejected = 0;
             $unlabeled = 0;
             $belowMinScore = 0;
@@ -206,6 +213,7 @@ class SocialListeningOrchestrator
             }
 
             $candidates = $this->hydrateReddit($candidates);
+            $candidates = $this->hydratePageDates($candidates);
 
             foreach ($candidates as $entry) {
                 /** @var RawSocialHit $hit */
@@ -392,10 +400,16 @@ class SocialListeningOrchestrator
                     [],
                 );
 
+                // A real opening (it passed every check above) that scores under the account's
+                // minimum is kept as a clearly-labelled "possible opening" instead of thrown away.
+                $tier = 'strong';
                 if ($score < (float) $settings->min_score) {
-                    $belowMinScore++;
+                    if ($score < self::POSSIBLE_OPENING_FLOOR) {
+                        $belowMinScore++;
 
-                    continue;
+                        continue;
+                    }
+                    $tier = 'possible';
                 }
 
                 if (! $this->matchesIntentFilters($enriched, $settings->intent_filters ?? [])) {
@@ -466,6 +480,7 @@ class SocialListeningOrchestrator
                         'freshness_factor' => $this->freshness->factor($postedAt, $appliedWindow),
                         'evidence_quote' => $enriched['evidence_quote'] ?? null,
                         'actionability' => $enriched['actionability'] ?? null,
+                        'opportunity_tier' => $tier,
                         'author_role' => $enriched['author_role'] ?? null,
                         'opportunity_kind' => $enriched['opportunity_kind'] ?? null,
                         'query_family' => $item['family'],
@@ -476,6 +491,9 @@ class SocialListeningOrchestrator
                 $seenHashes[$hash] = true;
                 EnrichSocialSignalJob::dispatch($signal->id);
                 $created++;
+                if ($tier === 'possible') {
+                    $possible++;
+                }
             }
 
             $settings->update(['last_run_at' => now()]);
@@ -487,7 +505,8 @@ class SocialListeningOrchestrator
                 'signals_created' => $created,
                 'result_summary' => [
                     'totalChecked' => $taggedHits->count(),
-                    'qualified' => $created,
+                    'qualified' => $created - $possible,
+                    'possible' => $possible,
                     'rejected' => [
                         'icpMismatch' => $icpRejected,
                         'missingSourceUrl' => $groundingRejected['missing_source_url'],
@@ -547,14 +566,24 @@ class SocialListeningOrchestrator
             $brief->signalTypePacks,
             static fn ($pack): bool => is_string($pack) && $pack !== '' && $pack !== SignalTypeDefinition::PACK_DEFAULT,
         ));
-        if ($profile !== null && $profile->mode !== 'sell' && $explicitPacks === []) {
-            return collect();
+        $packs = $brief->resolvedSignalTypePacks();
+        if ($profile !== null && $explicitPacks === []) {
+            // No packs chosen: use the events that matter for this kind of need.
+            $packs = match ($profile->mode) {
+                'sell' => $packs,
+                'source' => [SignalTypeDefinition::PACK_SUPPLY],
+                'raise' => [SignalTypeDefinition::PACK_FUNDING],
+                default => [],
+            };
+            if ($packs === []) {
+                return collect();
+            }
         }
 
         $this->signalTypeRegistry->ensureDefaults();
 
         return $this->signalTypeRegistry
-            ->activeForPacks($organizationId, $brief->resolvedSignalTypePacks())
+            ->activeForPacks($organizationId, $packs)
             ->take($cap)
             ->values();
     }
@@ -855,6 +884,44 @@ class SocialListeningOrchestrator
         }
 
         foreach ($this->redditHydrator->hydrateMany($targets) as $index => $hydrated) {
+            $candidates[$index]['hit'] = $hydrated;
+        }
+
+        return $candidates;
+    }
+
+    /**
+     * Undated posts that are not Reddit (handled above) and carry no decodable ID get their
+     * publish date read from the page itself, so they are qualified instead of dropped.
+     *
+     * @param  list<array<string, mixed>>  $candidates
+     * @return list<array<string, mixed>>
+     */
+    private function hydratePageDates(array $candidates): array
+    {
+        $cap = $this->budget('max_page_date_fetches_per_run', self::DEFAULT_PAGE_DATE_CAP);
+        $dates = app(LinkedInActivityDateExtractor::class);
+        $targets = [];
+        foreach ($candidates as $index => $entry) {
+            if (count($targets) >= $cap) {
+                break;
+            }
+            /** @var RawSocialHit $hit */
+            $hit = $entry['hit'];
+            if ($hit->postedAt !== null || ! filled($hit->postUrl) || preg_match('#reddit\.com#i', (string) $hit->postUrl)) {
+                continue;
+            }
+            if ($dates->fromUrl($hit->postUrl) !== null) {
+                continue;
+            }
+            $targets[$index] = $hit;
+        }
+
+        if ($targets === []) {
+            return $candidates;
+        }
+
+        foreach (app(PageDateHydrator::class)->hydrateMany($targets) as $index => $hydrated) {
             $candidates[$index]['hit'] = $hydrated;
         }
 

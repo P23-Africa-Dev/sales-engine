@@ -13,6 +13,12 @@ class SignalTypeDefinition extends Model
 
     public const PACK_LAGOS_CORPORATE_TRANSPORT = 'lagos_corporate_transport';
 
+    /** Events that matter when the account needs a SUPPLIER (new supply, export readiness). */
+    public const PACK_SUPPLY = 'supply_sourcing';
+
+    /** Events that matter when the account needs FUNDING (new funds, open calls). */
+    public const PACK_FUNDING = 'funding_opportunities';
+
     /** Explicit opt-out: Social Listening skips discrete type queries. */
     public const PACK_NONE = 'none';
 

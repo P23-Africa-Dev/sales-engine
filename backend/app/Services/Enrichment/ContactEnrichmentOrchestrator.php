@@ -88,6 +88,11 @@ class ContactEnrichmentOrchestrator
         $company = trim((string) ($seed['company'] ?? ''));
         $company = $company !== '' ? $company : null;
         $isCompanyLead = $personName === '' || ($company !== null && mb_strtolower($personName) === mb_strtolower($company));
+        if (! $isCompanyLead && $company !== null && $this->domainResolver->isGenericCompanyName($company)) {
+            // "Sales Manager at Cocoa": no single business to look up, so no company inbox or
+            // line is attached rather than some other cocoa firm's.
+            $company = null;
+        }
         $country = $this->phoneNormalizer->countryFromLocation(isset($seed['location']) ? (string) $seed['location'] : null);
 
         $contacts = [

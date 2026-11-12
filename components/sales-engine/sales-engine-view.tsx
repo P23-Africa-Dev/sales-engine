@@ -3298,6 +3298,14 @@ function SocialSignalRow({
       </td>
       <td className="px-1.5 py-2.5 align-middle">
         <ScoreGauge score={signal.score} dark={isActive} compact />
+        {signal.opportunityTier === "possible" && (
+          <span
+            className="mt-1 block text-center text-[8px] font-medium text-[#9a6b00]"
+            title="A real opening that scored below your minimum. Worth a look."
+          >
+            Possible opening
+          </span>
+        )}
       </td>
       <td className="rounded-r-[20px] px-2.5 py-2.5 align-middle">
         <div className="flex items-center justify-center gap-1.5">

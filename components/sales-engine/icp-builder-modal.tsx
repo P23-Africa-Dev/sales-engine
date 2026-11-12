@@ -200,6 +200,16 @@ const AVAILABLE_SIGNAL_TYPE_PACKS: Array<{ value: string; label: string; descrip
     description: "Engineering disruption, outages, complaints, unfilled dev roles, digital transformation announcements.",
   },
   {
+    value: "supply_sourcing",
+    label: "Supply & Sourcing",
+    description: "For finding suppliers: new stock, harvests, capacity or price lists, and suppliers becoming export-ready.",
+  },
+  {
+    value: "funding_opportunities",
+    label: "Funding Opportunities",
+    description: "For raising money: new funds and investment theses, plus grant, accelerator and competition calls.",
+  },
+  {
     value: "lagos_corporate_transport",
     label: "Lagos Corporate Transport",
     description: "New embassy/consulate presence, expat relocation, Lagos-based leadership hires, foreign market entry into Lagos.",
@@ -1584,7 +1594,7 @@ export function IcpBuilderModal({
                       </span>
                     </div>
                     <p className="text-[11px] text-gray-500 leading-snug">
-                      Social Listening searches each selected event type with a source URL and date. Core Buyer Signals is on by default. Clear every pack to turn discrete detection off.
+                      Social Listening also watches for dated events that matter to what you are looking for: buyer signals when you want customers, supply news when you want suppliers, funding calls when you want investors. Pick packs here to choose them yourself, or clear every pack to turn event detection off.
                     </p>
                     <div className="flex flex-wrap gap-2">
                       {AVAILABLE_SIGNAL_TYPE_PACKS.map((pack) => {

@@ -32,6 +32,8 @@ class SocialSignalResource extends JsonResource
             'intentColor' => $this->intent_color,
             'description' => $this->intent_description,
             'score' => (int) round((float) $this->score),
+            // "possible": a real opening that scored under the account's minimum; shown labelled.
+            'opportunityTier' => (is_array($this->meta) ? ($this->meta['opportunity_tier'] ?? null) : null) ?? 'strong',
             'profile' => $this->profile_name,
             'author_profile_url' => $this->author_profile_url,
             'platform' => $this->platform,

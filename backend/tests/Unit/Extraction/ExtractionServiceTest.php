@@ -160,6 +160,7 @@ class ExtractionServiceTest extends TestCase
             'title at company with experience' => ['Gloria Adjei - Olam | LinkedIn', 'https://gh.linkedin.com/in/gloria-adjei-1a2b3c', 'Import Export Manager at Olam · Experience: Olam · Location: Accra.', 'Gloria Adjei', 'Import Export Manager', 'Olam'],
             'full company name kept' => ['Fuseini Nadi - Bomarts Farms | LinkedIn', 'https://gh.linkedin.com/in/fuseini-nadi', 'Export Manager at Bomarts Farms Limited · Experience: Bomarts Farms Limited · Location: Ghana', 'Fuseini Nadi', 'Export Manager', 'Bomarts Farms Limited'],
             'at-sign title with former name' => ['Eugene Gikonyo - Prosper Global Ventures | LinkedIn', 'https://ke.linkedin.com/in/eugene-gikonyo', 'Eugene Gikonyo · Principal @ Prosper Global Ventures (formerly Mercy Corps Ventures) | Impact', 'Eugene Gikonyo', 'Principal', 'Prosper Global Ventures'],
+            'name not left inside the title' => ['Charles Debrah Asante - Cocoa Processing Company | LinkedIn', 'https://gh.linkedin.com/in/charles-debrah-asante', 'Charles Debrah Asante. Deputy Managing Director-Operations at Cocoa Processing Company · Experience: CPC', 'Charles Debrah Asante', 'Deputy Managing Director-Operations', 'Cocoa Processing Company'],
             'second role is not a company' => ['Olayemi Toye - CIO | LinkedIn', 'https://ng.linkedin.com/in/olayemi-toye', 'CIO | CTO | Payments', 'Olayemi Toye', 'CIO', null],
         ];
     }
@@ -185,6 +186,30 @@ class ExtractionServiceTest extends TestCase
         config(['services.glm.api_key' => '']);
         $brief = IcpBrief::fromIcpProfile(new IcpProfile(['name' => 'X', 'config' => IcpProfile::defaultConfig()]), 'fintech in Lagos', 'people');
         $hit = new RawDiscoveryHit(name: 'D P', source: 'web', provider: 'serper', snippet: 'CTO for Cede, B2B payments', url: 'https://ng.linkedin.com/in/d-p-7781a', meta: ['title' => 'D P - CTO - Cede | LinkedIn']);
+        $org = Organization::query()->create(['name' => 'O', 'slug' => 'o-'.uniqid()]);
+
+        $rows = app(ExtractionService::class)->extractManyBatch([$hit], $brief, $org)[0];
+
+        $this->assertSame([], $rows);
+    }
+
+    public function test_business_running_a_personal_profile_is_not_a_person_lead(): void
+    {
+        config(['services.glm.api_key' => 'test-glm']);
+        $brief = IcpBrief::fromIcpProfile(new IcpProfile(['name' => 'X', 'config' => IcpProfile::defaultConfig()]), 'cocoa exporters in Ghana', 'people');
+        $hit = new RawDiscoveryHit(name: 'Honesty Agro-exports', source: 'web', provider: 'serper', snippet: 'Cocoa and cashew exporter in Kumasi.', url: 'https://gh.linkedin.com/in/honesty-agro-exports-2bb2a5a8', meta: ['title' => 'Honesty Agro-exports | LinkedIn']);
+        $org = Organization::query()->create(['name' => 'O', 'slug' => 'o-'.uniqid()]);
+
+        $rows = app(ExtractionService::class)->extractManyBatch([$hit], $brief, $org)[0];
+
+        $this->assertSame([], $rows);
+    }
+
+    public function test_joined_up_slug_is_not_shown_as_a_name(): void
+    {
+        config(['services.glm.api_key' => '']);
+        $brief = IcpBrief::fromIcpProfile(new IcpProfile(['name' => 'X', 'config' => IcpProfile::defaultConfig()]), 'fintech in Lagos', 'people');
+        $hit = new RawDiscoveryHit(name: 'Fayombogabriel', source: 'web', provider: 'serper', snippet: 'Lagos, Nigeria.', url: 'https://ng.linkedin.com/in/fayombogabriel', meta: ['title' => 'LinkedIn']);
         $org = Organization::query()->create(['name' => 'O', 'slug' => 'o-'.uniqid()]);
 
         $rows = app(ExtractionService::class)->extractManyBatch([$hit], $brief, $org)[0];

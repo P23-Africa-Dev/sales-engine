@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\ChatSession;
 use App\Models\DiscoveryRun;
 use App\Models\IcpProfile;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
@@ -69,6 +70,41 @@ class IcpLeadTruthTest extends TestCase
         $this->assertSame('credits_exhausted', $summary['retrieval_degraded_reason'] ?? null);
         $this->assertGreaterThan(0, (int) ($summary['provider_failures']['serper']['failures'] ?? 0));
         $this->assertSame('credits_exhausted', $summary['provider_failures']['serper']['reason'] ?? null);
+    }
+
+    public function test_unreachable_web_search_is_reported_as_degraded_not_as_no_matches(): void
+    {
+        config([
+            'services.serper.api_key' => 'test-serper',
+            'services.glm.api_key' => '',
+        ]);
+
+        [$user, $org] = $this->actingAsOrgMember();
+        IcpProfile::query()->create([
+            'organization_id' => $org->id,
+            'name' => 'FinTech Lagos',
+            'is_active' => true,
+            'config' => array_merge(IcpProfile::defaultConfig(), [
+                'industries' => ['FinTech'],
+                'territories' => ['Lagos, NG'],
+                'enrichContactDetails' => false,
+            ]),
+        ]);
+        $session = ChatSession::query()->create(['organization_id' => $org->id, 'user_id' => $user->id]);
+
+        Http::fake([
+            'google.serper.dev/*' => fn () => throw new ConnectionException('Could not resolve host: google.serper.dev'),
+            '*' => Http::response([], 404),
+        ]);
+
+        $response = $this->withHeaders($this->orgHeaders($org))
+            ->postJson("/api/v1/chat/sessions/{$session->id}/messages", [
+                'body' => 'Generate 6 leads',
+                'intent' => 'generate_leads',
+            ]);
+
+        $response->assertOk()->assertJsonPath('data.assistant_message.meta.retrieval_degraded.web_search', true);
+        $this->assertStringContainsString('web search', mb_strtolower((string) $response->json('data.assistant_message.body')));
     }
 
     public function test_database_company_without_country_is_dropped_when_territories_are_set(): void

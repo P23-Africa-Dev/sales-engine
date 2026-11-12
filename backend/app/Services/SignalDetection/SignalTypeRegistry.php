@@ -3,6 +3,7 @@
 namespace App\Services\SignalDetection;
 
 use App\Models\SignalTypeDefinition;
+use Database\Seeders\SignalTypeDefinitionSeeder;
 use Illuminate\Support\Collection;
 
 /**
@@ -20,16 +21,20 @@ class SignalTypeRegistry
      */
     public function ensureDefaults(): void
     {
-        if (SignalTypeDefinition::query()->whereNull('organization_id')->exists()) {
+        $seeder = new SignalTypeDefinitionSeeder;
+        $expected = $seeder->keys();
+        $existing = SignalTypeDefinition::query()->whereNull('organization_id')->whereIn('key', $expected)->count();
+        if ($existing >= count($expected)) {
             return;
         }
 
-        (new \Database\Seeders\SignalTypeDefinitionSeeder)->run();
+        // New built-in packs reach existing installs without a manual seed (idempotent upsert).
+        $seeder->run();
     }
 
     /**
      * @param  list<string>  $packs  e.g. ['default', 'software_dev_vertical']
-     * @return Collection<int, SignalTypeDefinition>  keyed by signal type `key`, one row per key
+     * @return Collection<int, SignalTypeDefinition> keyed by signal type `key`, one row per key
      */
     public function activeForPacks(?int $organizationId, array $packs): Collection
     {

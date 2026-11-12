@@ -142,6 +142,7 @@ class SocialListeningRunService
         $public = array_intersect_key($summary, array_flip([
             'totalChecked',
             'qualified',
+            'possible',
             'enrichment',
             'budget_exhausted',
             'model_unavailable',

@@ -19,6 +19,7 @@ export function ScanRunSummaryPanel({ run }: ScanRunSummaryPanelProps) {
   }
 
   const { totalChecked, qualified, enrichment } = run.result_summary;
+  const possible = run.result_summary.possible ?? 0;
   if (totalChecked === 0) {
     return null;
   }
@@ -35,10 +36,14 @@ export function ScanRunSummaryPanel({ run }: ScanRunSummaryPanelProps) {
           .join(", ") + "."
       : null;
 
-  const hasOpenings = qualified > 0;
-  const title = hasOpenings
-    ? `${qualified} new ${qualified === 1 ? "opportunity" : "opportunities"} from your latest scan`
-    : "Nothing new worth your time yet";
+  const hasOpenings = qualified > 0 || possible > 0;
+  const possibleNote =
+    possible > 0 ? ` plus ${possible} possible ${possible === 1 ? "opening" : "openings"} worth a look` : "";
+  const title = !hasOpenings
+    ? "Nothing new worth your time yet"
+    : qualified > 0
+      ? `${qualified} new ${qualified === 1 ? "opportunity" : "opportunities"}${possibleNote} from your latest scan`
+      : `${possible} possible ${possible === 1 ? "opening" : "openings"} worth a look from your latest scan`;
   const description = hasOpenings
     ? "We only keep posts that are a real opening for what you're looking for."
     : "We reviewed the latest conversations for what you're looking for and held back anything that wasn't a real opening. We'll keep listening — check back after the next scan.";

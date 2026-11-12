@@ -73,6 +73,7 @@ class SerperDiscoveryAdapter implements DiscoverySourceInterface
         $briefGeo = $this->serperGeoParams($brief);
         $hits = collect();
         $plan = $this->buildQueryPlan($queries, $briefGeo);
+        $retryUnreachable = true;
 
         foreach (array_chunk($plan, self::POOL_SIZE) as $chunk) {
             $responses = Http::pool(function ($pool) use ($chunk, $baseUrl, $resultLimit) {
@@ -83,7 +84,7 @@ class SerperDiscoveryAdapter implements DiscoverySourceInterface
                             'X-API-KEY' => (string) config('services.serper.api_key'),
                             'Content-Type' => 'application/json',
                         ])
-                        ->post($baseUrl . '/search', $this->searchPayload($entry['q'], $resultLimit, $entry['geo']));
+                        ->post($baseUrl.'/search', $this->searchPayload($entry['q'], $resultLimit, $entry['geo']));
                 }
             });
 
@@ -92,7 +93,22 @@ class SerperDiscoveryAdapter implements DiscoverySourceInterface
                 $geoParams = $entry['geo'];
                 $region = $entry['region'];
                 $response = $responses[(string) $index] ?? null;
+                if (! $response instanceof Response && $retryUnreachable) {
+                    // One retry for a momentary DNS/network blip. If the retry fails too, the
+                    // network is down and the remaining queries are not retried.
+                    try {
+                        $response = $this->postSearch($baseUrl, $query, $resultLimit, $geoParams);
+                    } catch (\Throwable $retryError) {
+                        $response = $retryError;
+                        $retryUnreachable = false;
+                    }
+                }
                 if (! $response instanceof Response) {
+                    // A network/DNS failure must count as a failed search, otherwise the run reads
+                    // as "searched and found nothing" instead of "web search unavailable".
+                    $this->health()->recordFailure('serper', 0, $response instanceof \Throwable ? $response->getMessage() : 'no response');
+                    Log::warning('Serper search unreachable', ['error' => $response instanceof \Throwable ? mb_substr($response->getMessage(), 0, 200) : null]);
+
                     continue;
                 }
 
@@ -143,7 +159,7 @@ class SerperDiscoveryAdapter implements DiscoverySourceInterface
                 $variantBrief = $brief->withSearchQueryOverride($activeQuery);
                 $mapped = $this->mapOrganicHits($response->json('organic') ?? [], $variantBrief, $ctx);
                 if ($region !== null) {
-                    $mapped = $mapped->map(fn(RawDiscoveryHit $hit): RawDiscoveryHit => $hit->withRegion($region));
+                    $mapped = $mapped->map(fn (RawDiscoveryHit $hit): RawDiscoveryHit => $hit->withRegion($region));
                 }
                 $hits = $hits->merge($mapped);
             }
@@ -170,7 +186,7 @@ class SerperDiscoveryAdapter implements DiscoverySourceInterface
                 $url = $item['link'] ?? null;
                 $snippet = $item['snippet'] ?? null;
                 $name = $this->resolveHitName($title, $url, $brief);
-                $haystack = trim($title . ' ' . (string) $snippet . ' ' . (string) $url);
+                $haystack = trim($title.' '.(string) $snippet.' '.(string) $url);
                 $inferredLocation = $this->discoveryGeo->inferLocationFromText($haystack);
 
                 return new RawDiscoveryHit(
@@ -347,7 +363,7 @@ class SerperDiscoveryAdapter implements DiscoverySourceInterface
                 $geo = array_filter([
                     'location' => trim((string) ($entry['location'] ?? '')),
                     'gl' => trim((string) ($entry['gl'] ?? '')),
-                ], static fn(string $value): bool => $value !== '');
+                ], static fn (string $value): bool => $value !== '');
                 $region = isset($entry['region']) && trim((string) $entry['region']) !== ''
                     ? trim((string) $entry['region'])
                     : null;
@@ -389,7 +405,7 @@ class SerperDiscoveryAdapter implements DiscoverySourceInterface
                 'location' => isset($params['location']) ? trim((string) $params['location']) : '',
                 'gl' => isset($params['gl']) ? trim((string) $params['gl']) : '',
             ],
-            static fn(string $value): bool => $value !== '',
+            static fn (string $value): bool => $value !== '',
         );
     }
 
@@ -415,7 +431,7 @@ class SerperDiscoveryAdapter implements DiscoverySourceInterface
                 'X-API-KEY' => (string) config('services.serper.api_key'),
                 'Content-Type' => 'application/json',
             ])
-            ->post($baseUrl . '/search', $this->searchPayload($query, $num, $geoParams));
+            ->post($baseUrl.'/search', $this->searchPayload($query, $num, $geoParams));
     }
 
     private function isFreeTierPatternBlock(Response $response): bool
@@ -541,7 +557,7 @@ class SerperDiscoveryAdapter implements DiscoverySourceInterface
                 }
             }
 
-            if (preg_match('/\b(top|richest|wealthiest|billionaires?)\b/u', mb_strtolower($hit->name . ' ' . ($hit->snippet ?? '')))) {
+            if (preg_match('/\b(top|richest|wealthiest|billionaires?)\b/u', mb_strtolower($hit->name.' '.($hit->snippet ?? '')))) {
                 $score += 20;
             }
 

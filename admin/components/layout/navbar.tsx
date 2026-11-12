@@ -5,7 +5,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
-import { ChevronDown, LogOut, Settings, Users } from "lucide-react";
+import { Activity, ChevronDown, LogOut, Settings, Users } from "lucide-react";
 import { useAdminAuth } from "@/components/auth/admin-auth-provider";
 
 const navItems = [
@@ -160,6 +160,14 @@ export function Navbar() {
                   >
                     <Users className="w-4 h-4" />
                     Account Management
+                  </Link>
+                  <Link
+                    href="/sales-engine/engine-health"
+                    className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-white/80 hover:bg-white/5 hover:text-white transition-colors"
+                    onClick={() => setIsDropdownOpen(false)}
+                  >
+                    <Activity className="w-4 h-4" />
+                    Engine Health
                   </Link>
                 </div>
 

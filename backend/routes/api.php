@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\V1\Admin\AdminAuthController;
 use App\Http\Controllers\Api\V1\Admin\AdminCrmController;
+use App\Http\Controllers\Api\V1\Admin\AdminEngineHealthController;
 use App\Http\Controllers\Api\V1\Admin\AdminOrganizationController;
 use App\Http\Controllers\Api\V1\Admin\AdminOutreachController;
 use App\Http\Controllers\Api\V1\Admin\AdminSmartLeadsController;
@@ -259,6 +260,7 @@ Route::prefix('admin')->group(function () {
             ->middleware('throttle:60,1');
 
         // Phase 4 — Social Listening
+        Route::get('/engine-health', [AdminEngineHealthController::class, 'show']);
         Route::get('/social-listening/overview', [AdminSocialListeningController::class, 'overview']);
         Route::get('/social-listening/signals/export', [AdminSocialListeningController::class, 'export'])
             ->middleware('throttle:10,1');

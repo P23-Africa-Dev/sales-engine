@@ -43,6 +43,22 @@ describe("ScanRunSummaryPanel", () => {
     expect(html).toContain("still looking for 1");
   });
 
+  it("mentions possible openings separately from strong ones", () => {
+    const html = renderToStaticMarkup(
+      <ScanRunSummaryPanel run={makeRun({ result_summary: { totalChecked: 40, qualified: 2, possible: 3 } })} />
+    );
+
+    expect(html).toContain("2 new opportunities plus 3 possible openings worth a look");
+  });
+
+  it("shows possible openings even when no strong ones were found", () => {
+    const html = renderToStaticMarkup(
+      <ScanRunSummaryPanel run={makeRun({ result_summary: { totalChecked: 40, qualified: 0, possible: 1 } })} />
+    );
+
+    expect(html).toContain("1 possible opening worth a look");
+  });
+
   it("renders nothing for a legacy string result_summary", () => {
     const html = renderToStaticMarkup(
       <ScanRunSummaryPanel run={makeRun({ result_summary: "Created 2 social signals from 5 raw hits." })} />

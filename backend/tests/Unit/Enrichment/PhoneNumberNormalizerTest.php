@@ -23,6 +23,12 @@ class PhoneNumberNormalizerTest extends TestCase
             'extension dropped' => ['+1 415 555 0100 ext. 22', null, '+14155550100'],
             'unknown country national number' => ['0803 123 4567', null, null],
             'too short' => ['12345', 'Nigeria', null],
+            'trunk zero after plus code' => ['+233 0302 211 593', null, '+233302211593'],
+            'ghana national' => ['0302 211 593', 'Ghana', '+233302211593'],
+            'singapore number written without plus is not made ghanaian' => ['65 6339 4100', 'Ghana', null],
+            'us number written without plus is not made ghanaian' => ['1 952 742 2000', 'Ghana', null],
+            'italian leading zero kept' => ['+39 06 1234 5678', null, '+390612345678'],
+            'kenyan mobile' => ['0728 144 198', 'Kenya', '+254728144198'],
         ];
     }
 

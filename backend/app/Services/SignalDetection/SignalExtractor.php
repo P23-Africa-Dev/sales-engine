@@ -54,14 +54,14 @@ class SignalExtractor
             [
                 'role' => 'system',
                 'content' => 'Decide whether a post is a genuine match for ONE discrete buyer-signal type. '
-                    . 'Do not force a fit. If it is a performance story, listicle, vague commentary, or a different event, set matched=false. '
-                    . 'For export_trade_activity_mention, matched=true only when the trade direction is into the ICP territories (or unspecified). Reject exports from ICP territories into unrelated markets. '
-                    . 'For open_developer_roles_unfilled, matched=true only when the posting has been live for 60+ days. '
-                    . 'Extract company_size and revenue only when the post itself states them — never copy ICP filter values. '
-                    . 'Return JSON only: {"matched":bool,"reject_reason":string,"company":string,"description":string,'
-                    . '"source_url":string,"source_date":"YYYY-MM-DD or empty","territory":string,'
-                    . '"named_people":[],"company_size":string,"revenue":string,"industry":string}. '
-                    . 'named_people = full names of real people taking an action in the post (empty if none).',
+                    .'Do not force a fit. If it is a performance story, listicle, vague commentary, or a different event, set matched=false. '
+                    .'For export_trade_activity_mention, matched=true only when the trade direction is into the ICP territories (or unspecified). Reject exports from ICP territories into unrelated markets. '
+                    .'For open_developer_roles_unfilled, matched=true only when the posting has been live for 60+ days. '
+                    .'Extract company_size and revenue only when the post itself states them — never copy ICP filter values. '
+                    .'Return JSON only: {"matched":bool,"reject_reason":string,"company":string,"description":string,'
+                    .'"source_url":string,"source_date":"YYYY-MM-DD or empty","territory":string,'
+                    .'"named_people":[],"company_size":string,"revenue":string,"industry":string}. '
+                    .'named_people = full names of real people taking an action in the post (empty if none).',
             ],
             [
                 'role' => 'user',
@@ -203,6 +203,10 @@ class SignalExtractor
             'new_embassy_consulate_presence' => ['embassy', 'consulate'],
             'expat_relocation_activity' => ['expat', 'relocating', 'relocation'],
             'complaints_about_transport_providers' => ['pickup', 'transport', 'driver', 'missed'],
+            'new_supply_availability' => ['available', 'in stock', 'harvest', 'capacity', 'price list', 'now taking', 'orders', 'supply', 'mt ', 'tonnes'],
+            'supplier_export_readiness' => ['licence', 'license', 'certified', 'certification', 'approval', 'first shipment', 'export'],
+            'fund_launch' => ['fund', 'investing in', 'invest in', 'thesis', 'closes', 'launches'],
+            'call_for_applications' => ['applications', 'apply', 'call for', 'deadline', 'cohort', 'accelerator', 'grant'],
             default => $this->tokensFromTrigger($type),
         };
 

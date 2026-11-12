@@ -56,6 +56,11 @@ class ExtractionService
 
             if ($isPeople) {
                 $heuristic = $this->fallbackPerson($hit, $brief);
+                if ($heuristic['not_a_person'] ?? false) {
+                    $extracted[$index] = [];
+
+                    continue;
+                }
                 $hasName = filled($heuristic['person_name'] ?? null);
                 if (($hasName && ! ($heuristic['low_confidence'] ?? true))
                     || ($hasName && $this->isLinkedInProfileUrl($hit->url))
@@ -742,6 +747,18 @@ class ExtractionService
                 $first = trim((string) (preg_split('/\s+[\-–—|·]\s+/u', $headline)[0] ?? ''));
                 $name = ! $this->isInitialsOnly($first) && preg_match('/^\p{Lu}[\p{L}\'.-]+(?:\s+\p{Lu}[\p{L}\'.-]+){1,3}$/u', $first) ? $first : '';
             }
+            if (! str_contains(trim($name), ' ')) {
+                // "fayombogabriel": a joined-up slug can't be split into first/last name reliably;
+                // leave it to the model (or drop it) rather than show "Fayombogabriel".
+                return [
+                    'name' => '',
+                    'person_name' => '',
+                    'summary' => $hit->snippet ?? '',
+                    'business_fields' => [],
+                    'commercial_signals' => [],
+                    'low_confidence' => true,
+                ];
+            }
         }
 
         // Headline first ("Name - Founder/CEO - Acme"), then the snippet. Only text that names a
@@ -758,6 +775,23 @@ class ExtractionService
         }
         if ($name === mb_strtoupper($name)) {
             $name = mb_convert_case(mb_strtolower($name), MB_CASE_TITLE, 'UTF-8');
+        }
+        if ($title !== null) {
+            $title = $this->titleWithoutLeadingName($title, $name);
+        }
+
+        // Some businesses run personal LinkedIn profiles ("Honesty Agro-exports"); a name built
+        // from business words is not a person to contact.
+        if (preg_match('/\b(?:agro|exports?|imports?|trading|ventures|capital|ltd|limited|company|enterprises?|farms?|cooperative|co-?op|foundation|fund|group|holdings|industries|solutions|services|consult(?:ing|ants)?)\b/iu', $name)) {
+            return [
+                'name' => '',
+                'person_name' => '',
+                'summary' => $hit->snippet ?? '',
+                'business_fields' => [],
+                'commercial_signals' => [],
+                'low_confidence' => true,
+                'not_a_person' => true,
+            ];
         }
 
         return array_filter([
@@ -816,6 +850,24 @@ class ExtractionService
      * "Gbolahanfaniran" (slug) → "Gbolahan Faniran" when the headline's first segment spells
      * the same letters; "Bukola A." style headlines keep the fuller slug name.
      */
+    /**
+     * "Charles Debrah Asante. Deputy Managing Director-Operations" → "Deputy Managing Director-Operations".
+     * Snippets often open with the person's name; it must not end up inside the job title.
+     */
+    private function titleWithoutLeadingName(string $title, string $name): ?string
+    {
+        $title = trim($title);
+        $name = trim($name);
+        if ($name !== '' && mb_stripos($title, $name) === 0) {
+            $title = ltrim(mb_substr($title, mb_strlen($name)), ' .,:;|·-–—');
+        } elseif (preg_match('/^((?:\p{Lu}[\p{L}\'-]+\s+){1,3}\p{Lu}[\p{L}\'-]+)[.,:|·]\s+(.+)$/u', $title, $m) && ! $this->looksLikeRole($m[1])) {
+            // "Firstname Lastname. Title" where the leading words are a name, not part of the role.
+            $title = trim($m[2]);
+        }
+
+        return $title !== '' && $this->looksLikeRole($title) ? $title : null;
+    }
+
     private function isInitialsOnly(string $name): bool
     {
         $parts = preg_split('/\s+/u', trim($name)) ?: [];

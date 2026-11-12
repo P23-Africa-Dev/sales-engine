@@ -24,6 +24,8 @@ return [
     'signal_type_packs' => [
         ['value' => 'default', 'label' => 'Default', 'description' => 'General buying signals across industries.'],
         ['value' => 'software_dev_vertical', 'label' => 'Software', 'description' => 'Hiring, tooling, and vendor-switch signals for software teams.'],
+        ['value' => 'supply_sourcing', 'label' => 'Supply & sourcing', 'description' => 'New stock, harvests, capacity or price lists, and suppliers becoming export-ready.'],
+        ['value' => 'funding_opportunities', 'label' => 'Funding opportunities', 'description' => 'New funds and investment theses, plus grant, accelerator and competition calls.'],
         ['value' => 'lagos_corporate_transport', 'label' => 'Lagos corporate transport', 'description' => 'Fleet, shuttle, and staff-mobility signals.'],
         ['value' => 'none', 'label' => 'None', 'description' => 'Do not add discrete signal-type searches.'],
     ],

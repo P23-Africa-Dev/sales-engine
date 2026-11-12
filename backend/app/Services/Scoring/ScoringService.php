@@ -17,6 +17,12 @@ class ScoringService
     /** Leads at or above this evidence score are "strong"; below it they are labelled partial matches. */
     public const QUALITY_BAR = 80;
 
+    /** Most candidates sent to the model per page; the rest keep their heuristic score. */
+    private const MAX_MODEL_SCORED = 16;
+
+    /** Seconds to wait for a model scoring batch before keeping the heuristic score. */
+    private const MODEL_SCORE_TIMEOUT = 25;
+
     /** Highest score any lead can show — nothing is a certain buyer. */
     private const SCORE_CEILING = 98.0;
 
@@ -408,6 +414,13 @@ class ScoringService
             return $scores;
         }
 
+        // Only the strongest borderline candidates are worth a model round-trip: the run keeps
+        // the best of them anyway, and each extra batch adds latency the user waits through.
+        if (count($borderline) > self::MAX_MODEL_SCORED) {
+            uksort($borderline, fn (int $a, int $b): int => ($scores[$b]['priority_score'] ?? 0) <=> ($scores[$a]['priority_score'] ?? 0));
+            $borderline = array_slice($borderline, 0, self::MAX_MODEL_SCORED, true);
+        }
+
         $isFactualQuery = $brief->isAuthoritativePeopleQuery();
         $chunks = array_chunk($borderline, self::SCORE_BATCH_SIZE, true);
         $requests = [];
@@ -431,7 +444,8 @@ class ScoringService
                         ], JSON_UNESCAPED_UNICODE),
                     ],
                 ],
-                'options' => ['timeout' => 45, 'max_tokens' => 2600],
+                // A late batch keeps its evidence-based heuristic score rather than holding the run.
+                'options' => ['timeout' => self::MODEL_SCORE_TIMEOUT, 'max_tokens' => 2000],
             ];
         }
 

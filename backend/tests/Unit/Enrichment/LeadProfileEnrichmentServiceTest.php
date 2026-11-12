@@ -3,6 +3,7 @@
 namespace Tests\Unit\Enrichment;
 
 use App\Models\IcpProfile;
+use App\Services\Discovery\DTO\IcpBrief;
 use App\Services\Enrichment\DTO\EnrichedLeadProfile;
 use App\Services\Enrichment\LeadProfileEnrichmentService;
 use Illuminate\Support\Facades\Cache;
@@ -144,5 +145,44 @@ class LeadProfileEnrichmentServiceTest extends TestCase
         $this->assertFalse($original->enrichmentAttempted);
         $this->assertTrue($updated->enrichmentAttempted);
         $this->assertSame('Founder', $updated->title);
+    }
+
+    public function test_company_decision_maker_must_work_there_and_title_is_never_invented(): void
+    {
+        config([
+            'services.serper.api_key' => 'test-serper',
+            'services.serper.base_url' => 'https://google.serper.dev',
+            'services.glm.api_key' => '',
+            'services.apollo.api_key' => '',
+            'services.hunter.api_key' => '',
+        ]);
+        [, $org] = $this->actingAsOrgMember();
+        Cache::flush();
+
+        Http::fake([
+            'google.serper.dev/search' => Http::response([
+                'organic' => [
+                    // Different company: skipped even though it matches the role.
+                    ['title' => 'Kofi Mensah - Managing Director - Olam Ghana | LinkedIn', 'link' => 'https://gh.linkedin.com/in/kofi-mensah-1a2b3c', 'snippet' => 'Managing Director at Olam Ghana.'],
+                    // Concatenated slug and no readable name in the title: skipped.
+                    ['title' => 'LinkedIn profile', 'link' => 'https://gh.linkedin.com/in/laragustavo', 'snippet' => 'Works at Cargill Ghana.'],
+                    ['title' => 'Ama Owusu - Head of Sourcing - Cargill Ghana | LinkedIn', 'link' => 'https://gh.linkedin.com/in/ama-owusu-9f8e7d6c', 'snippet' => 'Head of Sourcing at Cargill Ghana.'],
+                ],
+            ], 200),
+            '*' => Http::response('', 404),
+        ]);
+
+        $icp = IcpProfile::query()->create([
+            'organization_id' => $org->id, 'name' => 'Cocoa', 'is_active' => true,
+            'config' => array_merge(IcpProfile::defaultConfig(), ['decisionMakers' => ['Managing Director'], 'enrichContactDetails' => true]),
+        ]);
+
+        $service = app(LeadProfileEnrichmentService::class);
+        $service->setDeferContactWaterfall(true);
+        $found = $service->enrichCompanyDecisionMaker($org, $icp, 'Cargill Ghana', IcpBrief::fromIcpProfile($icp), ['company' => 'Cargill Ghana']);
+
+        $this->assertSame('Ama Owusu', $found['contact_person'] ?? null);
+        $this->assertSame('Head of Sourcing', $found['title'] ?? null);
+        $this->assertStringNotContainsString('Managing Director', (string) ($found['title'] ?? ''));
     }
 }

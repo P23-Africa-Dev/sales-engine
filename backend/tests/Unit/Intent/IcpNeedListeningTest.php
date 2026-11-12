@@ -146,4 +146,14 @@ class IcpNeedListeningTest extends TestCase
             'evidence_quote' => 'Acumen Digital is a Lagos-based digital technology company that works across mobile app development',
         ], $text, $profile));
     }
+
+    public function test_funding_queries_name_the_startup_sector_not_funding_jargon(): void
+    {
+        $profile = new ListeningProfile('raise', 'agritech funding', [], false, ['Kenya'], synonyms: ['venture capital', 'impact investing', 'agriculture tech investors'], target: 'agritech investors in Kenya');
+
+        $queries = implode(' | ', array_column(app(IcpOpportunityQueryBuilder::class)->plan($profile), 'query'));
+
+        $this->assertStringContainsString('agritech', $queries);
+        $this->assertStringNotContainsString('"venture capital"', $queries);
+    }
 }

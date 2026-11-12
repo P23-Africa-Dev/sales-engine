@@ -62,7 +62,7 @@ class IcpOpportunityQueryBuilder
             'invest' => $this->investLanes($terms, $place),
             'partner' => $this->partnerLanes($terms, $place),
             'source' => $this->sourceLanes($profile, $terms, $place),
-            'raise' => $this->raiseLanes($terms, $place),
+            'raise' => $this->raiseLanes($this->sectorTerms($profile) ?: $terms, $place),
             default => [...$this->sellLanes($profile, $terms, $place), $this->targetMomentLane($profile, $place)],
         };
         // The planner writes how the other side of this need actually posts ("we supply bulk
@@ -220,6 +220,29 @@ class IcpOpportunityQueryBuilder
         }
 
         return [$offering, $recommended, $pain];
+    }
+
+    /**
+     * The sector a funding need is about ("agritech"), without the funding vocabulary itself.
+     * "venture capital" or "startup funding" as a search term matches every investor post
+     * online; the sector is what makes an investor relevant to this startup.
+     *
+     * @return list<string>
+     */
+    private function sectorTerms(ListeningProfile $profile): array
+    {
+        $funding = '/\b(funding|funds?|fundraising|investors?|investment|investing|venture capital|vc|vcs|capital|grants?|accelerators?|seed|series [a-e]|startup|startups|impact|pitch(es)?)\b/iu';
+        $terms = [];
+        foreach ([$profile->offer, $profile->target, ...$profile->synonyms] as $term) {
+            $sector = trim(preg_replace('/\s+/u', ' ', preg_replace($funding, ' ', (string) $term) ?? '') ?? '');
+            $sector = trim(preg_replace('/\b(for|in|of|and|the|our|my)\b/iu', ' ', $sector) ?? $sector);
+            $sector = trim(preg_replace('/\s+/u', ' ', $sector) ?? $sector);
+            if ($sector !== '' && mb_strlen($sector) >= 3 && ! in_array(mb_strtolower($sector), array_map('mb_strtolower', $terms), true)) {
+                $terms[] = $sector;
+            }
+        }
+
+        return array_slice($terms, 0, 3);
     }
 
     /**

@@ -39,6 +39,18 @@ class DomainResolver
         'the', 'and', 'of', 'international', 'intl', 'global', 'nigeria', 'ng', 'uk', 'usa', 'africa',
     ];
 
+    /**
+     * Industry/common words that never identify one company on their own.
+     */
+    private const GENERIC_TOKENS = [
+        'cocoa', 'coffee', 'tea', 'cashew', 'shea', 'agro', 'agri', 'agric', 'farm', 'farms', 'food', 'foods',
+        'trade', 'trading', 'export', 'exports', 'import', 'commodities', 'processing', 'capital', 'ventures',
+        'venture', 'partners', 'investment', 'investments', 'fund', 'funds', 'finance', 'financial', 'bank',
+        'pay', 'payments', 'tech', 'technology', 'technologies', 'digital', 'solutions', 'services', 'systems',
+        'logistics', 'energy', 'health', 'media', 'consulting', 'industries', 'enterprise', 'enterprises',
+        'business', 'development', 'foundation', 'initiative', 'federation', 'association', 'council', 'premium',
+    ];
+
     public function __construct(
         private readonly SerperClient $serper,
     ) {}
@@ -48,12 +60,13 @@ class DomainResolver
      */
     public function resolve(?string $website, ?string $company, array $snippets = [], ?string $location = null): ?string
     {
+        $company = trim((string) $company);
         $fromWebsite = $this->hostFrom($website);
-        if ($fromWebsite !== null && ! $this->isNonCompanyHost($fromWebsite)) {
+        if ($fromWebsite !== null && ! $this->isNonCompanyHost($fromWebsite)
+            && (! $this->isGovernmentHost($fromWebsite) || $this->hostMatchesCompany($fromWebsite, $company))) {
             return $fromWebsite;
         }
 
-        $company = trim((string) $company);
         if ($company === '' || $this->companyTokens($company) === []) {
             return null;
         }
@@ -116,6 +129,26 @@ class DomainResolver
     }
 
     /**
+     * Regulator/government sites often list licensed companies; a company "website" found
+     * there (e.g. a PSP on cbn.gov.ng) is the regulator's, not the company's.
+     */
+    public function isGovernmentHost(string $host): bool
+    {
+        return (bool) preg_match('/(?:^|\.)(?:gov|go|gouv|gob|govt|mil)(?:\.[a-z]{2})?$/i', $host);
+    }
+
+    /**
+     * True when the name is a single industry word ("Cocoa", "Payments Ltd"), which can't be
+     * tied to one business's website, listing or phone line.
+     */
+    public function isGenericCompanyName(string $company): bool
+    {
+        $tokens = $this->companyTokens($company);
+
+        return count($tokens) === 1 && in_array($tokens[0], self::GENERIC_TOKENS, true);
+    }
+
+    /**
      * Significant lower-case tokens of a company name ("Acme Corp Ltd" → ["acme"]).
      *
      * @return list<string>
@@ -142,7 +175,13 @@ class DomainResolver
         $labels = explode('.', mb_strtolower($host));
         $core = str_replace('-', '', implode('', array_slice($labels, 0, max(1, count($labels) - 1))));
 
-        if (str_contains($core, implode('', $tokens))) {
+        $joined = implode('', $tokens);
+        if (count($tokens) === 1 && in_array($joined, self::GENERIC_TOKENS, true)) {
+            // A one-word industry name ("Cocoa") only matches its exact domain (cocoa.com).
+            return $core === $joined;
+        }
+
+        if (str_contains($core, $joined)) {
             return true;
         }
 
@@ -151,7 +190,11 @@ class DomainResolver
             return true;
         }
 
-        return mb_strlen($tokens[0]) >= 3 && str_contains($core, $tokens[0]);
+        // "Cargill Ghana" → cargill.com is fine, but "Cocoa Processing Company" must not
+        // land on cocoafederation.com: an industry word alone identifies nobody.
+        return mb_strlen($tokens[0]) >= 3
+            && ! in_array($tokens[0], self::GENERIC_TOKENS, true)
+            && str_contains($core, $tokens[0]);
     }
 
     /**

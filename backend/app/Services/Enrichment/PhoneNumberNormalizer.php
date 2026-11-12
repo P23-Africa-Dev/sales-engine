@@ -49,6 +49,23 @@ class PhoneNumberNormalizer
         'KG' => '996', 'UZ' => '998',
     ];
 
+    /**
+     * Allowed national significant-number lengths (after the calling code, without the
+     * trunk 0) for countries where they are fixed. A number outside the range was almost
+     * always another country's number written without "+" (e.g. "65 6339 4100").
+     *
+     * @var array<string, array{int, int}>
+     */
+    private const NATIONAL_LENGTHS = [
+        'GH' => [9, 9], 'KE' => [9, 9], 'UG' => [9, 9], 'TZ' => [9, 9], 'RW' => [9, 9], 'ET' => [9, 9],
+        'ZA' => [9, 9], 'ZM' => [9, 9], 'SN' => [9, 9], 'CM' => [9, 9], 'MA' => [9, 9], 'CI' => [10, 10],
+        'NG' => [8, 10], 'EG' => [8, 10], 'GB' => [9, 10], 'IN' => [10, 10], 'SG' => [8, 8], 'AE' => [8, 9],
+        'CH' => [9, 9], 'FR' => [9, 9], 'NL' => [9, 9], 'ES' => [9, 9], 'AU' => [9, 9],
+    ];
+
+    /** Countries whose leading 0 is part of the number, not a national trunk prefix. */
+    private const KEEPS_LEADING_ZERO = ['39'];
+
     public function __construct(private readonly DiscoveryGeo $geo) {}
 
     /**
@@ -166,11 +183,54 @@ class PhoneNumberNormalizer
 
     private function validE164(string $digits): ?string
     {
+        if (str_starts_with($digits, '0')) {
+            return null;
+        }
+
+        $code = $this->callingCodeOf($digits);
+        if ($code !== null) {
+            $national = substr($digits, strlen($code));
+            if (str_starts_with($national, '0') && ! in_array($code, self::KEEPS_LEADING_ZERO, true)) {
+                $national = ltrim($national, '0');
+                $digits = $code.$national;
+            }
+            if (! $this->plausibleNationalLength($code, strlen($national))) {
+                return null;
+            }
+        }
+
         $length = strlen($digits);
-        if ($length < 8 || $length > 15 || str_starts_with($digits, '0')) {
+        if ($length < 8 || $length > 15) {
             return null;
         }
 
         return '+'.$digits;
+    }
+
+    /**
+     * Calling code at the start of an international number (codes are prefix-free).
+     */
+    private function callingCodeOf(string $digits): ?string
+    {
+        $codes = array_flip(self::CALLING_CODES);
+        foreach ([1, 2, 3] as $size) {
+            $candidate = substr($digits, 0, $size);
+            if (isset($codes[$candidate])) {
+                return $candidate;
+            }
+        }
+
+        return null;
+    }
+
+    private function plausibleNationalLength(string $code, int $length): bool
+    {
+        foreach (self::NATIONAL_LENGTHS as $iso => [$min, $max]) {
+            if ((self::CALLING_CODES[$iso] ?? null) === $code) {
+                return $length >= $min && $length <= $max;
+            }
+        }
+
+        return true;
     }
 }

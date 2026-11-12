@@ -144,7 +144,8 @@ class LeadProfileEnrichmentService
             return $extracted;
         }
 
-        $personName = $this->guessPersonNameFromResults($searchResults, $companyName);
+        $person = $this->guessPersonFromResults($searchResults, $companyName);
+        $personName = $person['name'] ?? null;
         if ($personName === null) {
             // Still try to pull title/linkedin from snippets without a named person.
             $profile = $this->parseWithGlm(
@@ -170,24 +171,25 @@ class LeadProfileEnrichmentService
             return $extracted;
         }
 
+        // The role comes only from the search result itself, never from the roles the ICP
+        // asked for: a guessed title presented as fact is worse than no title.
+        $evidencedTitle = (string) ($person['title'] ?? '');
         $enriched = $this->enrich($organization, $icp, $personName, $brief->query, array_merge($extracted, [
             'company' => $companyName,
-            'title' => trim((string) ($extracted['title'] ?? ($titleHints[0] ?? ''))),
+            'title' => $evidencedTitle,
         ]));
 
         $merged = $enriched->mergeIntoExtraction($extracted);
         if (trim((string) ($merged['company'] ?? '')) === '') {
             $merged['company'] = $companyName;
         }
-        // Keep Lead.name as the company; store person as contact context in title if missing.
-        if (trim((string) ($merged['title'] ?? '')) === '' && $personName !== '') {
-            $merged['title'] = trim((string) ($titleHints[0] ?? 'Decision maker')).' ('.$personName.')';
-        } elseif (trim((string) ($merged['title'] ?? '')) !== '' && ! str_contains((string) $merged['title'], $personName)) {
-            // Prefer explicit person name in meta for CRM contactability.
-            $merged['contact_person'] = $personName;
-        } else {
-            $merged['contact_person'] = $personName;
+        if ($evidencedTitle !== '') {
+            $merged['title'] = $evidencedTitle;
         }
+        if (($person['url'] ?? '') !== '' && trim((string) ($merged['linkedin_url'] ?? '')) === '') {
+            $merged['linkedin_url'] = $person['url'];
+        }
+        $merged['contact_person'] = $personName;
 
         return $merged;
     }
@@ -211,39 +213,99 @@ class LeadProfileEnrichmentService
     }
 
     /**
+     * A named person who the result shows actually works at the company, with the role the
+     * result states. Results that don't mention the company are skipped: a search for
+     * "Managing Director Cargill" also returns people from other firms.
+     *
      * @param  list<array{title: string, snippet: ?string, url: ?string}>  $results
+     * @return array{name: string, title: string, url: string}|null
      */
-    private function guessPersonNameFromResults(array $results, string $companyName): ?string
+    private function guessPersonFromResults(array $results, string $companyName): ?array
     {
         foreach ($results as $result) {
-            $title = (string) ($result['title'] ?? '');
+            $title = trim((string) ($result['title'] ?? ''));
             $url = (string) ($result['url'] ?? '');
+            $isProfile = $url !== '' && str_contains(mb_strtolower($url), 'linkedin.com/in/');
 
-            if ($url !== '' && str_contains(mb_strtolower($url), 'linkedin.com/in/')) {
-                $path = parse_url($url, PHP_URL_PATH) ?? '';
-                if (preg_match('#/in/([^/?]+)#', $path, $matches)) {
-                    $slug = str_replace(['-', '_'], ' ', $matches[1]);
-                    $candidate = ucwords($slug);
-                    if ($this->queryIntent->looksLikeContentOrGenericPhrase($candidate)) {
-                        continue;
-                    }
-                    if (mb_strtolower($candidate) !== mb_strtolower($companyName)) {
-                        return $candidate;
-                    }
+            if (! $this->mentionsCompany($title.' '.($result['snippet'] ?? ''), $companyName)) {
+                continue;
+            }
+
+            // "Jane Doe - CEO - Acme | LinkedIn" / "Jane Doe – Head of Sales at Acme"
+            $segments = array_values(array_filter(array_map('trim', preg_split('/\s+[-–|·]\s+/u', $title) ?: [])));
+            $name = $segments[0] ?? '';
+            if (! $this->looksLikePersonName($name, $companyName)) {
+                $name = $isProfile ? $this->nameFromProfileSlug($url) : '';
+            }
+            if ($name === '' || ! $this->looksLikePersonName($name, $companyName)) {
+                continue;
+            }
+
+            $role = '';
+            foreach (array_slice($segments, 1) as $segment) {
+                $segment = trim((string) preg_replace('/\s+(?:at|@)\s+.+$/iu', '', $segment));
+                if ($segment !== '' && ! preg_match('/linkedin/i', $segment) && ! $this->mentionsCompany($segment, $companyName)
+                    && preg_match('/\b(?:ceo|cto|cfo|coo|chief|founder|co-founder|director|head|manager|partner|principal|president|vice|vp|officer|lead|owner|chairman|associate|analyst)\b/i', $segment)) {
+                    $role = mb_substr($segment, 0, 90);
+                    break;
                 }
             }
 
-            // "Jane Doe - CEO at Acme | LinkedIn"
-            if (preg_match('/^([A-Z][\p{L}\'-]+(?:\s+[A-Z][\p{L}\'-]+)+)\s*[-–|]/u', $title, $m)) {
-                $candidate = trim($m[1]);
-                if (! $this->queryIntent->looksLikeContentOrGenericPhrase($candidate)
-                    && mb_strtolower($candidate) !== mb_strtolower($companyName)) {
-                    return $candidate;
-                }
-            }
+            return ['name' => $name, 'title' => $role, 'url' => $isProfile ? $url : ''];
         }
 
         return null;
+    }
+
+    private function mentionsCompany(string $text, string $companyName): bool
+    {
+        $core = mb_strtolower(trim((string) preg_replace(
+            '/\b(?:limited|ltd|plc|inc|llc|company|co|group|holdings|cooperative|international|corporation|corp)\b\.?/iu',
+            ' ',
+            $companyName,
+        )));
+        $core = trim((string) preg_replace('/[^\p{L}\p{N}]+/u', ' ', $core));
+        if ($core === '') {
+            return false;
+        }
+
+        $haystack = ' '.trim((string) preg_replace('/[^\p{L}\p{N}]+/u', ' ', mb_strtolower($text))).' ';
+
+        return str_contains($haystack, ' '.$core.' ');
+    }
+
+    private function looksLikePersonName(string $candidate, string $companyName): bool
+    {
+        $candidate = trim($candidate);
+        if (! preg_match('/^\p{Lu}[\p{L}\'’.-]+(?:\s+\p{Lu}[\p{L}\'’.-]*){1,3}$/u', $candidate)) {
+            return false;
+        }
+
+        return mb_strtolower($candidate) !== mb_strtolower($companyName)
+            && ! $this->mentionsCompany($candidate, $companyName)
+            && ! $this->queryIntent->looksLikeContentOrGenericPhrase($candidate);
+    }
+
+    /**
+     * "jane-doe-4a5b6c" → "Jane Doe". Concatenated slugs ("janedoe") can't be split
+     * reliably and are rejected.
+     */
+    private function nameFromProfileSlug(string $url): string
+    {
+        $path = (string) (parse_url($url, PHP_URL_PATH) ?? '');
+        if (! preg_match('#/in/([^/?]+)#', $path, $matches)) {
+            return '';
+        }
+
+        $words = array_filter(
+            explode(' ', str_replace(['-', '_'], ' ', rawurldecode($matches[1]))),
+            fn (string $word): bool => $word !== '' && preg_match('/^\p{L}+$/u', $word) === 1,
+        );
+        if (count($words) < 2 || count($words) > 4) {
+            return '';
+        }
+
+        return implode(' ', array_map(fn (string $w): string => mb_convert_case($w, MB_CASE_TITLE), $words));
     }
 
     public function shouldEnrich(IcpProfile $icp): bool
