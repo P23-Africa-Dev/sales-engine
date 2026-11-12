@@ -18,6 +18,7 @@ use App\Services\Discovery\DTO\IcpBrief;
 use App\Services\Discovery\DTO\RawDiscoveryHit;
 use App\Services\Discovery\DTO\SearchContext;
 use App\Services\Enrichment\LeadProfileEnrichmentService;
+use App\Services\Enrichment\PersonHeadlineResolver;
 use App\Services\Enrichment\ProfileUrlValidator;
 use App\Services\Enrichment\WebsiteContactCrawler;
 use App\Services\Extraction\ExtractionService;
@@ -1347,6 +1348,19 @@ class DiscoveryOrchestrator
         $heuristicOnly = $this->deferContactEnrichment
             || $this->pastSoftDeadline()
             || $this->remainingSeconds() < 45;
+
+        // People found via posts or thin snippets often lack role/employer; read them from the
+        // person's own profile result so the role dimension is evidence, not "unknown".
+        if (! $this->pastSoftDeadline() && (bool) config('services.contact_finder.person_headlines', true)) {
+            $scorePayloads = $this->timed('person_headlines', fn (): array => app(PersonHeadlineResolver::class)->fill($scorePayloads));
+            foreach ($prepared as $index => $candidate) {
+                foreach (['title', 'company', 'role_source', 'company_source'] as $field) {
+                    if (filled($scorePayloads[$index][$field] ?? null) && blank($candidate['extracted'][$field] ?? null)) {
+                        $prepared[$index]['extracted'][$field] = $scorePayloads[$index][$field];
+                    }
+                }
+            }
+        }
 
         $scorePayloads = $this->timed('website_evidence', fn (): array => $this->attachWebsiteEvidence($scorePayloads, $brief));
         $batchScores = $this->timed('score', fn (): array => $this->scoring->scoreBatch($scorePayloads, $brief, $organization, $heuristicOnly));

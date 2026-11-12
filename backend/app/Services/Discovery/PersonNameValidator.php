@@ -111,6 +111,9 @@ class PersonNameValidator
      * @var list<string>
      */
     private const TITLE_TOKENS = [
+        // Post-nominal credentials that leak in from profile slugs ("eyituoyo-mogbeyi-llm-cams").
+        'llm', 'llb', 'dcp', 'cams', 'cfe', 'cdpo', 'cisa', 'cism', 'cissp', 'cipp', 'acca', 'aca', 'fca', 'cfa',
+        'cpa', 'mba', 'msc', 'bsc', 'phd', 'pmp', 'acams', 'cipm', 'acib', 'fcib', 'mcips', 'aml', 'cft',
         'ceo',
         'cto',
         'cfo',
@@ -210,7 +213,7 @@ class PersonNameValidator
         }
 
         $tokens = preg_split('/\s+/u', $trimmed) ?: [];
-        $tokens = array_values(array_filter($tokens, fn(string $t) => $t !== ''));
+        $tokens = array_values(array_filter($tokens, fn (string $t) => $t !== ''));
 
         if (count($tokens) === 0) {
             return false;

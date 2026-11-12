@@ -21,6 +21,11 @@ class DomainResolverMatchTest extends TestCase
             'one generic word only matches exactly' => ['cocoainitiative.org', 'Cocoa', false],
             'generic word exact domain' => ['cocoa.com', 'Cocoa', true],
             'full multi-word name' => ['cocoaprocessingcompany.com', 'Cocoa Processing Company', true],
+            'country second-level domain with initials' => ['kcv.co.ke', 'Kenya Climate Ventures', true],
+            'distinctive word that is not first' => ['paytech.ng', 'Payment Technology Limited (PAYTECH)', true],
+            'listing site is not the company' => ['capboard.io', 'Exponential Impact', false],
+            'all-generic name is not a substring match' => ['centralbanking.com', 'Central Bank of Nigeria', false],
+            'name plus legal suffix in host' => ['eesolutionslimited.africa', 'EE SOLUTIONS LTD', true],
         ];
     }
 
@@ -35,7 +40,7 @@ class DomainResolverMatchTest extends TestCase
         $resolver = app(DomainResolver::class);
 
         $this->assertNull($resolver->resolve('https://www.cbn.gov.ng/psp-list', 'Arca Payments Company Limited'));
-        $this->assertSame('cocobod.gh', $resolver->resolve('https://cocobod.gh', 'Ghana Cocoa Board'));
+        $this->assertSame('cbn.gov.ng', $resolver->resolve('https://www.cbn.gov.ng', 'CBN'));
         $this->assertSame('arca.network', $resolver->resolve('https://arca.network', 'Arca Payments Company Limited'));
     }
 
@@ -47,5 +52,25 @@ class DomainResolverMatchTest extends TestCase
         $this->assertTrue($resolver->isGenericCompanyName('Payments Ltd'));
         $this->assertFalse($resolver->isGenericCompanyName('Cocoa Processing Company'));
         $this->assertFalse($resolver->isGenericCompanyName('Olam'));
+    }
+
+    /**
+     * @return array<string, array{string, string, bool}>
+     */
+    public static function strictProvider(): array
+    {
+        return [
+            'exact' => ['bomarts.com', 'Bomarts Farms Limited', true],
+            'name plus group' => ['olamgroup.com', 'Olam', true],
+            'longer unrelated host' => ['cedev.org', 'Cede', false],
+            'name buried in another host' => ['inthismomentofficial.com', 'Moment', false],
+            'different company' => ['thevillagecompany.com', 'Village of Naturals', false],
+        ];
+    }
+
+    #[DataProvider('strictProvider')]
+    public function test_a_persons_employer_needs_a_near_exact_domain(string $host, string $company, bool $expected): void
+    {
+        $this->assertSame($expected, app(DomainResolver::class)->hostMatchesCompany($host, $company, true));
     }
 }

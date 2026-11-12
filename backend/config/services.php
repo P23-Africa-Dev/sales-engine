@@ -95,6 +95,8 @@ return [
         'queue' => env('CONTACT_FINDER_QUEUE', 'enrichment'),
         // Read top candidates' homepages as industry evidence before scoring (cached per domain).
         'evidence_check' => (bool) env('LEAD_EVIDENCE_CHECK', true),
+        // Fill missing role/employer of people from their own LinkedIn result before scoring.
+        'person_headlines' => (bool) env('LEAD_PERSON_HEADLINES', true),
     ],
 
     'bytemine' => [

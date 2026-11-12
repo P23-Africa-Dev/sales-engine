@@ -114,7 +114,7 @@ class ContactEnrichmentOrchestrator
 
         // Resolve the company domain first: every email below is judged against it.
         $location = isset($seed['location']) ? (string) $seed['location'] : null;
-        $domain = $this->domainResolver->resolve($seed['website'] ?? null, $company, $snippets, $location);
+        $domain = $this->domainResolver->resolve($seed['website'] ?? null, $company, $snippets, $location, ! $isCompanyLead);
         $contacts['domain'] = $domain;
         $country ??= $this->countryFromDomain($domain);
         $this->gateDomain = $domain;
@@ -433,7 +433,7 @@ class ContactEnrichmentOrchestrator
     private function acceptCompanyEmail(array &$contacts, string $email, string $method, ?string $sourceUrl, string $confidence, string $tier, string $provider, bool $isCompanyLead): bool
     {
         $email = $this->text->normalizeEmail($email);
-        if ($email === null || $this->isUnusableGeneric($email) || ! $this->emailBelongsToCompany($email)) {
+        if ($email === null || $this->isUnreliableSource($sourceUrl) || $this->isUnusableGeneric($email) || ! $this->emailBelongsToCompany($email)) {
             return false;
         }
 
@@ -473,7 +473,7 @@ class ContactEnrichmentOrchestrator
     private function acceptCompanyPhone(array &$contacts, string $phone, string $method, ?string $sourceUrl, string $confidence, ?string $country, string $tier, string $provider, bool $isCompanyLead): bool
     {
         $clean = $this->text->cleanPhone($phone);
-        if ($clean === null) {
+        if ($clean === null || $this->isUnreliableSource($sourceUrl)) {
             return false;
         }
 
@@ -483,6 +483,11 @@ class ContactEnrichmentOrchestrator
         }
         // A switchboard in another country is the head office, not a local line.
         $lineType = $this->phoneNormalizer->belongsToCountry($normalized, $this->gateCountry) ? 'company_line' : 'hq_line';
+        if ($lineType === 'hq_line' && ! $this->isContactPage($sourceUrl)) {
+            // A foreign number on a product/news page (a supplier listing, a subsidiary's
+            // page) is someone else's; head-office lines only come from contact-type pages.
+            return false;
+        }
         $filled = false;
         if ($contacts['company_phone'] === '') {
             $contacts['company_phone'] = $normalized;
@@ -507,7 +512,7 @@ class ContactEnrichmentOrchestrator
     private function setEmail(array &$contacts, string $email, string $type, string $method, ?string $sourceUrl, string $confidence, string $tier, string $provider): bool
     {
         $email = $this->text->normalizeEmail($email);
-        if ($email === null || $contacts['email'] !== '' || ! $this->emailAllowedForLead($email)) {
+        if ($email === null || $contacts['email'] !== '' || $this->isUnreliableSource($sourceUrl) || ! $this->emailAllowedForLead($email)) {
             return false;
         }
 
@@ -525,7 +530,7 @@ class ContactEnrichmentOrchestrator
     private function setPhone(array &$contacts, string $phone, string $type, string $method, ?string $sourceUrl, string $confidence, ?string $country, string $tier, string $provider): bool
     {
         $clean = $this->text->cleanPhone($phone);
-        if ($clean === null || $contacts['phone'] !== '') {
+        if ($clean === null || $contacts['phone'] !== '' || $this->isUnreliableSource($sourceUrl)) {
             return false;
         }
 
@@ -632,6 +637,38 @@ class ContactEnrichmentOrchestrator
         }
 
         return $this->text->emailMatchesPerson($email, $this->gatePerson);
+    }
+
+    /**
+     * A social *post* (not a profile/page): a number or address in it belongs to whoever
+     * posted, not reliably to this lead. The company's own page (facebook.com/acme) still counts.
+     */
+    private function isUnreliableSource(?string $sourceUrl): bool
+    {
+        $url = mb_strtolower((string) $sourceUrl);
+
+        // Document-sharing sites host other people's CVs and brochures.
+        if ($url !== '' && preg_match('~(?:scribd\.com|slideshare\.net|issuu\.com|docplayer\.|pdfcoffee\.com|studocu\.com|yumpu\.com)~', $url)) {
+            return true;
+        }
+
+        return $url !== '' && (bool) preg_match(
+            '~(?:instagram\.com/(?:p|reel|reels|tv)/|facebook\.com/.+/(?:posts|videos|photos)/|facebook\.com/(?:permalink|story|photo|watch)|(?:x|twitter)\.com/[^/]+/status/|tiktok\.com/@[^/]+/video/|linkedin\.com/(?:posts|feed)/)~',
+            $url,
+        );
+    }
+
+    private function isContactPage(?string $sourceUrl): bool
+    {
+        $url = trim((string) $sourceUrl);
+        if ($url === '' || str_contains($url, 'maps.google.')) {
+            return true;
+        }
+
+        $path = trim((string) parse_url($url, PHP_URL_PATH), '/');
+
+        // Whole path segments only: ".../someone-you-care-about-0" is not an About page.
+        return $path === '' || (bool) preg_match('~(?:^|/)(?:contact|contact-us|contactus|about|about-us|aboutus|impressum|imprint|reach-us|locations?|offices?|support|get-in-touch|connect)(?:[/.]|\.html?|$)~i', $path);
     }
 
     private function isUnusableGeneric(string $email): bool

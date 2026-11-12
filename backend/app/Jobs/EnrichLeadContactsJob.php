@@ -233,7 +233,7 @@ class EnrichLeadContactsJob implements ShouldQueue
         // head-office number, another company's mailbox). The checker saw it as a seed; if it
         // did not keep it, it does not belong on this lead.
         if ($contacts !== []) {
-            foreach (['email', 'phone'] as $key) {
+            foreach (['email', 'phone', 'company_email', 'company_phone'] as $key) {
                 $existing = trim((string) ($meta[$key] ?? ''));
                 $checked = trim((string) ($contacts[$key] ?? ''));
                 if ($existing !== '' && $checked === '') {
@@ -253,7 +253,7 @@ class EnrichLeadContactsJob implements ShouldQueue
             }
         }
 
-        foreach (['linkedin_url', 'title', 'company_email', 'company_phone', 'address'] as $key) {
+        foreach (['linkedin_url', 'title', 'address'] as $key) {
             $value = trim((string) ($contacts[$key] ?? ''));
             if ($value !== '' && trim((string) ($meta[$key] ?? '')) === '') {
                 $meta[$key] = $value;

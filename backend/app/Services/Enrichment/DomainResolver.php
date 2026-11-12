@@ -49,6 +49,18 @@ class DomainResolver
         'pay', 'payments', 'tech', 'technology', 'technologies', 'digital', 'solutions', 'services', 'systems',
         'logistics', 'energy', 'health', 'media', 'consulting', 'industries', 'enterprise', 'enterprises',
         'business', 'development', 'foundation', 'initiative', 'federation', 'association', 'council', 'premium',
+        'aml', 'kyc', 'fraud', 'risk', 'compliance', 'regtech', 'fintech', 'agritech', 'east', 'west', 'north',
+        'south', 'central', 'region', 'self', 'freelance', 'freelancer', 'independent', 'confidential', 'stealth',
+        'software', 'marketing', 'board', 'ghana', 'kenya', 'lagos', 'accra', 'nairobi', 'uganda', 'tanzania',
+        'rwanda', 'senegal', 'egypt', 'ethiopia', 'zambia', 'cameroon', 'impact', 'climate', 'innovation',
+    ];
+
+    /**
+     * What may follow the company name in its own domain (bomarts-group.com, eesolutionslimited).
+     */
+    private const HOST_REMAINDERS = [
+        '', 'limited', 'ltd', 'group', 'global', 'hq', 'inc', 'africa', 'ng', 'gh', 'ke', 'app', 'online', 'co',
+        'plc', 'company', 'international', 'intl', 'holdings', 'llc', 'corp', 'uk', 'usa',
     ];
 
     public function __construct(
@@ -58,12 +70,18 @@ class DomainResolver
     /**
      * @param  list<array{title?: ?string, snippet?: ?string, url?: ?string}>  $snippets
      */
-    public function resolve(?string $website, ?string $company, array $snippets = [], ?string $location = null): ?string
+    /**
+     * @param  bool  $strict  The company is a person's employer taken from a headline: only a
+     *                        near-exact domain counts (see hostMatchesCompany).
+     */
+    public function resolve(?string $website, ?string $company, array $snippets = [], ?string $location = null, bool $strict = false): ?string
     {
         $company = trim((string) $company);
         $fromWebsite = $this->hostFrom($website);
+        // A website found at discovery can be a listing/regulator page about the company
+        // (capboard.io, cbn.gov.ng); it only counts when the host is plausibly theirs.
         if ($fromWebsite !== null && ! $this->isNonCompanyHost($fromWebsite)
-            && (! $this->isGovernmentHost($fromWebsite) || $this->hostMatchesCompany($fromWebsite, $company))) {
+            && ($this->companyTokens($company) === [] || $this->hostMatchesCompany($fromWebsite, $company, $strict))) {
             return $fromWebsite;
         }
 
@@ -71,7 +89,7 @@ class DomainResolver
             return null;
         }
 
-        $fromSnippets = $this->fromSnippets($company, $snippets);
+        $fromSnippets = $this->fromSnippets($company, $snippets, $strict);
         if ($fromSnippets !== null) {
             return $fromSnippets;
         }
@@ -80,7 +98,7 @@ class DomainResolver
             return null;
         }
 
-        $cacheKey = 'enrichment:domain:v1:'.md5(mb_strtolower($company.'|'.trim((string) $location)));
+        $cacheKey = 'enrichment:domain:v2:'.md5(mb_strtolower($company.'|'.trim((string) $location).'|'.($strict ? 's' : 'l')));
         $cached = Cache::get($cacheKey);
         if (is_string($cached)) {
             return $cached !== '' ? $cached : null;
@@ -92,7 +110,7 @@ class DomainResolver
         }
 
         $rows = $this->serper->organicRows($this->serper->search(['q' => $query, 'num' => 10]));
-        $domain = $this->fromSnippets($company, $rows);
+        $domain = $this->fromSnippets($company, $rows, $strict);
 
         Cache::put($cacheKey, $domain ?? '', now()->addDays(self::CACHE_DAYS));
 
@@ -129,15 +147,6 @@ class DomainResolver
     }
 
     /**
-     * Regulator/government sites often list licensed companies; a company "website" found
-     * there (e.g. a PSP on cbn.gov.ng) is the regulator's, not the company's.
-     */
-    public function isGovernmentHost(string $host): bool
-    {
-        return (bool) preg_match('/(?:^|\.)(?:gov|go|gouv|gob|govt|mil)(?:\.[a-z]{2})?$/i', $host);
-    }
-
-    /**
      * True when the name is a single industry word ("Cocoa", "Payments Ltd"), which can't be
      * tied to one business's website, listing or phone line.
      */
@@ -165,24 +174,28 @@ class DomainResolver
         ));
     }
 
-    public function hostMatchesCompany(string $host, string $company): bool
+    /**
+     * Whether a host is plausibly this company's own site.
+     *
+     * Loose (company leads): the whole name, its initials, or any distinctive word of it.
+     * Strict (a person's employer, often a fragment of a headline): essentially the whole
+     * name, so "Cede" can't land on cedev.org or "Moment" on inthismomentofficial.com.
+     */
+    public function hostMatchesCompany(string $host, string $company, bool $strict = false): bool
     {
         $tokens = $this->companyTokens($company);
         if ($tokens === []) {
             return false;
         }
 
-        $labels = explode('.', mb_strtolower($host));
-        $core = str_replace('-', '', implode('', array_slice($labels, 0, max(1, count($labels) - 1))));
-
+        $core = $this->hostCore($host);
         $joined = implode('', $tokens);
-        if (count($tokens) === 1 && in_array($joined, self::GENERIC_TOKENS, true)) {
+        $distinctive = array_values(array_filter($tokens, fn (string $t): bool => ! in_array($t, self::GENERIC_TOKENS, true)));
+        $distinctiveJoined = implode('', $distinctive);
+
+        if (count($tokens) === 1 && $distinctive === []) {
             // A one-word industry name ("Cocoa") only matches its exact domain (cocoa.com).
             return $core === $joined;
-        }
-
-        if (str_contains($core, $joined)) {
-            return true;
         }
 
         $initials = implode('', array_map(fn (string $token): string => $token[0], $tokens));
@@ -190,17 +203,58 @@ class DomainResolver
             return true;
         }
 
-        // "Cargill Ghana" → cargill.com is fine, but "Cocoa Processing Company" must not
-        // land on cocoafederation.com: an industry word alone identifies nobody.
-        return mb_strlen($tokens[0]) >= 3
-            && ! in_array($tokens[0], self::GENERIC_TOKENS, true)
-            && str_contains($core, $tokens[0]);
+        foreach (array_filter([$joined, $distinctiveJoined]) as $name) {
+            if ($core === $name) {
+                return true;
+            }
+            if (str_starts_with($core, $name) && in_array(substr($core, strlen($name)), self::HOST_REMAINDERS, true)) {
+                return true;
+            }
+            if (mb_strlen($core) >= 5 && str_starts_with($name, $core)) {
+                return true;
+            }
+        }
+
+        if ($strict) {
+            return false;
+        }
+
+        if ($distinctive !== [] && str_contains($core, $joined)) {
+            return true;
+        }
+
+        // Any distinctive word ("Cargill Ghana" → cargill.com, "PAYTECH" → paytech.ng); an
+        // industry word alone ("Cocoa Processing" → cocoafederation.com) identifies nobody.
+        foreach ($distinctive as $token) {
+            if (mb_strlen($token) >= 4 && str_contains($core, $token)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Registrable name without public-suffix labels: kcv.co.ke → kcv, www.olamgroup.com → olamgroup.
+     */
+    private function hostCore(string $host): string
+    {
+        $labels = explode('.', mb_strtolower($host));
+        array_pop($labels);
+        while (count($labels) > 1 && in_array(end($labels), ['co', 'com', 'org', 'net', 'ac', 'gov', 'go', 'or', 'ne', 'edu', 'ltd', 'plc', 'sch', 'mil'], true)) {
+            array_pop($labels);
+        }
+        if (count($labels) > 1) {
+            $labels = [end($labels)];
+        }
+
+        return str_replace('-', '', (string) ($labels[0] ?? ''));
     }
 
     /**
      * @param  list<array{title?: ?string, snippet?: ?string, url?: ?string}>  $snippets
      */
-    private function fromSnippets(string $company, array $snippets): ?string
+    private function fromSnippets(string $company, array $snippets, bool $strict = false): ?string
     {
         foreach ($snippets as $snippet) {
             $candidates = [(string) ($snippet['url'] ?? '')];
@@ -216,7 +270,7 @@ class DomainResolver
                     continue;
                 }
                 $host = $this->hostFrom($candidate);
-                if ($host !== null && ! $this->isNonCompanyHost($host) && $this->hostMatchesCompany($host, $company)) {
+                if ($host !== null && ! $this->isNonCompanyHost($host) && $this->hostMatchesCompany($host, $company, $strict)) {
                     return $host;
                 }
             }

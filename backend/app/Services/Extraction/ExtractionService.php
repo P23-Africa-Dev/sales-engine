@@ -8,6 +8,7 @@ use App\Services\Discovery\DiscoveryGeo;
 use App\Services\Discovery\DTO\IcpBrief;
 use App\Services\Discovery\DTO\RawDiscoveryHit;
 use App\Services\Discovery\QueryIntentService;
+use App\Services\Enrichment\DomainResolver;
 use App\Services\Llm\GlmClient;
 use App\Support\IcpMeaning;
 
@@ -576,10 +577,13 @@ class ExtractionService
         if ($personName === '' || mb_strtolower($personName) === mb_strtolower($brief->name)) {
             return $heuristic;
         }
+        if (! $this->isPresentablePersonName($personName)) {
+            return [];
+        }
 
         $summary = (string) ($result['summary'] ?? $hit->snippet ?? $hit->name);
         $title = trim((string) ($result['title'] ?? ''));
-        $company = trim((string) ($result['company'] ?? ''));
+        $company = $this->identifyingCompany(trim((string) ($result['company'] ?? '')));
         $email = trim((string) ($result['email'] ?? ''));
         $phone = trim((string) ($result['phone'] ?? ''));
         if ($email !== '' && ! filter_var($email, FILTER_VALIDATE_EMAIL)) {
@@ -592,7 +596,7 @@ class ExtractionService
             }
         }
 
-        if ($title !== '' && $company !== '') {
+        if ($title !== '' && $company !== null) {
             $summary = "{$title} at {$company}. {$summary}";
         }
 
@@ -782,6 +786,19 @@ class ExtractionService
 
         // Some businesses run personal LinkedIn profiles ("Honesty Agro-exports"); a name built
         // from business words is not a person to contact.
+        $company = $company !== null ? $this->identifyingCompany($company) : null;
+        if ($name !== '' && ! $this->isPresentablePersonName($name)) {
+            return [
+                'name' => '',
+                'person_name' => '',
+                'summary' => $hit->snippet ?? '',
+                'business_fields' => [],
+                'commercial_signals' => [],
+                'low_confidence' => true,
+                'not_a_person' => true,
+            ];
+        }
+
         if (preg_match('/\b(?:agro|exports?|imports?|trading|ventures|capital|ltd|limited|company|enterprises?|farms?|cooperative|co-?op|foundation|fund|group|holdings|industries|solutions|services|consult(?:ing|ants)?)\b/iu', $name)) {
             return [
                 'name' => '',
@@ -866,6 +883,69 @@ class ExtractionService
         }
 
         return $title !== '' && $this->looksLikeRole($title) ? $title : null;
+    }
+
+    /**
+     * Role and employer from a person's own LinkedIn search result
+     * ("Ada Obi - Head of Compliance - Moniepoint | LinkedIn" + "Experience: Moniepoint · …").
+     * Only values the result states; the employer must name one business.
+     *
+     * @return array{title: ?string, company: ?string}
+     */
+    public function roleFromProfileResult(string $resultTitle, string $snippet, string $name): array
+    {
+        $headline = preg_replace('/\s*[|\-–—]\s*LinkedIn\s*$/iu', '', trim($resultTitle)) ?? $resultTitle;
+        $parts = preg_split('/\s+[\-–—|]\s+/u', $headline) ?: [];
+        array_shift($parts);
+        [$title, $company] = $parts !== [] ? $this->titleAndCompanyFromSnippet(implode(' | ', $parts)) : [null, null];
+        [$snippetTitle, $snippetCompany] = $this->titleAndCompanyFromSnippet($snippet);
+        $title ??= $snippetTitle;
+        $company ??= $snippetCompany;
+        if ($title !== null) {
+            $title = $this->titleWithoutLeadingName($title, $name);
+        }
+
+        return [
+            'title' => $title,
+            'company' => $company !== null ? $this->identifyingCompany($company) : null,
+        ];
+    }
+
+    /**
+     * A name we can show a user: two to four words, none of them job or compliance jargon
+     * that leaked in from a profile slug ("Simeon Julius Riskcontrol").
+     */
+    private function isPresentablePersonName(string $name): bool
+    {
+        $words = preg_split('/\s+/u', trim($name)) ?: [];
+        if (count($words) < 2 || count($words) > 4) {
+            return false;
+        }
+
+        return ! preg_match('/\b(?:risk\w*|\w*control|compliance|fraud|aml\w*|kyc|cft|analyst|investigator|manager|consultant|officer|ceo|cto|cfo|founder|finance|linkedin)\b/iu', $name);
+    }
+
+    /**
+     * The company only when it names one business; "AML", "East Africa" or "Cocoa" picked
+     * out of a headline would attach someone else's contacts and read as fact.
+     */
+    private function identifyingCompany(string $company): ?string
+    {
+        if ($company === '') {
+            return null;
+        }
+
+        $resolver = app(DomainResolver::class);
+        if ($resolver->companyTokens($company) === [] || $resolver->isGenericCompanyName($company)) {
+            return null;
+        }
+        // "Country Manager Kenya", "Board Member", "… Sales Manager at Tiryaki Ghana": a role
+        // fragment of the headline, not an employer.
+        if (preg_match('/\b(?:manager|member|director|officer|head|lead|consultant|analyst|executive|founder|partner|principal|specialist|advisor|adviser|intern|student|at)\b/iu', $company)) {
+            return null;
+        }
+
+        return $company;
     }
 
     private function isInitialsOnly(string $name): bool

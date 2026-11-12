@@ -48,4 +48,31 @@ class DecisionMakerInBackgroundTest extends TestCase
         $this->assertSame('ada@payonus.com', $meta['email']);
         $this->assertSame('found', $meta['contact_status']);
     }
+
+    public function test_search_stage_company_contacts_are_dropped_when_the_checker_does_not_confirm_them(): void
+    {
+        config(['services.contact_finder.concurrency_driver' => 'sync']);
+        [, $org] = $this->actingAsOrgMember();
+        $lead = Lead::query()->create([
+            'organization_id' => $org->id, 'name' => 'Exponential Impact', 'stage' => 'new', 'save_status' => 'draft', 'score' => 88,
+            'meta' => [
+                'entity_type' => 'company', 'lead_type' => 'business', 'contact_person' => 'Lauren Allen', 'contact_status' => 'searching',
+                'company_email' => 'info@capboard.io', 'company_phone' => '+16318141682',
+                'contact_sources' => ['company_email' => ['value' => 'info@capboard.io'], 'company_phone' => ['value' => '+16318141682']],
+            ],
+        ]);
+
+        $this->mock(ContactEnrichmentOrchestrator::class, function ($mock) {
+            $mock->shouldReceive('enrichContacts')->once()->andReturn([
+                'email' => '', 'phone' => '+254700000001', 'company_email' => '', 'company_phone' => '+254700000001', 'contact_sources' => [],
+            ]);
+        });
+
+        (new EnrichLeadContactsJob($org->id, [$lead->id]))->handle();
+
+        $meta = $lead->fresh()->meta;
+        $this->assertArrayNotHasKey('company_email', $meta);
+        $this->assertArrayNotHasKey('company_email', $meta['contact_sources']);
+        $this->assertSame('+254700000001', $meta['company_phone']);
+    }
 }

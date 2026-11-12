@@ -49,6 +49,8 @@ class PersonNameValidatorTest extends TestCase
         $this->assertSame('Jane Doe Fintech', $this->validator->normalizePersonName('Jane Doe Ceo Fintech Africa'));
         $this->assertTrue($this->validator->isValidPersonName('Chidera Okolie Cto Lagos'));
         $this->assertSame('Chidera Okolie Lagos', $this->validator->normalizePersonName('Chidera Okolie Cto Lagos'));
+        $this->assertSame('Eyituoyo Mogbeyi', $this->validator->normalizePersonName('Eyituoyo Mogbeyi Llm'));
+        $this->assertSame('Victoria Domon', $this->validator->normalizePersonName('Victoria Domon Dcp'));
     }
 
     public function test_rejects_screenshot_non_person_headlines(): void
