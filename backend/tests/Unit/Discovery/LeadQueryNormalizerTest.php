@@ -143,7 +143,18 @@ class LeadQueryNormalizerTest extends TestCase
 
         $queries = app(LeadQueryNormalizer::class)->firstBatchCompanyQueries($brief);
 
-        $this->assertSame('B2B SaaS London site:linkedin.com/company', $queries[0]);
-        $this->assertCount(2, $queries);
+        $this->assertSame('"Software Development" B2B platform London site:linkedin.com/company', $queries[0]);
+        $this->assertSame('B2B SaaS London site:linkedin.com/company', $queries[1]);
+        $this->assertCount(3, $queries);
+    }
+
+    public function test_non_software_company_needs_do_not_get_the_software_query(): void
+    {
+        $icp = new IcpProfile(['name' => 'X', 'config' => ['industries' => ['Logistics']]]);
+        $brief = IcpBrief::fromIcpProfile($icp, 'freight forwarders in Nairobi', 'companies');
+
+        $queries = app(LeadQueryNormalizer::class)->firstBatchCompanyQueries($brief);
+
+        $this->assertStringNotContainsString('Software Development', implode(' | ', $queries));
     }
 }

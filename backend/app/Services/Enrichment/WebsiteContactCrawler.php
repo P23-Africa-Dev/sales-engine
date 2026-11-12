@@ -139,24 +139,40 @@ class WebsiteContactCrawler
         }
 
         $robotsUrls = [];
+        $homepages = [];
         foreach (array_keys($pending) as $domain) {
             $robotsUrls[$domain] = 'https://'.$domain.'/robots.txt';
+            $homepages[$domain] = 'https://'.$domain.'/';
         }
-        $robotsBodies = $this->fetchManyRaw(array_values($robotsUrls));
+        // robots.txt and homepages are fetched together (one timeout, not two); a homepage
+        // whose robots.txt disallows "/" is discarded unread.
+        $responses = $this->fetchPool([...array_values($robotsUrls), ...array_values($homepages)]);
+        $robotsBodies = [];
+        foreach ($robotsUrls as $url) {
+            $response = $responses[$url] ?? null;
+            if ($response instanceof Response && $response->successful()) {
+                $robotsBodies[$url] = $response->body();
+            }
+        }
+        $bodies = [];
+        foreach ($homepages as $url) {
+            $response = $responses[$url] ?? null;
+            $body = $response instanceof Response ? $this->usableBody($response) : null;
+            if ($body !== null) {
+                $bodies[$url] = $body;
+            }
+        }
 
-        $homepages = [];
         foreach (array_keys($pending) as $domain) {
             $rules = isset($robotsBodies[$robotsUrls[$domain]])
                 ? $this->parseRobots(substr($robotsBodies[$robotsUrls[$domain]], 0, 512_000))
                 : ['allow' => [], 'disallow' => []];
-            if ($this->isAllowed('/', $rules)) {
-                $homepages[$domain] = 'https://'.$domain.'/';
-            } else {
+            if (! $this->isAllowed('/', $rules)) {
+                unset($homepages[$domain], $bodies['https://'.$domain.'/']);
                 $profiles[$domain] = $this->emptyProfile();
             }
         }
 
-        $bodies = $this->fetchMany(array_values($homepages));
         foreach ($homepages as $domain => $url) {
             $profile = isset($bodies[$url])
                 ? $this->profileFrom($url, $this->loadDom($bodies[$url]))
@@ -166,6 +182,39 @@ class WebsiteContactCrawler
         }
 
         return $profiles;
+    }
+
+    /**
+     * One parallel pool of GETs, responses keyed by URL (failures omitted).
+     *
+     * @param  list<string>  $urls
+     * @return array<string, Response>
+     */
+    private function fetchPool(array $urls): array
+    {
+        if ($urls === []) {
+            return [];
+        }
+
+        try {
+            $responses = Http::pool(function (Pool $pool) use ($urls): array {
+                $requests = [];
+                foreach ($urls as $url) {
+                    $requests[] = $pool->as($url)
+                        ->timeout(self::TIMEOUT_SECONDS)
+                        ->connectTimeout(self::TIMEOUT_SECONDS)
+                        ->withUserAgent(self::USER_AGENT)
+                        ->withOptions($this->sizeGuardOptions())
+                        ->get($url);
+                }
+
+                return $requests;
+            });
+        } catch (\Throwable) {
+            return [];
+        }
+
+        return array_filter($responses, static fn ($response): bool => $response instanceof Response);
     }
 
     /**

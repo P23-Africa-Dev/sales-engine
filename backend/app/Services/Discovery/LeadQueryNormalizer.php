@@ -134,7 +134,18 @@ class LeadQueryNormalizer
         $words = preg_split('/\s+/u', $short) ?: [];
         $short = implode(' ', array_slice($words, 0, 5));
 
+        // Software needs: "SaaS" in a query attracts agencies that *serve* SaaS. LinkedIn's own
+        // industry label ("Software Development") finds the software companies themselves.
+        $softwareQuery = null;
+        $industryText = implode(' ', $brief->industries);
+        if ($short !== '' && preg_match('/\b(saas|software|app|apps|platform|fintech|tech|api|cloud|developers?|it services)\b/iu', $short.' '.$industryText)) {
+            $softwareTheme = trim(preg_replace('/\b(saas|software|companies|company)\b/iu', 'platform', $short) ?? $short);
+            $softwareTheme = trim(preg_replace('/\b(platform)(\s+platform)+\b/iu', '$1', $softwareTheme) ?? $softwareTheme);
+            $softwareQuery = '"Software Development" '.$softwareTheme.' site:linkedin.com/company';
+        }
+
         return array_values(array_unique(array_filter([
+            $softwareQuery,
             $short !== '' ? $short.' site:linkedin.com/company' : null,
             trim($brief->searchQuery()),
         ])));

@@ -503,7 +503,7 @@ export function IcpBuilderModal({
       })
     ) {
       toast.error(
-        "This ICP needs a niche “What we search for” before it can be activated. Edit the profile first."
+        "This ICP needs “What kind of opportunity are you looking for?” filled in before it can be activated. Edit the profile first."
       );
       return;
     }
@@ -716,7 +716,7 @@ export function IcpBuilderModal({
       if (!isProfileNameValid) {
         toast.error("ICP Profile Name is required.");
       } else if (!isDescriptionValid) {
-        toast.error("Description / Target Objective is required.");
+        toast.error("Tell us what you need right now (what you're looking for).");
       } else if (!isCustomPromptValid) {
         toast.error("What kind of opportunity you are looking for is required.");
       } else if (!isTerritoryValid) {
@@ -733,7 +733,7 @@ export function IcpBuilderModal({
       })
     ) {
       toast.error(
-        "Add a niche “What we search for” (products, buyers, or exclusions) before saving this ICP."
+        "Tell us what kind of opportunity you're looking for (who or what, plus anything to exclude) before saving this ICP."
       );
       return;
     }
@@ -1251,13 +1251,16 @@ export function IcpBuilderModal({
                   <div>
                     <label className="mb-1.5 flex items-center justify-between text-[12px] font-semibold text-gray-700">
                       <span className="flex items-center gap-1">
-                        <span>Description / Target Objective</span>
+                        <span>What do you need right now?</span>
                         <span className="text-red-500 font-bold" aria-hidden="true">*</span>
                       </span>
                       <span className="text-[11px] font-normal text-gray-400">
                         Required
                       </span>
                     </label>
+                    <p className="mb-1.5 text-[11px] leading-snug text-gray-500">
+                      Describe what you&apos;re looking for — customers, suppliers, partners or investors — not what your company does.
+                    </p>
                     <input
                       type="text"
                       value={formConfig.description ?? ""}
@@ -1267,7 +1270,7 @@ export function IcpBuilderModal({
                       onBlur={() =>
                         setTouchedFields((prev) => ({ ...prev, description: true }))
                       }
-                      placeholder="e.g. B2B SaaS and supply-chain logistics providers in East & West Africa expanding enterprise operations…"
+                      placeholder="e.g. Clients for our KYC API among Lagos fintechs · Reliable cocoa bean suppliers in Ghana · Investors for our agritech startup…"
                       className={`w-full rounded-xl border px-4 py-2.5 text-[12px] text-[#09232D] outline-none transition-all placeholder:text-gray-400 ${
                         showDescriptionError
                           ? "border-red-400 bg-red-50/20 focus:border-red-500 focus:ring-2 focus:ring-red-500/10"
@@ -1286,16 +1289,16 @@ export function IcpBuilderModal({
                   <div className="space-y-2.5">
                     <div className="rounded-2xl border border-gray-100 bg-[#FBFBFB] px-3.5 py-2.5">
                       <p className="text-[12px] font-semibold text-[#09232D]">
-                        Filter criteria: a company must match these to qualify
+                        Who or what you&apos;re looking for: a match must fit these
                       </p>
                       <p className="mt-0.5 text-[11px] leading-snug text-gray-500">
-                        Industry, size, and revenue gate which companies appear. Territory locates the search and then rejects other countries.
+                        Describe the companies you want to find (not your own company). Industry, size and revenue decide which ones qualify; territory decides where we look.
                       </p>
                     </div>
                     <div className="flex items-center justify-between">
                       <label className="flex items-center gap-1.5 text-[12px] font-semibold text-gray-700">
                         <Building2 size={15} className="text-gray-400" />
-                        Target Industry Verticals
+                        Industries of the companies you want to find
                       </label>
                       <span className="text-[11px] text-gray-400">
                         {formConfig.industries.length} selected
@@ -1424,7 +1427,7 @@ export function IcpBuilderModal({
                     <div className="flex items-center justify-between">
                       <label className="flex items-center gap-1.5 text-[12px] font-semibold text-gray-700">
                         <MapPin size={15} className="text-gray-400" />
-                        Target Geographic Hubs & Territories
+                        Where should they be?
                         <span className="text-red-500 font-bold" aria-hidden="true">*</span>
                       </label>
                       <span className="text-[11px] text-gray-400">
@@ -1517,7 +1520,7 @@ export function IcpBuilderModal({
                   <div className="space-y-2.5">
                     <label className="flex items-center gap-1.5 text-[12px] font-semibold text-gray-700">
                       <Briefcase size={15} className="text-gray-400" />
-                      Target Decision Maker Titles / Roles
+                      Who should we reach there? (titles / roles)
                     </label>
                     <div className="flex flex-wrap gap-2">
                       {AVAILABLE_DECISION_MAKERS.map((role) => {
@@ -1740,7 +1743,7 @@ export function IcpBuilderModal({
                       })}
                     </p>
                     <p className="mt-2 text-[10px] leading-snug text-gray-500">
-                      Tip: name products, buyers, and exclusions in “What we search for” — that text drives discovery when you ask for leads.
+                      Tip: describe exactly what you&apos;re looking for (customers, suppliers, partners or investors) and anything to exclude — that text drives every search.
                     </p>
                   </div>
                 </div>
@@ -1879,7 +1882,7 @@ export function IcpBuilderModal({
                       if (!isProfileNameValid) {
                         toast.error("ICP Profile Name is required.");
                       } else if (!isDescriptionValid) {
-                        toast.error("Description / Target Objective is required.");
+                        toast.error("Tell us what you need right now (what you're looking for).");
                       } else if (!isCustomPromptValid) {
                         toast.error("What kind of opportunity you are looking for is required.");
                       } else if (!isTerritoryValid) {

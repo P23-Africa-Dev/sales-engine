@@ -46,7 +46,8 @@ export function getSocialListeningEmptyState(
     return {
       variant: "scan_failed",
       title: "Scan couldn't complete",
-      description: latestRun.error ?? "The last scan failed. Try Scan now to retry.",
+      // Never echo the backend error text: it can carry provider or system details.
+      description: "We couldn't finish this scan. Try Scan now again in a few minutes.",
       tip: SOCIAL_LISTENING_TIPS[4],
       showActions: true,
     };

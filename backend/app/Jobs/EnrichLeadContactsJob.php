@@ -3,9 +3,12 @@
 namespace App\Jobs;
 
 use App\Models\ChatMessage;
+use App\Models\IcpProfile;
 use App\Models\Lead;
 use App\Models\Organization;
+use App\Services\Discovery\DTO\IcpBrief;
 use App\Services\Enrichment\ContactEnrichmentOrchestrator;
+use App\Services\Enrichment\LeadProfileEnrichmentService;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Concurrency;
@@ -140,7 +143,29 @@ class EnrichLeadContactsJob implements ShouldQueue
             $website = trim((string) ($lead->company->website ?? ''));
         }
 
-        return app(ContactEnrichmentOrchestrator::class)->enrichContacts(
+        // Company leads: find the decision maker here (moved out of the search so results show
+        // sooner), then look up that person's contacts below.
+        $decisionMaker = [];
+        if (! $isIndividual && $personName === '' && $company !== '' && $lead->icp_profile_id) {
+            $icp = IcpProfile::query()->where('organization_id', $organizationId)->find($lead->icp_profile_id);
+            if ($icp) {
+                $profiles = app(LeadProfileEnrichmentService::class);
+                $profiles->setDeferContactWaterfall(true);
+                $found = $profiles->enrichCompanyDecisionMaker($organization, $icp, $company, IcpBrief::fromIcpProfile($icp), array_filter([
+                    'company' => $company,
+                    'location' => $meta['location'] ?? null,
+                    'title' => $meta['title'] ?? null,
+                ]));
+                $personName = trim((string) ($found['contact_person'] ?? ''));
+                $decisionMaker = array_filter([
+                    'contact_person' => $personName,
+                    'title' => trim((string) ($found['title'] ?? '')),
+                    'linkedin_url' => trim((string) ($found['linkedin_url'] ?? '')),
+                ]);
+            }
+        }
+
+        $contacts = app(ContactEnrichmentOrchestrator::class)->enrichContacts(
             $organization,
             $personName,
             array_filter([
@@ -155,6 +180,8 @@ class EnrichLeadContactsJob implements ShouldQueue
             [],
             $lead->id,
         );
+
+        return $decisionMaker === [] ? $contacts : $contacts + ['decision_maker' => $decisionMaker];
     }
 
     /**
@@ -220,6 +247,12 @@ class EnrichLeadContactsJob implements ShouldQueue
             }
         }
 
+        foreach (is_array($contacts['decision_maker'] ?? null) ? $contacts['decision_maker'] : [] as $key => $value) {
+            if (trim((string) $value) !== '' && trim((string) ($meta[$key] ?? '')) === '') {
+                $meta[$key] = (string) $value;
+            }
+        }
+
         foreach (['linkedin_url', 'title', 'company_email', 'company_phone', 'address'] as $key) {
             $value = trim((string) ($contacts[$key] ?? ''));
             if ($value !== '' && trim((string) ($meta[$key] ?? '')) === '') {
@@ -249,6 +282,8 @@ class EnrichLeadContactsJob implements ShouldQueue
         return array_filter([
             'email' => $meta['email'] ?? null,
             'phone' => $meta['phone'] ?? null,
+            'contact_person' => $meta['contact_person'] ?? null,
+            'title' => $meta['title'] ?? null,
             'website' => $meta['website'] ?? null,
             'linkedin_url' => $meta['linkedin_url'] ?? null,
             'company_email' => $meta['company_email'] ?? null,

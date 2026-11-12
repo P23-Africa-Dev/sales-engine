@@ -142,7 +142,7 @@ class SocialListeningOrchestrator
             $requestedWindow = max(1, (int) ($settings->freshness_window_days ?? 30));
             $appliedWindow = min($requestedWindow, self::MAX_FRESHNESS_WINDOW_DAYS);
             $definitions = $brief->signalTypeDetectionEnabled()
-                ? $this->activeDefinitions($organization->id, $brief)
+                ? $this->activeDefinitions($organization->id, $brief, $profile)
                 : collect();
             $searchWindow = $appliedWindow;
             $tbs = $this->freshness->serperTbs($searchWindow);
@@ -532,10 +532,22 @@ class SocialListeningOrchestrator
     /**
      * @return Collection<int, SignalTypeDefinition>
      */
-    private function activeDefinitions(int $organizationId, IcpBrief $brief): Collection
+    private function activeDefinitions(int $organizationId, IcpBrief $brief, ?ListeningProfile $profile = null): Collection
     {
         $cap = max(0, (int) config('services.social_listening.max_signal_type_queries_per_run', 8));
         if ($cap === 0) {
+            return collect();
+        }
+
+        // The built-in packs are buyer signals: events that make a company a likely CUSTOMER.
+        // When the account needs suppliers, investors or partners they only produce false
+        // signals, so the default pack runs for customer needs only. Packs a user picked
+        // explicitly are still honoured.
+        $explicitPacks = array_values(array_filter(
+            $brief->signalTypePacks,
+            static fn ($pack): bool => is_string($pack) && $pack !== '' && $pack !== SignalTypeDefinition::PACK_DEFAULT,
+        ));
+        if ($profile !== null && $profile->mode !== 'sell' && $explicitPacks === []) {
             return collect();
         }
 

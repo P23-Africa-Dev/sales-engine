@@ -60,6 +60,9 @@ class DiscoveryOrchestrator
 
     private float $startedAt = 0.0;
 
+    /** @var array<string, float> Seconds spent per pipeline stage (server-side diagnostics). */
+    private array $timings = [];
+
     private bool $deferContactEnrichment = true;
 
     private int $requestedLeadLimit = 20;
@@ -174,6 +177,7 @@ class DiscoveryOrchestrator
 
         try {
             $this->startedAt = microtime(true);
+            $this->timings = [];
             $brief = $briefSeed;
             $hasUserQuery = $brief->hasUserQuery();
             $effectiveLimit = min(self::MAX_LEAD_LIMIT, max(1, $limit > 0 ? $limit : $brief->requestedLimit));
@@ -690,6 +694,7 @@ class DiscoveryOrchestrator
                         'backfill_passes' => $backfillPasses,
                         'soft_completed_early' => $softCompletedEarly,
                         'elapsed_seconds' => round(microtime(true) - $this->startedAt, 1),
+                        'timings' => $this->timings,
                         'contact_enrichment_deferred' => $this->deferContactEnrichment,
                     ]
                 ),
@@ -775,6 +780,33 @@ class DiscoveryOrchestrator
      * @return array{0: Collection<int, RawDiscoveryHit>, 1: int, 2: array{queries_executed: list<string>, sources_hit_count: array<string, int>, fan_out_strategy_used: bool, candidates_extracted?: int}}
      */
     private function collectHits(
+        IcpBrief $brief,
+        SearchContext $ctx,
+        int $effectiveLimit,
+        ?array $overrideQueries = null,
+    ): array {
+        return $this->timed('search', fn (): array => $this->collectHitsAcrossRegions($brief, $ctx, $effectiveLimit, $overrideQueries));
+    }
+
+    /**
+     * Time a pipeline stage; totals land in result_summary.timings (never sent to the browser).
+     *
+     * @template T
+     *
+     * @param  callable(): T  $work
+     * @return T
+     */
+    private function timed(string $stage, callable $work): mixed
+    {
+        $started = microtime(true);
+        try {
+            return $work();
+        } finally {
+            $this->timings[$stage] = round(($this->timings[$stage] ?? 0) + (microtime(true) - $started), 2);
+        }
+    }
+
+    private function collectHitsAcrossRegions(
         IcpBrief $brief,
         SearchContext $ctx,
         int $effectiveLimit,
@@ -1205,7 +1237,7 @@ class DiscoveryOrchestrator
             $eligibleHits[] = $hit;
         }
 
-        $extractionsByHit = $this->extraction->extractManyBatch($eligibleHits, $brief, $organization);
+        $extractionsByHit = $this->timed('extract', fn (): array => $this->extraction->extractManyBatch($eligibleHits, $brief, $organization));
 
         foreach ($eligibleHits as $hitIndex => $hit) {
             if (count($candidates) >= $gatherCap) {
@@ -1316,8 +1348,8 @@ class DiscoveryOrchestrator
             || $this->pastSoftDeadline()
             || $this->remainingSeconds() < 45;
 
-        $scorePayloads = $this->attachWebsiteEvidence($scorePayloads, $brief);
-        $batchScores = $this->scoring->scoreBatch($scorePayloads, $brief, $organization, $heuristicOnly);
+        $scorePayloads = $this->timed('website_evidence', fn (): array => $this->attachWebsiteEvidence($scorePayloads, $brief));
+        $batchScores = $this->timed('score', fn (): array => $this->scoring->scoreBatch($scorePayloads, $brief, $organization, $heuristicOnly));
 
         foreach ($prepared as $index => $candidate) {
             $scores = $batchScores[$index] ?? $this->scoring->heuristicScore($scorePayloads[$index], $brief);
@@ -1532,28 +1564,31 @@ class DiscoveryOrchestrator
             }
 
             if ($brief->isPeopleSearch()) {
-                $enrichedProfile = $this->enrichment->enrich(
+                $enrichedProfile = $this->timed('person_profile', fn () => $this->enrichment->enrich(
                     $organization,
                     $icp,
                     $displayName,
                     $brief->query,
                     $extracted,
-                );
+                ));
                 $extracted = $enrichedProfile->mergeIntoExtraction($extracted);
             } elseif (
                 ! $this->deferContactEnrichment
+                // With background contact finding on, the decision maker is looked up after the
+                // results are shown (EnrichLeadContactsJob); inline it cost 20–40s per search.
+                && ! (bool) config('services.contact_finder.async', true)
                 && ! $this->pastSoftDeadline()
                 && $this->remainingSeconds() >= 45
             ) {
                 // Defer company DM enrichment on first-batch / freemium runs so wall-clock
                 // is spent creating more leads instead of enriching a thin set.
-                $extracted = $this->enrichment->enrichCompanyDecisionMaker(
+                $extracted = $this->timed('decision_maker', fn () => $this->enrichment->enrichCompanyDecisionMaker(
                     $organization,
                     $icp,
                     $displayName,
                     $brief,
                     $extracted,
-                );
+                ));
             }
 
             // Post-enrichment geo re-check: drop when enrichment stamps a known wrong country.

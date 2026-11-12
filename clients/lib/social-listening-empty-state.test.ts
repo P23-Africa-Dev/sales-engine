@@ -65,7 +65,8 @@ describe("social-listening-empty-state", () => {
     const state = getSocialListeningEmptyState(latestRun, "2026-01-01T00:00:00Z", false);
 
     expect(state?.variant).toBe("scan_failed");
-    expect(state?.description).toContain("Serper quota exceeded");
+    expect(state?.description).not.toContain("Serper");
+    expect(state?.description).toContain("couldn't finish this scan");
     expect(state?.showActions).toBe(true);
   });
 

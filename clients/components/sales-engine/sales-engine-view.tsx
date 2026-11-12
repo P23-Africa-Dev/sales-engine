@@ -967,11 +967,7 @@ function LeadInlineResults({
                       {lead.contact_enrichment_tier && lead.contact_enrichment_tier !== "seed" && (
                         <span
                           className="inline-flex w-fit rounded-full bg-[#eef6f2] px-1 py-0.2 text-[6.5px] font-semibold text-[#087652]"
-                          title={
-                            lead.contact_enrichment_provider
-                              ? `Contact via ${lead.contact_enrichment_provider}`
-                              : "Contact enrichment source"
-                          }
+                          title="How we found these contact details"
                         >
                           {lead.contact_enrichment_tier === "tier1"
                             ? "Web"
@@ -1065,11 +1061,7 @@ function LeadInlineResults({
                       {lead.contact_enrichment_tier && lead.contact_enrichment_tier !== "seed" && (
                         <span
                           className="mt-0.5 inline-flex w-fit rounded-full bg-[#eef6f2] px-1.5 py-0.5 text-[7px] font-semibold text-[#087652]"
-                          title={
-                            lead.contact_enrichment_provider
-                              ? `Contact via ${lead.contact_enrichment_provider}`
-                              : "Contact enrichment source"
-                          }
+                          title="How we found these contact details"
                         >
                           {lead.contact_enrichment_tier === "tier1"
                             ? "Contact from web"

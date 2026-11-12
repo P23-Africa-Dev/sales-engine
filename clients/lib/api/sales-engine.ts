@@ -870,7 +870,8 @@ export async function pollDiscoveryRunUntilComplete(
       }
 
       // Not a validation/ICP 422 — use 502 so UI does not treat this as "select an ICP".
-      throw new SalesEngineApiError(rechecked.error ?? "Discovery run failed.", 502);
+      // The run error can carry system details; the user gets a plain message.
+      throw new SalesEngineApiError("We couldn't finish this search. Please try again in a moment.", 502);
     }
 
     if (options?.signal?.aborted) {
@@ -1249,7 +1250,9 @@ export function normalizeRecommendedAction(
 export type SocialListeningRunResultSummary = {
   totalChecked: number;
   qualified: number;
-  rejected: {
+  sources_unavailable?: boolean;
+  /** Server-side diagnostics; no longer sent to the browser. */
+  rejected?: {
     icpMismatch: number;
     missingSourceUrl: number;
     missingSourceDate: number;
@@ -1296,7 +1299,7 @@ export type SocialListeningRunStatus = {
 export function isStructuredRunSummary(
   value: SocialListeningRunStatus["result_summary"]
 ): value is SocialListeningRunResultSummary {
-  return typeof value === "object" && value !== null && "rejected" in value;
+  return typeof value === "object" && value !== null && "totalChecked" in value;
 }
 
 export type SocialListeningMetrics = {
