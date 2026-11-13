@@ -21,7 +21,9 @@ class SocialSignalResource extends JsonResource
             'source' => $this->source_label,
             'sourceIcon' => $this->source_icon,
             'persona' => $this->persona,
-            'company' => $this->company_name,
+            // Never null: the scan leaves the company empty when a post names none, and the
+            // signal list treats this as text (a null crashed the page, 13 Nov 2026).
+            'company' => (string) ($this->company_name ?? ''),
             'entityType' => $this->entity_type,
             'industry' => $this->industry,
             'keyTopics' => $this->key_topics ?? [],

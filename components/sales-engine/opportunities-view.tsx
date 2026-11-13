@@ -1,5 +1,6 @@
 "use client";
 
+import { SafeItem } from "@/components/ui/safe-boundary";
 import { Fragment, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, ChevronRight, Download, ExternalLink } from "lucide-react";
@@ -184,7 +185,7 @@ export function OpportunitiesView() {
               </tr>
             </thead>
             <tbody>
-              {items.map((item) => {
+              {items.map((item) => (<SafeItem key={item.id} name="opportunity">{() => {
                 const isOpen = openId === item.id;
 
                 return (
@@ -309,7 +310,7 @@ export function OpportunitiesView() {
                     )}
                   </Fragment>
                 );
-              })}
+              }}</SafeItem>))}
             </tbody>
           </table>
         </div>
