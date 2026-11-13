@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { CRM_RECORDS } from "./admin-crm";
+import {
+  CRM_BUSINESS_CATEGORIES,
+  CRM_CITIES,
+  CRM_COUNTRIES,
+  CRM_INDUSTRIES,
+  CRM_RECORDS,
+} from "./admin-crm";
 import { buildKeyBusinessAccounts } from "./key-business-accounts";
 import { ONBOARDED_BUSINESSES_DATA } from "./smart-leads";
 import { INITIAL_SIGNALS } from "./social-listening";
@@ -49,5 +55,21 @@ describe("buildKeyBusinessAccounts", () => {
     expect(accounts.find((account) => account.lead?.id === "prospect-nt-5")).toMatchObject({
       emailsSent: 0, averageOpenRate: null, engagementRate: null,
     });
+  });
+
+  it("populates at least 200 CRM prospect records across all industries, categories, countries, and cities", () => {
+    expect(CRM_RECORDS.length).toBeGreaterThanOrEqual(200);
+    for (const ind of CRM_INDUSTRIES) {
+      expect(CRM_RECORDS.filter((r) => r.industry === ind).length).toBeGreaterThan(0);
+    }
+    for (const cat of CRM_BUSINESS_CATEGORIES) {
+      expect(CRM_RECORDS.filter((r) => r.category === cat).length).toBeGreaterThan(0);
+    }
+    for (const country of CRM_COUNTRIES) {
+      expect(CRM_RECORDS.filter((r) => r.country === country).length).toBeGreaterThan(0);
+    }
+    for (const city of CRM_CITIES) {
+      expect(CRM_RECORDS.filter((r) => r.city === city).length).toBeGreaterThan(0);
+    }
   });
 });
