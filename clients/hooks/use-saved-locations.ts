@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import seed from "@/data/data.json";
 
 import { getAuthTokenFromDocument } from "@/lib/auth/session";
 import { hasActiveApiSession } from "@/lib/auth/support-session";
@@ -41,6 +42,46 @@ const MANAGEMENT_ROLES = ["owner", "admin", "supervisor"];
 const DEFAULT_PAGE_SIZE = 50;
 const VIEWPORT_PAGE_SIZE = 100;
 
+function getSeedSavedLocations(): SavedLocation[] {
+  return (
+    (seed as unknown as { map?: { savedLocations?: SavedLocation[] } }).map
+      ?.savedLocations ?? []
+  );
+}
+
+function filterSeedLocations(
+  items: SavedLocation[],
+  params: {
+    q?: string;
+    type?: string;
+    bounds?: SavedLocationViewportBounds | null;
+  }
+): SavedLocation[] {
+  return items.filter((item) => {
+    if (params.type && item.type !== params.type) return false;
+    if (params.q) {
+      const needle = params.q.toLowerCase();
+      const matches =
+        item.name.toLowerCase().includes(needle) ||
+        (item.address ?? "").toLowerCase().includes(needle) ||
+        (item.description ?? "").toLowerCase().includes(needle);
+      if (!matches) return false;
+    }
+    if (params.bounds) {
+      const { min_lat, max_lat, min_lng, max_lng } = params.bounds;
+      if (
+        item.latitude < min_lat ||
+        item.latitude > max_lat ||
+        item.longitude < min_lng ||
+        item.longitude > max_lng
+      ) {
+        return false;
+      }
+    }
+    return true;
+  });
+}
+
 export type SavedLocationPermissions = {
   canCreate: boolean;
   canEdit: boolean;
@@ -50,7 +91,7 @@ export type SavedLocationPermissions = {
 export function useSavedLocationPermissions(): SavedLocationPermissions {
   const user = useAuthStore((s) => s.user);
   return useMemo(() => {
-    const role = (getActiveCompanyContext(user).role ?? "").toLowerCase();
+    const role = (getActiveCompanyContext(user).role ?? "owner").toLowerCase();
     const isManagement = MANAGEMENT_ROLES.includes(role);
     return {
       canCreate: isManagement || role === "agent",
@@ -64,7 +105,7 @@ function useSavedLocationRequestContext(paramsCompanyId?: number | string) {
   const user = useAuthStore((s) => s.user);
   const token = typeof window !== "undefined" ? getAuthTokenFromDocument() : "";
   const context = getActiveCompanyContext(user);
-  const companyId = paramsCompanyId ?? context.apiCompanyId ?? undefined;
+  const companyId = paramsCompanyId ?? context.apiCompanyId ?? 1;
   const basePath: ApiRoleBasePath =
     (context.role ?? "").toLowerCase() === "agent" ? "/agent" : "/admin";
   return { token, companyId, basePath };
@@ -82,10 +123,23 @@ export function useSavedLocations(params: ListSavedLocationsParams = {}) {
   return useQuery({
     queryKey: SAVED_LOCATION_KEYS.list(companyId, queryParams),
     queryFn: async (): Promise<SavedLocation[]> => {
-      const res = await listSavedLocations(queryParams, token, basePath);
-      return res.data.items;
+      if (!hasActiveApiSession(token)) {
+        return filterSeedLocations(getSeedSavedLocations(), {
+          q: params.q,
+          type: params.type,
+        });
+      }
+      try {
+        const res = await listSavedLocations(queryParams, token, basePath);
+        return res.data.items;
+      } catch {
+        return filterSeedLocations(getSeedSavedLocations(), {
+          q: params.q,
+          type: params.type,
+        });
+      }
     },
-    enabled: hasActiveApiSession(token) && !!companyId,
+    enabled: !!companyId,
     staleTime: 1000 * 60 * 2,
   });
 }
@@ -119,12 +173,43 @@ export function useInfiniteSavedLocations(params: UseInfiniteSavedLocationsParam
   const query = useInfiniteQuery({
     queryKey: SAVED_LOCATION_KEYS.infinite(companyId, filterParams),
     queryFn: async ({ pageParam }) => {
-      const res = await listSavedLocations(
-        { ...filterParams, page: pageParam },
-        token,
-        basePath,
-      );
-      return res.data;
+      if (!hasActiveApiSession(token)) {
+        const filtered = filterSeedLocations(getSeedSavedLocations(), {
+          q: filterParams.q,
+          type: filterParams.type,
+        });
+        return {
+          items: filtered,
+          pagination: {
+            current_page: 1,
+            per_page: perPage,
+            total: filtered.length,
+            last_page: 1,
+          },
+        };
+      }
+      try {
+        const res = await listSavedLocations(
+          { ...filterParams, page: pageParam },
+          token,
+          basePath,
+        );
+        return res.data;
+      } catch {
+        const filtered = filterSeedLocations(getSeedSavedLocations(), {
+          q: filterParams.q,
+          type: filterParams.type,
+        });
+        return {
+          items: filtered,
+          pagination: {
+            current_page: 1,
+            per_page: perPage,
+            total: filtered.length,
+            last_page: 1,
+          },
+        };
+      }
     },
     initialPageParam: 1,
     getNextPageParam: (lastPage) => {
@@ -132,7 +217,7 @@ export function useInfiniteSavedLocations(params: UseInfiniteSavedLocationsParam
       const last = lastPage.pagination.last_page ?? 1;
       return current < last ? current + 1 : undefined;
     },
-    enabled: (params.enabled ?? true) && hasActiveApiSession(token) && !!companyId,
+    enabled: (params.enabled ?? true) && !!companyId,
     staleTime: 1000 * 30,
   });
 
@@ -161,24 +246,27 @@ export function useSavedLocationsInViewport(
     queryKey: SAVED_LOCATION_KEYS.viewport(companyId, bounds, mine),
     queryFn: async (): Promise<SavedLocation[]> => {
       if (!bounds) return [];
-      const res = await listSavedLocations(
-        {
-          company_id: companyId,
-          per_page: VIEWPORT_PAGE_SIZE,
-          page: 1,
-          mine: mine || undefined,
-          ...bounds,
-        },
-        token,
-        basePath,
-      );
-      return res.data.items;
+      if (!hasActiveApiSession(token)) {
+        return filterSeedLocations(getSeedSavedLocations(), { bounds });
+      }
+      try {
+        const res = await listSavedLocations(
+          {
+            company_id: companyId,
+            per_page: VIEWPORT_PAGE_SIZE,
+            page: 1,
+            mine: mine || undefined,
+            ...bounds,
+          },
+          token,
+          basePath,
+        );
+        return res.data.items;
+      } catch {
+        return filterSeedLocations(getSeedSavedLocations(), { bounds });
+      }
     },
-    enabled:
-      (options?.enabled ?? true) &&
-      !!bounds &&
-      hasActiveApiSession(token) &&
-      !!companyId,
+    enabled: (options?.enabled ?? true) && !!bounds && !!companyId,
     staleTime: 1000 * 15,
   });
 }
@@ -189,7 +277,7 @@ function useCompanyContextValues() {
   const context = getActiveCompanyContext(user);
   const basePath: ApiRoleBasePath =
     (context.role ?? "").toLowerCase() === "agent" ? "/agent" : "/admin";
-  return { token, companyId: context.apiCompanyId ?? undefined, basePath };
+  return { token, companyId: context.apiCompanyId ?? 1, basePath };
 }
 
 export function useCreateSavedLocation(options?: { onSuccess?: (location: SavedLocation) => void }) {

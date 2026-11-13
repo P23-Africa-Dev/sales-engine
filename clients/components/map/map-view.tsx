@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import mapboxgl from 'mapbox-gl';
-import { Search, Eye, EyeOff, RefreshCcw, LocateFixed, X } from 'lucide-react';
+import { Search, Eye, EyeOff, RefreshCcw, LocateFixed, X, Flame, History } from 'lucide-react';
 import {
   getGoogleMapsPublicApiKey,
   MAPBOX_PUBLIC_TOKEN_ENV,
@@ -76,6 +76,14 @@ import { useInitialMapViewport } from '@/hooks/use-initial-map-viewport';
 import { TrackingConnectionStatus } from '@/components/tracking/TrackingConnectionStatus';
 import { SavedLocationsLayer, type GoogleMapBridge } from '@/components/map/SavedLocationsLayer';
 import { TerritoryLayer } from '@/components/map/TerritoryLayer';
+import { FieldHeatmapLayer } from '@/components/map/FieldHeatmapLayer';
+import { VisitHistoryMapLayer } from '@/components/map/VisitHistoryMapLayer';
+import { MapAnalyticsHistoryDrawer } from '@/components/map/MapAnalyticsHistoryDrawer';
+import {
+  MapAnalyticalModeHeader,
+  getLagosFleetCoordinates,
+} from '@/components/map/MapAnalyticalModeHeader';
+import { useMapAnalyticsStore } from '@/store/map-analytics';
 import { useInfiniteSavedLocations, useSavedLocationPermissions } from '@/hooks/use-saved-locations';
 import { useViewerCoords } from '@/hooks/use-viewer-coords';
 import { getSavedLocationLabel } from '@/lib/map/location-types';
@@ -566,10 +574,64 @@ export function MapboxMapView({ compact = false, providerState }: MapViewProps &
     return () => clearTimeout(timer);
   }, [initialAgentId, deepLinkTaskId, liveTasks, selectedTaskId, handleSelectTask]);
 
+  const openDrawerToTab = useMapAnalyticsStore((s) => s.openDrawerToTab);
+  const analyticsDrawerOpen = useMapAnalyticsStore((s) => s.drawerOpen);
+  const setAnalyticsDrawerOpen = useMapAnalyticsStore((s) => s.setDrawerOpen);
+  const heatmapEnabled = useMapAnalyticsStore((s) => s.heatmapEnabled);
+  const setHeatmapEnabled = useMapAnalyticsStore((s) => s.setHeatmapEnabled);
+  const initialFleetFittedRef = useRef(false);
+
+  const handleFlyToCoordinate = useCallback(
+    (lng: number, lat: number, zoom = 15) => {
+      const map = mapRef.current;
+      if (!map || !Number.isFinite(lng) || !Number.isFinite(lat)) return;
+      suppressFollowBreakRef.current = true;
+      map.flyTo({ center: [lng, lat], zoom: Math.max(map.getZoom(), zoom), speed: 1.3 });
+      map.once('moveend', () => {
+        suppressFollowBreakRef.current = false;
+      });
+    },
+    [],
+  );
+
+  const handleFitCoordinates = useCallback((coords: [number, number][]) => {
+    const map = mapRef.current;
+    if (!map || coords.length === 0) return;
+    const bounds = new mapboxgl.LngLatBounds();
+    coords.forEach(([lng, lat]) => {
+      if (Number.isFinite(lng) && Number.isFinite(lat)) {
+        bounds.extend([lng, lat]);
+      }
+    });
+    if (bounds.isEmpty()) return;
+    suppressFollowBreakRef.current = true;
+    map.fitBounds(bounds, { padding: 90, maxZoom: 14.5, duration: 1000 });
+    map.once('moveend', () => {
+      suppressFollowBreakRef.current = false;
+    });
+  }, []);
+
+  const handleFitLagosFleet = useCallback(() => {
+    handleFitCoordinates(getLagosFleetCoordinates());
+  }, [handleFitCoordinates]);
+
+  // Fit all 5 Lagos territories and active agents on initial map load when no specific task/agent is deep-linked
+  useEffect(() => {
+    if (mapVersion === 0 || initialFleetFittedRef.current) return;
+    if (taskFocus) return;
+    if (Number.isFinite(deepLinkTaskId) && deepLinkTaskId > 0) return;
+    if (Number.isFinite(initialAgentId) && initialAgentId > 0) return;
+    initialFleetFittedRef.current = true;
+    handleFitLagosFleet();
+  }, [mapVersion, taskFocus, deepLinkTaskId, initialAgentId, handleFitLagosFleet]);
+
   const handleViewHistoryTask = useCallback((task: LiveTaskState) => {
-    // Route history slide-in disabled — see docs/map-route-history-panel.md
-    // setHistoryTask({ id: task.taskId, title: task.taskTitle ?? `Task #${task.taskId}` });
-  }, [setHistoryTask]);
+    openDrawerToTab('visits', task.userId);
+    const poly = task.polyline ?? [];
+    if (poly.length > 0) {
+      handleFitCoordinates(poly);
+    }
+  }, [openDrawerToTab, handleFitCoordinates]);
 
   const handleToggleFollowAll = useCallback(() => {
     setFollowAllActive((prev) => {
@@ -1854,8 +1916,11 @@ export function MapboxMapView({ compact = false, providerState }: MapViewProps &
         </div>
       )}
 
+      {/* Analytical Mode Switcher & KPI Ribbon */}
+      <MapAnalyticalModeHeader onFitLagosFleet={handleFitLagosFleet} />
+
       {/* Search — top, full-width on mobile / top-right on desktop */}
-      <div className="absolute top-4 left-4 right-4 md:top-8 md:right-8 md:left-auto md:w-[450px] z-20">
+      <div className="absolute top-20 left-4 right-4 md:top-6 md:right-8 md:left-auto md:w-[300px] xl:w-[340px] z-20">
         <div className="relative">
           <Search className="absolute left-5 top-1/2 -translate-y-1/2 text-gray-400" size={18} strokeWidth={2} />
           <input
@@ -2044,6 +2109,7 @@ export function MapboxMapView({ compact = false, providerState }: MapViewProps &
             }}
             onToggleFollowAll={() => setFieldFollowAll(!fieldFollowAll)}
             onToggleFocusMode={() => setFieldFocusMode(!fieldFocusMode)}
+            onViewHistory={(userId) => openDrawerToTab('visits', userId)}
           />
         ) : (
           <BusinessListPanel
@@ -2148,6 +2214,23 @@ export function MapboxMapView({ compact = false, providerState }: MapViewProps &
         toggleClassName="absolute bottom-6 left-4 z-30 flex flex-col-reverse items-start gap-2"
       />
 
+      <FieldHeatmapLayer
+        provider="mapbox"
+        ready={mapVersion > 0}
+        getMapboxMap={() => mapRef.current}
+      />
+
+      <VisitHistoryMapLayer
+        provider="mapbox"
+        ready={mapVersion > 0}
+        getMapboxMap={() => mapRef.current}
+      />
+
+      <MapAnalyticsHistoryDrawer
+        onFlyToCoordinate={handleFlyToCoordinate}
+        onFitCoordinates={handleFitCoordinates}
+      />
+
       {selectedTask && (() => {
         const operationalStatus = resolveOperationalStatusFromTask(selectedTask, nowMs, STALE_MS);
         const statusMeta = OPERATIONAL_STATUS_META[operationalStatus];
@@ -2180,7 +2263,7 @@ export function MapboxMapView({ compact = false, providerState }: MapViewProps &
                 />
                 <div className="min-w-0">
                   <p className="text-[14px] font-semibold text-slate-900 truncate">{selectedTask.agentName || 'Agent'}</p>
-                  <p className="text-[11px] text-slate-500">Role: Agent</p>
+                  <p className="text-[11px] text-slate-500">Role: Field Sales Agent</p>
                 </div>
               </div>
 
@@ -2215,16 +2298,25 @@ export function MapboxMapView({ compact = false, providerState }: MapViewProps &
                 Last GPS Update: {new Date(selectedTask.lastEventAt).toLocaleString()}
               </p>
 
-              <button
-                onClick={handleToggleSelectedFollow}
-                className={`w-full flex items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-[12px] font-semibold transition-colors ${isFollowing
-                  ? 'bg-dash-teal/10 text-dash-teal hover:bg-dash-teal/20'
-                  : 'bg-[#0A192F] text-white hover:bg-[#132B4A]'
-                  }`}
-              >
-                <LocateFixed size={14} />
-                {isFollowing ? 'Following — tap to stop' : 'Follow agent'}
-              </button>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  onClick={handleToggleSelectedFollow}
+                  className={`flex items-center justify-center gap-1.5 rounded-xl px-3 py-2.5 text-[11.5px] font-semibold transition-colors ${isFollowing
+                    ? 'bg-dash-teal/10 text-dash-teal hover:bg-dash-teal/20'
+                    : 'bg-[#0A192F] text-white hover:bg-[#132B4A]'
+                    }`}
+                >
+                  <LocateFixed size={13} />
+                  {isFollowing ? 'Following' : 'Follow Agent'}
+                </button>
+                <button
+                  onClick={() => handleViewHistoryTask(selectedTask)}
+                  className="flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-[11.5px] font-semibold text-slate-700 hover:bg-slate-100 transition-colors"
+                >
+                  <History size={13} className="text-dash-teal" />
+                  Visit History
+                </button>
+              </div>
             </div>
           </div>
         );
@@ -2267,6 +2359,30 @@ export function MapboxMapView({ compact = false, providerState }: MapViewProps &
         >
           {showBusinessPins ? <EyeOff size={16} /> : <Eye size={16} />}
           {showBusinessPins ? 'Hide Pins' : 'Show Pins'}
+        </button>
+
+        {/* Toggle Heat Map */}
+        <button
+          onClick={() => setHeatmapEnabled(!heatmapEnabled)}
+          title={heatmapEnabled ? 'Hide field activity heat map' : 'Show field activity heat map'}
+          className={`h-10 rounded-full backdrop-blur shadow-lg border px-4 flex items-center gap-2 text-[12px] font-semibold active:scale-95 transition-all ${
+            heatmapEnabled
+              ? 'bg-gradient-to-r from-amber-500 to-rose-500 text-white border-amber-500'
+              : 'bg-white/95 border-slate-200 text-dash-dark hover:bg-slate-50'
+          }`}
+        >
+          <Flame size={16} className={heatmapEnabled ? 'text-white' : 'text-amber-500'} />
+          Heat Map
+        </button>
+
+        {/* Toggle Visit History & Analytics Drawer */}
+        <button
+          onClick={() => openDrawerToTab('visits')}
+          title="Open Visit History, Weekly & Monthly Analytics"
+          className="h-10 rounded-full bg-white/95 backdrop-blur shadow-lg border border-slate-200 px-4 flex items-center gap-2 text-[12px] font-semibold text-dash-dark hover:bg-slate-50 active:scale-95 transition-all"
+        >
+          <History size={16} className="text-dash-teal" />
+          History
         </button>
 
         {/* Locate me */}
@@ -2501,10 +2617,42 @@ function GoogleMapView({ compact = false, providerState }: MapViewProps & { prov
     return () => clearTimeout(timer);
   }, [initialAgentId, deepLinkTaskIdGoogle, liveTasks, selectedTaskId, handleSelectTask]);
 
+  const openDrawerToTabGoogle = useMapAnalyticsStore((s) => s.openDrawerToTab);
+
+  const handleFlyToCoordinateGoogle = useCallback(
+    (lng: number, lat: number, zoom = 15) => {
+      const map = mapRef.current;
+      if (!map || !Number.isFinite(lng) || !Number.isFinite(lat)) return;
+      map.panTo({ lat, lng });
+      if (map.getZoom() < zoom) map.setZoom(zoom);
+    },
+    [],
+  );
+
+  const handleFitCoordinatesGoogle = useCallback((coords: [number, number][]) => {
+    const map = mapRef.current;
+    const google = googleRef.current;
+    if (!map || !google || coords.length === 0) return;
+    const bounds = new google.maps.LatLngBounds();
+    coords.forEach(([lng, lat]) => {
+      if (Number.isFinite(lng) && Number.isFinite(lat)) {
+        bounds.extend({ lat, lng });
+      }
+    });
+    map.fitBounds(bounds, 80);
+  }, []);
+
+  const handleFitLagosFleetGoogle = useCallback(() => {
+    handleFitCoordinatesGoogle(getLagosFleetCoordinates());
+  }, [handleFitCoordinatesGoogle]);
+
   const handleViewHistoryTask = useCallback((task: LiveTaskState) => {
-    // Route history slide-in disabled — see docs/map-route-history-panel.md
-    // setHistoryTask({ id: task.taskId, title: task.taskTitle ?? `Task #${task.taskId}` });
-  }, [setHistoryTask]);
+    openDrawerToTabGoogle('visits', task.userId);
+    const poly = task.polyline ?? [];
+    if (poly.length > 0) {
+      handleFitCoordinatesGoogle(poly);
+    }
+  }, [openDrawerToTabGoogle, handleFitCoordinatesGoogle]);
 
   const handleToggleFollowAll = useCallback(() => {
     setFollowAllActive((prev) => {
@@ -3264,7 +3412,10 @@ function GoogleMapView({ compact = false, providerState }: MapViewProps & { prov
         </div>
       )}
 
-      <div className="absolute top-4 left-4 right-4 md:top-8 md:right-8 md:left-auto md:w-[450px] z-20">
+      {/* Analytical Mode Switcher & KPI Ribbon */}
+      <MapAnalyticalModeHeader onFitLagosFleet={handleFitLagosFleetGoogle} />
+
+      <div className="absolute top-20 left-4 right-4 md:top-6 md:right-8 md:left-auto md:w-[300px] xl:w-[340px] z-20">
         <div className="relative">
           <Search className="absolute left-5 top-1/2 -translate-y-1/2 text-gray-400" size={18} strokeWidth={2} />
           <input
@@ -3375,6 +3526,7 @@ function GoogleMapView({ compact = false, providerState }: MapViewProps & { prov
             }}
             onToggleFollowAll={() => setFieldFollowAll(!fieldFollowAll)}
             onToggleFocusMode={() => setFieldFocusMode(!fieldFocusMode)}
+            onViewHistory={(userId) => openDrawerToTabGoogle('visits', userId)}
           />
         ) : (
           <BusinessListPanel
@@ -3468,6 +3620,17 @@ function GoogleMapView({ compact = false, providerState }: MapViewProps & { prov
         ready={googleReady}
         getGoogleMap={() => (mapRef.current ? { map: mapRef.current } : null)}
         toggleClassName="absolute bottom-6 left-4 z-30 flex flex-col-reverse items-start gap-2"
+      />
+
+      <FieldHeatmapLayer
+        provider="google"
+        ready={googleReady}
+        getGoogleMap={() => (mapRef.current ? { map: mapRef.current } : null)}
+      />
+
+      <MapAnalyticsHistoryDrawer
+        onFlyToCoordinate={handleFlyToCoordinateGoogle}
+        onFitCoordinates={handleFitCoordinatesGoogle}
       />
 
       {/* Route history slide-in disabled — see docs/map-route-history-panel.md

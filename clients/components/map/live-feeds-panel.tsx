@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, MoreHorizontal, Radio, Users } from "lucide-react";
+import { ChevronDown, History, Radio, Users } from "lucide-react";
 import { useMemo } from "react";
 
 import { AgentAvatar } from "@/components/map/agent-avatar";
@@ -78,22 +78,31 @@ function FeedCard({
   nowMs,
   liveTaskCount = 1,
   onSelect,
+  onViewHistory,
 }: {
   task: LiveTaskState;
   isSelected: boolean;
   nowMs: number;
   liveTaskCount?: number;
   onSelect: () => void;
+  onViewHistory?: () => void;
 }) {
   const operationalStatus = resolveOperationalStatusFromTask(task, nowMs, TRACKING_STALE_MS);
   const statusMeta = OPERATIONAL_STATUS_META[operationalStatus];
   const lastSeen = formatRelativeLastSeen(task.lastEventAt, nowMs);
 
   return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onSelect}
-      className={`w-full flex items-center gap-4 px-4 py-3.5 text-left transition-all rounded-[20px] ${
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onSelect();
+        }
+      }}
+      className={`w-full flex items-center gap-3.5 px-4 py-3.5 text-left transition-all rounded-[20px] cursor-pointer ${
         isSelected ? "bg-[#0A192F]" : "bg-[#F8FAFC] hover:bg-gray-100"
       }`}
     >
@@ -157,8 +166,24 @@ function FeedCard({
           {formatSpeed(task.speedMps)} · Left {formatMetricDistance(task.distanceRemainingMeters)}
         </p>
       </div>
-      <MoreHorizontal size={20} className={isSelected ? "text-white/50" : "text-gray-400"} />
-    </button>
+      {onViewHistory && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onViewHistory();
+          }}
+          title="View agent visit history & route playback"
+          className={`shrink-0 rounded-full p-2 transition-colors ${
+            isSelected
+              ? "bg-white/10 text-[#2AE9C9] hover:bg-white/20"
+              : "bg-white text-slate-500 hover:bg-slate-200 hover:text-slate-800 shadow-2xs"
+          }`}
+        >
+          <History size={15} />
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -178,12 +203,6 @@ export function LiveFeedsPanel({
   const needle = searchQuery.trim();
   const { active, history } = splitLiveFeedTasks(tasks, nowMs, TRACKING_STALE_MS);
   const agentTaskCounts = useMemo(() => countLiveTasksByAgent(tasks), [tasks]);
-
-  const selectHistoryTask = (task: LiveTaskState) => {
-    onSelectTask(task.taskId);
-    // Route history slide-in disabled — see docs/map-route-history-panel.md
-    // onViewHistoryTask?.(task);
-  };
 
   const searchResults = useMemo(() => {
     if (!needle) return [];
@@ -214,6 +233,9 @@ export function LiveFeedsPanel({
               nowMs={nowMs}
               liveTaskCount={agentTaskCounts.get(task.userId) ?? 1}
               onSelect={() => onSelectTask(task.taskId)}
+              onViewHistory={
+                onViewHistoryTask ? () => onViewHistoryTask(task) : undefined
+              }
             />
           ))
         )}
@@ -262,6 +284,9 @@ export function LiveFeedsPanel({
             nowMs={nowMs}
             liveTaskCount={agentTaskCounts.get(task.userId) ?? 1}
             onSelect={() => onSelectTask(task.taskId)}
+            onViewHistory={
+              onViewHistoryTask ? () => onViewHistoryTask(task) : undefined
+            }
           />
         ))
       )}
@@ -289,6 +314,9 @@ export function LiveFeedsPanel({
                   nowMs={nowMs}
                   liveTaskCount={agentTaskCounts.get(task.userId) ?? 1}
                   onSelect={() => onSelectTask(task.taskId)}
+                  onViewHistory={
+                    onViewHistoryTask ? () => onViewHistoryTask(task) : undefined
+                  }
                 />
               ))}
             </div>

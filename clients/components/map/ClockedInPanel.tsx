@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { format, parseISO } from "date-fns";
-import { Clock3, Crosshair, Eye, EyeOff, Users } from "lucide-react";
+import { Clock3, Crosshair, Eye, EyeOff, History, Users } from "lucide-react";
 import type { AttendanceMapSnapshotItem } from "@/lib/api/attendance";
 import { getAgentInitials } from "@/lib/tracking/map-visualization";
 
@@ -12,6 +12,7 @@ type ClockedInPanelProps = {
   isLoading?: boolean;
   selectedUserId: number | null;
   onSelect: (item: AttendanceMapSnapshotItem) => void;
+  onViewHistory?: (userId: number | null) => void;
   showAttendanceLink?: boolean;
   followAllActive?: boolean;
   focusMode?: boolean;
@@ -25,6 +26,7 @@ export function ClockedInPanel({
   isLoading = false,
   selectedUserId,
   onSelect,
+  onViewHistory,
   showAttendanceLink = true,
   followAllActive = false,
   focusMode = false,
@@ -101,11 +103,18 @@ export function ClockedInPanel({
           : "—";
 
         return (
-          <button
+          <div
             key={item.user_id}
-            type="button"
+            role="button"
+            tabIndex={0}
             onClick={() => onSelect(item)}
-            className={`w-full flex items-center gap-4 px-4 py-3.5 text-left transition-all rounded-[20px] ${
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onSelect(item);
+              }
+            }}
+            className={`w-full flex items-center gap-3.5 px-4 py-3.5 text-left transition-all rounded-[20px] cursor-pointer ${
               isSelected ? "bg-[#0A192F]" : "bg-[#F8FAFC] hover:bg-gray-100"
             }`}
           >
@@ -139,19 +148,47 @@ export function ClockedInPanel({
                 }`}
               >
                 Clocked in {clockInLabel}
+                {item.zone ? ` · ${item.zone}` : ""}
               </p>
             </div>
-          </button>
+            {onViewHistory ? (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onViewHistory(item.user_id);
+                }}
+                title="View agent visit history"
+                className={`shrink-0 rounded-full p-2 transition-colors ${
+                  isSelected
+                    ? "bg-white/10 text-[#2AE9C9] hover:bg-white/20"
+                    : "bg-white text-slate-500 hover:bg-slate-200 hover:text-slate-800 shadow-2xs"
+                }`}
+              >
+                <History size={15} />
+              </button>
+            ) : null}
+          </div>
         );
       })}
 
       {showAttendanceLink ? (
-        <Link
-          href="/operations"
-          className="block text-center text-[12px] font-semibold text-[#2F5E71] pt-2"
-        >
-          Open Journey History
-        </Link>
+        onViewHistory ? (
+          <button
+            type="button"
+            onClick={() => onViewHistory(selectedUserId)}
+            className="w-full block text-center text-[12px] font-semibold text-[#2F5E71] hover:underline pt-2"
+          >
+            Open Visit & Journey History
+          </button>
+        ) : (
+          <Link
+            href="/operations"
+            className="block text-center text-[12px] font-semibold text-[#2F5E71] pt-2"
+          >
+            Open Journey History
+          </Link>
+        )
       ) : null}
     </div>
   );
