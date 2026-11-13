@@ -394,7 +394,6 @@ export function AdminCrmView() {
           </p>
         </div>
         <div className="sl-head-note">
-          <span className="sl-demo">Demo data</span> Admin workspace
           <small>Snapshot · 13 Oct 2026 · {records.length} leads loaded</small>
         </div>
       </header>
@@ -679,7 +678,7 @@ export function AdminCrmView() {
                   filter the pipeline and inspect matching leads below.
                 </p>
               </div>
-              <div className="crm-period" role="tablist" aria-label="Segmentation dimension">
+              {/* <div className="crm-period" role="tablist" aria-label="Segmentation dimension">
                 {(
                   [
                     ["industry", "Industries"],
@@ -697,10 +696,10 @@ export function AdminCrmView() {
                     {label}
                   </button>
                 ))}
-              </div>
+              </div> */}
             </div>
 
-            <div className="crm-segment-pills">
+            {/* <div className="crm-segment-pills">
               {segmentTab === "industry" &&
                 CRM_INDUSTRIES.map((ind) => {
                   const count = industryCounts.get(ind) ?? 0;
@@ -789,7 +788,7 @@ export function AdminCrmView() {
                     </button>
                   );
                 })}
-            </div>
+            </div> */}
 
             <div className="sl-subhead crm-preview-subhead">
               <h3>
