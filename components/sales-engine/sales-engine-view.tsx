@@ -1,5 +1,6 @@
 "use client";
 
+import { SafeItem, SafeSection } from "@/components/ui/safe-boundary";
 import type { Dispatch, ReactNode, SetStateAction } from "react";
 import { PAGE_SIZE, ProspectPagination } from "@/components/ui/prospect-pagination";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -962,7 +963,7 @@ function LeadInlineResults({
 
       {viewMode === "list" ? (
         <div className="flex flex-col gap-1.5">
-          {visibleLeads.map((lead) => {
+          {visibleLeads.map((lead) => (<SafeItem key={lead.id ?? lead.name} name="lead">{() => {
             const isSynced = lead.native_crm_saved || Boolean(lead.native_crm_lead_id);
             const fieldsUpdated = lead.crm_fields_updated ?? [];
             const { overall } = leadScoreBreakdown(lead);
@@ -1077,11 +1078,11 @@ function LeadInlineResults({
                 </div>
               </div>
             );
-          })}
+          }}</SafeItem>))}
         </div>
       ) : (
         <div className="grid gap-2 sm:grid-cols-3">
-          {visibleLeads.map((lead) => {
+          {visibleLeads.map((lead) => (<SafeItem key={lead.id ?? lead.name} name="lead">{() => {
             const isSynced = lead.native_crm_saved || Boolean(lead.native_crm_lead_id);
             const fieldsUpdated = lead.crm_fields_updated ?? [];
             const { overall } = leadScoreBreakdown(lead);
@@ -1197,7 +1198,7 @@ function LeadInlineResults({
                 </div>
               </div>
             );
-          })}
+          }}</SafeItem>))}
         </div>
       )}
       {hasMore && (
@@ -2093,7 +2094,7 @@ function ChatWorkspace({
         }`}
       >
         <div className="space-y-4">
-          {messages.map((message, index) => {
+          {messages.map((message, index) => (<SafeItem key={message.id ?? index} name="chat message">{() => {
             const pendingRunId =
               typeof message.meta?.discovery_run_id === "number"
                 ? message.meta.discovery_run_id
@@ -2354,7 +2355,7 @@ function ChatWorkspace({
               )}
             </div>
             );
-          })}
+          }}</SafeItem>))}
           {isThinking && sendMessage.processingState && (
             sendMessage.processingState.intent === "quick_research" ? (
               <ResearchProcessingPanel
@@ -2745,7 +2746,7 @@ function OutreachPanel({ onOpenSettings }: { onOpenSettings: () => void }) {
       </p>
       {items.length > 0 ? (
         <div className="mx-auto flex h-[440px] w-full max-w-[285px] flex-col gap-4 overflow-y-auto overflow-x-hidden pr-1 max-xl:h-[360px] [scrollbar-width:thin] [scrollbar-color:rgba(255,255,255,0.28)_transparent] [&::-webkit-scrollbar]:h-0 [&::-webkit-scrollbar]:w-[3px] [&::-webkit-scrollbar-button]:hidden [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-white/25 hover:[&::-webkit-scrollbar-thumb]:bg-white/40">
-          {items.map((item, index) => {
+          {items.map((item, index) => (<SafeItem key={item.id ?? index} name="outreach item">{() => {
             const cardTheme = OUTREACH_CARD_PALETTE[index % OUTREACH_CARD_PALETTE.length];
             return (
               <OutreachCard
@@ -2763,7 +2764,7 @@ function OutreachPanel({ onOpenSettings }: { onOpenSettings: () => void }) {
                 isDeleting={deleteOutreach.isPending && deleteOutreach.variables === item.id}
               />
             );
-          })}
+          }}</SafeItem>))}
         </div>
       ) : (
         <div className="flex h-[420px] flex-col items-center justify-center max-xl:h-[340px]">
@@ -3174,7 +3175,7 @@ function SocialSignalRow({
   onSetReminder?: (signal: SocialSignal) => void;
 }) {
   const isIndividual =
-    signal.entityType === "individual" || signal.company.toLowerCase() === "individual";
+    signal.entityType === "individual" || (signal.company ?? "").toLowerCase() === "individual";
   const fresh = isFreshSignal(signal.posted_at);
   const inCrm = Boolean(signal.native_crm_saved);
 
@@ -3491,8 +3492,8 @@ function SocialSignalsTable({
           </thead>
           <tbody>
             {paginatedList.map((signal) => (
+              <SafeItem key={signal.id} name="signal">{() => (
               <SocialSignalRow
-                key={signal.id}
                 signal={signal}
                 isActive={signal.id === activeSignalId}
                 selected={selectedIds.includes(signal.id)}
@@ -3504,6 +3505,7 @@ function SocialSignalsTable({
                 onAddToCrm={onAddToCrm}
                 onSetReminder={onSetReminder}
               />
+              )}</SafeItem>
             ))}
             {showSkeleton && (
               <SocialSignalsTableSkeleton rows={skeletonRows} selectionMode={selectionMode} />
@@ -3657,7 +3659,7 @@ function SocialOpportunityDetail({
   outreachSent?: boolean;
 }) {
   const isIndividual =
-    signal.entityType === "individual" || signal.company.toLowerCase() === "individual";
+    signal.entityType === "individual" || (signal.company ?? "").toLowerCase() === "individual";
   const [hasCopiedMessage, setHasCopiedMessage] = useState(false);
   const [expandedSignalId, setExpandedSignalId] = useState<number | null>(null);
   const showFullSignal = expandedSignalId === signal.id;
@@ -4758,6 +4760,7 @@ function SocialListeningTab({
               Select an active ICP profile first. Open ICP Builder to create or activate one.
             </div>
           ) : (
+            <SafeSection name="signals" label="your signals" className="flex-1">
             <SocialSignalsTable
               signals={signals}
               activeSignalId={effectiveActiveSignalId}
@@ -4792,9 +4795,11 @@ function SocialListeningTab({
               scanPanel={scanPanel}
               lastRunSummary={<ScanRunSummaryPanel run={latestRun} />}
             />
+            </SafeSection>
           )}
         </div>
         {activeSignal ? (
+          <SafeSection key={activeSignal.id} name="signal-detail" label="signal details">
           <SocialOpportunityDetail
             signal={activeSignal}
             isCreatingOutreach={createOutreach.isPending && pendingOutreachSignal?.id === activeSignal.id}
@@ -4805,6 +4810,7 @@ function SocialListeningTab({
             onSyncToCrm={() => setPendingCrmSignal(activeSignal)}
             outreachSent={sentOutreachSignalIds.has(activeSignal.id)}
           />
+          </SafeSection>
         ) : isScanning ? (
           <SocialOpportunityDetailSkeleton />
         ) : (
@@ -4926,10 +4932,12 @@ export function SalesEngineView({ activeTab = "smart-lead" }: { activeTab?: Sale
     <div className="se-workspace min-h-[calc(100vh-80px)] overflow-x-hidden bg-[#f8f8f8] px-6 py-8 text-[#09232d] max-sm:px-4">
       <div className="mx-auto flex w-full max-w-[1340px] flex-col gap-7">
         {activeTab === "social-listening" && !chatExpanded ? (
+          <SafeSection name="social-listening" label="social listening">
           <SocialListeningTab
             onOpenIcpBuilder={handleOpenIcpBuilder}
             onOpenOutreachSettings={() => setIsOutreachSettingsOpen(true)}
           />
+          </SafeSection>
         ) : (
           <>
         {!chatExpanded && (
@@ -4951,7 +4959,7 @@ export function SalesEngineView({ activeTab = "smart-lead" }: { activeTab?: Sale
               href={activeProfile?.id ? `/sales-engine/pending-review?icp_id=${activeProfile.id}` : "/sales-engine/pending-review"}
               actionLabel="Review leads &rarr;"
             />
-            <TrendChart changePercent={trend?.change_percent} direction={trend?.direction} points={trend?.points} />
+            <SafeSection name="trend" label="the trend" compact><TrendChart changePercent={trend?.change_percent} direction={trend?.direction} points={trend?.points} /></SafeSection>
             <div className="se-smart-actions flex flex-col gap-3 pt-2 col-span-full">
               <div className="flex flex-wrap items-center gap-4">
                 <Link
@@ -4990,14 +4998,16 @@ export function SalesEngineView({ activeTab = "smart-lead" }: { activeTab?: Sale
               : "grid grid-cols-[minmax(0,949px)_368px] gap-[25px] max-xl:grid-cols-1"
           }
         >
+          <SafeSection name="chat" label="your chat">
           <ChatWorkspace
             expanded={chatExpanded}
             onToggleExpanded={() => setChatExpanded((current) => !current)}
             onOpenIcpBuilder={handleOpenIcpBuilder}
             onOpenOutreachSettings={() => setIsOutreachSettingsOpen(true)}
           />
+          </SafeSection>
           {!chatExpanded && (
-            <OutreachPanel onOpenSettings={() => setIsOutreachSettingsOpen(true)} />
+            <SafeSection name="outreach" label="outreach"><OutreachPanel onOpenSettings={() => setIsOutreachSettingsOpen(true)} /></SafeSection>
           )}
         </div>
           </>

@@ -41,6 +41,8 @@ class SocialSignalResourceStageFieldsTest extends TestCase
         $this->assertSame([], $legacyArray['namedPeople']);
         $this->assertSame(SocialSignal::ENRICHMENT_NOT_ATTEMPTED, $legacyArray['enrichment']['status']);
         $this->assertNull($legacyArray['enrichment']['attemptedAt']);
+        // A post that names no company: the list reads this as text, so never null.
+        $this->assertSame('', $legacyArray['company']);
 
         $populated = SocialSignal::query()->create([
             'organization_id' => $org->id,
