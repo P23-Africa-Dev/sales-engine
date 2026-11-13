@@ -87,6 +87,18 @@ export function CrmRecordDrawer({
             <strong>{money(record.value)}</strong>
           </div>
           <div>
+            <small>INDUSTRY & CATEGORY</small>
+            <strong>
+              {record.industry} · {record.category}
+            </strong>
+          </div>
+          <div>
+            <small>TERRITORY / LOCATION</small>
+            <strong>
+              {record.city}, {record.country}
+            </strong>
+          </div>
+          <div>
             <small>CAPTURE SOURCE</small>
             <strong>{record.source}</strong>
           </div>

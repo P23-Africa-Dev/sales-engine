@@ -5,6 +5,7 @@ import {
   Archive,
   ArrowDownToLine,
   ArrowRight,
+  Briefcase,
   Building2,
   Check,
   ChevronRight,
@@ -12,16 +13,24 @@ import {
   Clock3,
   Database,
   Filter,
+  Globe,
   Layers3,
+  MapPin,
   Search,
   Settings2,
   ShieldCheck,
+  Tag,
   TrendingUp,
   Users,
   X,
 } from "lucide-react";
 import {
+  CRM_BUSINESS_CATEGORIES,
   CRM_BUSINESSES,
+  CRM_CITIES,
+  CRM_CITIES_BY_COUNTRY,
+  CRM_COUNTRIES,
+  CRM_INDUSTRIES,
   CRM_INITIAL_AUDIT,
   CRM_RECORDS,
   CRM_SNAPSHOT,
@@ -33,15 +42,22 @@ import {
   isStale,
   issuesFor,
   money,
-  type CrmAudit,
   type CrmBusiness,
   type CrmIssue,
   type CrmRecord,
 } from "@/lib/admin/admin-crm";
 import { CrmCharts } from "./crm-charts";
 import { CrmRecordDrawer } from "./crm-record-drawer";
+
 type View =
-  "Overview" | "Client pipelines" | "Records" | "Data quality" | "Activity log";
+  | "Overview"
+  | "Client pipelines"
+  | "Records"
+  | "Data quality"
+  | "Activity log";
+
+type SegmentDimension = "industry" | "category" | "country" | "city";
+
 const tabs = [
   { name: "Overview", icon: TrendingUp },
   { name: "Client pipelines", icon: Layers3 },
@@ -49,6 +65,9 @@ const tabs = [
   { name: "Data quality", icon: ShieldCheck },
   { name: "Activity log", icon: Activity },
 ] as const;
+
+const PAGE_SIZE = 10;
+
 function Pill({
   children,
   tone = "neutral",
@@ -58,12 +77,18 @@ function Pill({
 }) {
   return <span className={`sl-badge sl-${tone}`}>{children}</span>;
 }
+
 export function AdminCrmView() {
   const [records, setRecords] = useState(CRM_RECORDS);
   const [businesses, setBusinesses] = useState(CRM_BUSINESSES);
   const [audit, setAudit] = useState(CRM_INITIAL_AUDIT);
   const [view, setView] = useState<View>("Overview");
   const [scope, setScope] = useState("all");
+  const [industry, setIndustry] = useState("all");
+  const [category, setCategory] = useState("all");
+  const [country, setCountry] = useState("all");
+  const [city, setCity] = useState("all");
+  const [segmentTab, setSegmentTab] = useState<SegmentDimension>("industry");
   const [selectedBusiness, setSelectedBusiness] = useState(
     CRM_BUSINESSES[0].id,
   );
@@ -80,11 +105,58 @@ export function AdminCrmView() {
   const [notice, setNotice] = useState("");
   const [issueFilter, setIssueFilter] = useState<CrmIssue | "all">("all");
   const [activityFilter, setActivityFilter] = useState("all");
+
+  const availableCities =
+    country === "all"
+      ? CRM_CITIES
+      : (CRM_CITIES_BY_COUNTRY[country] ?? CRM_CITIES);
+
+  const nonArchivedRecords = records.filter((r) => !r.archived);
+  const totalActiveCount = nonArchivedRecords.length;
+
+  const industryCounts = new Map<string, number>();
+  const categoryCounts = new Map<string, number>();
+  const countryCounts = new Map<string, number>();
+  const cityCounts = new Map<string, number>();
+
+  for (const r of nonArchivedRecords) {
+    const matchScope = scope === "all" || r.businessId === scope;
+    const matchInd = industry === "all" || r.industry === industry;
+    const matchCat = category === "all" || r.category === category;
+    const matchCountry = country === "all" || r.country === country;
+    const matchCity = city === "all" || r.city === city;
+
+    if (matchScope && matchCat && matchCountry && matchCity) {
+      industryCounts.set(r.industry, (industryCounts.get(r.industry) ?? 0) + 1);
+    }
+    if (matchScope && matchInd && matchCountry && matchCity) {
+      categoryCounts.set(r.category, (categoryCounts.get(r.category) ?? 0) + 1);
+    }
+    if (matchScope && matchInd && matchCat && matchCity) {
+      countryCounts.set(r.country, (countryCounts.get(r.country) ?? 0) + 1);
+    }
+    if (matchScope && matchInd && matchCat && matchCountry) {
+      cityCounts.set(r.city, (cityCounts.get(r.city) ?? 0) + 1);
+    }
+  }
+
+  const hasScopeFilters =
+    scope !== "all" ||
+    industry !== "all" ||
+    category !== "all" ||
+    country !== "all" ||
+    city !== "all";
+
   const scopedBusinesses = businesses.filter(
     (b) => scope === "all" || b.id === scope,
   );
   const scoped = records.filter(
-    (r) => scope === "all" || r.businessId === scope,
+    (r) =>
+      (scope === "all" || r.businessId === scope) &&
+      (industry === "all" || r.industry === industry) &&
+      (category === "all" || r.category === category) &&
+      (country === "all" || r.country === country) &&
+      (city === "all" || r.city === city),
   );
   const active = scoped.filter((r) => !r.archived);
   const open = active.filter(isOpen);
@@ -96,10 +168,17 @@ export function AdminCrmView() {
   const business =
     businesses.find((b) => b.id === selectedBusiness) ?? businesses[0];
   const businessRecords = records.filter(
-    (r) => r.businessId === business.id && !r.archived,
+    (r) =>
+      r.businessId === business.id &&
+      !r.archived &&
+      (industry === "all" || r.industry === industry) &&
+      (category === "all" || r.category === category) &&
+      (country === "all" || r.country === country) &&
+      (city === "all" || r.city === city),
   );
   const detail = records.find((r) => r.id === detailId);
   const policy = businesses.find((b) => b.id === policyId);
+
   function log(
     businessId: string,
     action: string,
@@ -141,6 +220,16 @@ export function AdminCrmView() {
     setPage(1);
     setDetailId(null);
   }
+  function resetScopeFilters() {
+    setScope("all");
+    setIndustry("all");
+    setCategory("all");
+    setCountry("all");
+    setCity("all");
+    setSelected([]);
+    setPage(1);
+    setDetailId(null);
+  }
   function inspectBusiness(id: string) {
     changeScope(id);
     setSelectedBusiness(id);
@@ -161,16 +250,20 @@ export function AdminCrmView() {
         r.archived === (visibility === "archived") &&
         (stage === "all" || r.stage === stage) &&
         (source === "all" || r.source === source) &&
-        `${r.company} ${r.contact} ${r.owner} ${r.id} ${name(r.businessId)}`
+        `${r.company} ${r.contact} ${r.owner} ${r.id} ${name(r.businessId)} ${r.industry} ${r.category} ${r.country} ${r.city}`
           .toLowerCase()
           .includes(query.toLowerCase()),
     )
     .sort((a, b) =>
       sort === "value" ? b.value - a.value : b.created.localeCompare(a.created),
     );
-  const pages = Math.max(1, Math.ceil(filtered.length / 6));
+  const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, pages);
-  const pageRecords = filtered.slice((safePage - 1) * 6, safePage * 6);
+  const pageRecords = filtered.slice(
+    (safePage - 1) * PAGE_SIZE,
+    safePage * PAGE_SIZE,
+  );
+
   function archiveRecords(ids: string[], reason: string) {
     if (!reason.trim()) return;
     setRecords((items) =>
@@ -243,6 +336,10 @@ export function AdminCrmView() {
         "ID",
         "Client business",
         "Company",
+        "Industry",
+        "Business category",
+        "City",
+        "Country",
         "Contact",
         "Email",
         "Owner",
@@ -255,6 +352,10 @@ export function AdminCrmView() {
         r.id,
         name(r.businessId),
         r.company,
+        r.industry,
+        r.category,
+        r.city,
+        r.country,
         r.contact,
         r.email,
         r.owner,
@@ -279,6 +380,7 @@ export function AdminCrmView() {
     URL.revokeObjectURL(url);
     setNotice(`Exported ${filtered.length} records from the current filters.`);
   }
+
   return (
     <div className="sl-root crm-root">
       <header className="sl-page-head">
@@ -293,27 +395,210 @@ export function AdminCrmView() {
         </div>
         <div className="sl-head-note">
           <span className="sl-demo">Demo data</span> Admin workspace
-          <small>Snapshot · 13 Oct 2026</small>
+          <small>Snapshot · 13 Oct 2026 · {records.length} leads loaded</small>
         </div>
       </header>
-      <div className="sl-context">
-        <div>
-          <Building2 size={17} />
-          <label htmlFor="crm-scope">Business scope</label>
-          <select
-            id="crm-scope"
-            value={scope}
-            onChange={(e) => changeScope(e.target.value)}
-          >
-            <option value="all">All client businesses</option>
-            {businesses.map((b) => (
-              <option key={b.id} value={b.id}>
-                {b.name}
+      <div className="sl-context crm-scope-bar">
+        <div className="crm-scope-filters">
+          <div className="crm-scope-field">
+            <label htmlFor="crm-scope">
+              <Building2 size={14} /> Business scope
+            </label>
+            <select
+              id="crm-scope"
+              value={scope}
+              onChange={(e) => changeScope(e.target.value)}
+            >
+              <option value="all">
+                All client businesses ({businesses.length})
               </option>
-            ))}
-          </select>
+              {businesses.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="crm-scope-field">
+            <label htmlFor="crm-industry">
+              <Briefcase size={14} /> Industry
+            </label>
+            <select
+              id="crm-industry"
+              value={industry}
+              onChange={(e) => {
+                setIndustry(e.target.value);
+                filterChanged();
+              }}
+            >
+              <option value="all">
+                All industries ({CRM_INDUSTRIES.length})
+              </option>
+              {CRM_INDUSTRIES.map((ind) => (
+                <option key={ind} value={ind}>
+                  {ind} ({industryCounts.get(ind) ?? 0})
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="crm-scope-field">
+            <label htmlFor="crm-category">
+              <Tag size={14} /> Business category
+            </label>
+            <select
+              id="crm-category"
+              value={category}
+              onChange={(e) => {
+                setCategory(e.target.value);
+                filterChanged();
+              }}
+            >
+              <option value="all">
+                All categories ({CRM_BUSINESS_CATEGORIES.length})
+              </option>
+              {CRM_BUSINESS_CATEGORIES.map((cat) => (
+                <option key={cat} value={cat}>
+                  {cat} ({categoryCounts.get(cat) ?? 0})
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="crm-scope-field">
+            <label htmlFor="crm-country">
+              <Globe size={14} /> Country
+            </label>
+            <select
+              id="crm-country"
+              value={country}
+              onChange={(e) => {
+                const nextCountry = e.target.value;
+                setCountry(nextCountry);
+                if (
+                  nextCountry !== "all" &&
+                  city !== "all" &&
+                  !(CRM_CITIES_BY_COUNTRY[nextCountry] ?? []).includes(city)
+                ) {
+                  setCity("all");
+                }
+                filterChanged();
+              }}
+            >
+              <option value="all">
+                All countries ({CRM_COUNTRIES.length})
+              </option>
+              {CRM_COUNTRIES.map((c) => (
+                <option key={c} value={c}>
+                  {c} ({countryCounts.get(c) ?? 0})
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="crm-scope-field">
+            <label htmlFor="crm-city">
+              <MapPin size={14} /> City
+            </label>
+            <select
+              id="crm-city"
+              value={city}
+              onChange={(e) => {
+                setCity(e.target.value);
+                filterChanged();
+              }}
+            >
+              <option value="all">
+                {country === "all"
+                  ? `All cities (${availableCities.length})`
+                  : `All cities in ${country} (${availableCities.length})`}
+              </option>
+              {availableCities.map((c) => (
+                <option key={c} value={c}>
+                  {c} ({cityCounts.get(c) ?? 0})
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
-        <span>Local demo changes · refresh resets the workspace</span>
+        <div className="crm-scope-meta">
+          <div className="crm-scope-tags">
+            <span className="crm-scope-count">
+              <strong>{active.length}</strong> of {totalActiveCount} active
+              leads
+            </span>
+            {scope !== "all" && (
+              <button
+                type="button"
+                className="crm-active-tag"
+                onClick={() => changeScope("all")}
+                title="Remove client business filter"
+              >
+                Client: {name(scope)} <X size={12} />
+              </button>
+            )}
+            {industry !== "all" && (
+              <button
+                type="button"
+                className="crm-active-tag"
+                onClick={() => {
+                  setIndustry("all");
+                  filterChanged();
+                }}
+                title="Remove industry filter"
+              >
+                Industry: {industry} <X size={12} />
+              </button>
+            )}
+            {category !== "all" && (
+              <button
+                type="button"
+                className="crm-active-tag"
+                onClick={() => {
+                  setCategory("all");
+                  filterChanged();
+                }}
+                title="Remove business category filter"
+              >
+                Category: {category} <X size={12} />
+              </button>
+            )}
+            {country !== "all" && (
+              <button
+                type="button"
+                className="crm-active-tag"
+                onClick={() => {
+                  setCountry("all");
+                  filterChanged();
+                }}
+                title="Remove country filter"
+              >
+                Country: {country} <X size={12} />
+              </button>
+            )}
+            {city !== "all" && (
+              <button
+                type="button"
+                className="crm-active-tag"
+                onClick={() => {
+                  setCity("all");
+                  filterChanged();
+                }}
+                title="Remove city filter"
+              >
+                City: {city} <X size={12} />
+              </button>
+            )}
+          </div>
+          {hasScopeFilters ? (
+            <button
+              type="button"
+              className="crm-scope-reset"
+              onClick={resetScopeFilters}
+            >
+              <X size={13} /> Reset all filters
+            </button>
+          ) : null
+        
+        }
+        </div>
       </div>
       <nav className="sl-tabs" aria-label="Admin CRM views">
         {tabs.map(({ name: tab, icon: Icon }) => (
@@ -325,6 +610,7 @@ export function AdminCrmView() {
           >
             <Icon size={16} />
             {tab}
+            {tab === "Records" && <span>{active.length}</span>}
             {tab === "Data quality" && <span>{flagged.length}</span>}
           </button>
         ))}
@@ -346,9 +632,9 @@ export function AdminCrmView() {
           <div className="sl-metrics">
             {[
               {
-                label: "CLIENT WORKSPACES",
-                value: String(scopedBusinesses.length),
-                note: `${active.length} active CRM records`,
+                label: "MATCHING PROSPECT LEADS",
+                value: String(active.length),
+                note: `${scopedBusinesses.length} client workspaces · ${totalActiveCount} total active`,
                 icon: Building2,
               },
               {
@@ -357,7 +643,7 @@ export function AdminCrmView() {
                   open.reduce((sum, r) => sum + r.value, 0),
                   true,
                 ),
-                note: `${open.length} deals · illustrative EUR value`,
+                note: `${open.length} open deals · illustrative EUR value`,
                 icon: TrendingUp,
               },
               {
@@ -383,8 +669,217 @@ export function AdminCrmView() {
               </div>
             ))}
           </div>
+
+          <section className="sl-panel crm-explorer-panel">
+            <div className="sl-panel-head">
+              <div>
+                <h2>Prospect segmentation & matching leads</h2>
+                <p>
+                  Click any industry, business category, country, or city to
+                  filter the pipeline and inspect matching leads below.
+                </p>
+              </div>
+              <div className="crm-period" role="tablist" aria-label="Segmentation dimension">
+                {(
+                  [
+                    ["industry", "Industries"],
+                    ["category", "Categories"],
+                    ["country", "Countries"],
+                    ["city", "Cities"],
+                  ] as const
+                ).map(([key, label]) => (
+                  <button
+                    key={key}
+                    type="button"
+                    aria-pressed={segmentTab === key}
+                    onClick={() => setSegmentTab(key)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="crm-segment-pills">
+              {segmentTab === "industry" &&
+                CRM_INDUSTRIES.map((ind) => {
+                  const count = industryCounts.get(ind) ?? 0;
+                  const isActive = industry === ind;
+                  return (
+                    <button
+                      key={ind}
+                      type="button"
+                      aria-pressed={isActive}
+                      className={`crm-segment-pill ${isActive ? "is-active" : ""}`}
+                      onClick={() => {
+                        setIndustry(isActive ? "all" : ind);
+                        filterChanged();
+                      }}
+                    >
+                      <span>{ind}</span>
+                      <strong>{count}</strong>
+                    </button>
+                  );
+                })}
+              {segmentTab === "category" &&
+                CRM_BUSINESS_CATEGORIES.map((cat) => {
+                  const count = categoryCounts.get(cat) ?? 0;
+                  const isActive = category === cat;
+                  return (
+                    <button
+                      key={cat}
+                      type="button"
+                      aria-pressed={isActive}
+                      className={`crm-segment-pill ${isActive ? "is-active" : ""}`}
+                      onClick={() => {
+                        setCategory(isActive ? "all" : cat);
+                        filterChanged();
+                      }}
+                    >
+                      <span>{cat}</span>
+                      <strong>{count}</strong>
+                    </button>
+                  );
+                })}
+              {segmentTab === "country" &&
+                CRM_COUNTRIES.map((c) => {
+                  const count = countryCounts.get(c) ?? 0;
+                  const isActive = country === c;
+                  return (
+                    <button
+                      key={c}
+                      type="button"
+                      aria-pressed={isActive}
+                      className={`crm-segment-pill ${isActive ? "is-active" : ""}`}
+                      onClick={() => {
+                        const next = isActive ? "all" : c;
+                        setCountry(next);
+                        if (
+                          next !== "all" &&
+                          city !== "all" &&
+                          !(CRM_CITIES_BY_COUNTRY[next] ?? []).includes(city)
+                        ) {
+                          setCity("all");
+                        }
+                        filterChanged();
+                      }}
+                    >
+                      <span>{c}</span>
+                      <strong>{count}</strong>
+                    </button>
+                  );
+                })}
+              {segmentTab === "city" &&
+                availableCities.map((c) => {
+                  const count = cityCounts.get(c) ?? 0;
+                  const isActive = city === c;
+                  return (
+                    <button
+                      key={c}
+                      type="button"
+                      aria-pressed={isActive}
+                      className={`crm-segment-pill ${isActive ? "is-active" : ""}`}
+                      onClick={() => {
+                        setCity(isActive ? "all" : c);
+                        filterChanged();
+                      }}
+                    >
+                      <span>{c}</span>
+                      <strong>{count}</strong>
+                    </button>
+                  );
+                })}
+            </div>
+
+            <div className="sl-subhead crm-preview-subhead">
+              <h3>
+                Leads matching current scope ({active.length})
+              </h3>
+              <button
+                type="button"
+                className="sl-text-button"
+                onClick={() => setTab("Records")}
+              >
+                Open full record registry ({active.length}){" "}
+                <ArrowRight size={15} />
+              </button>
+            </div>
+
+            {active.length > 0 ? (
+              <div className="sl-table-wrap">
+                <table className="crm-record-table">
+                  <thead>
+                    <tr>
+                      <th>Lead / company</th>
+                      <th>Industry & category</th>
+                      <th>Location</th>
+                      <th>Client workspace</th>
+                      <th>Stage</th>
+                      <th>Estimated value</th>
+                      <th>Details</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {active.slice(0, 8).map((r) => (
+                      <tr key={r.id}>
+                        <td>
+                          <strong>{r.company}</strong>
+                          <small>
+                            {r.contact} · {r.role}
+                          </small>
+                        </td>
+                        <td>
+                          <strong>{r.industry}</strong>
+                          <small>{r.category}</small>
+                        </td>
+                        <td>
+                          <strong>{r.city}</strong>
+                          <small>{r.country}</small>
+                        </td>
+                        <td>
+                          <strong>{name(r.businessId)}</strong>
+                          <small>{r.owner || "Unassigned"}</small>
+                        </td>
+                        <td>
+                          <Pill tone={r.stage === "Won" ? "mint" : "neutral"}>
+                            {r.stage}
+                          </Pill>
+                        </td>
+                        <td>{money(r.value)}</td>
+                        <td>
+                          <button onClick={() => setDetailId(r.id)}>
+                            Inspect <ChevronRight size={14} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="sl-empty">
+                <Database size={28} />
+                <h3>No leads match this combination of filters</h3>
+                <p>
+                  Try broadening your industry, category, country, or city
+                  selection on the Business scope row.
+                </p>
+                <button type="button" onClick={resetScopeFilters}>
+                  Reset scope filters
+                </button>
+              </div>
+            )}
+            {active.length > 8 && (
+              <p className="sl-footnote">
+                Showing top 8 of {active.length} matching prospect leads. Switch
+                to the Records tab to paginate, sort, bulk-manage, or export all{" "}
+                {active.length} leads.
+              </p>
+            )}
+          </section>
+
           <CrmCharts
-            key={scope}
+            key={`${scope}-${industry}-${category}-${country}-${city}`}
             records={active}
             businesses={scopedBusinesses}
             onBusiness={inspectBusiness}
@@ -620,7 +1115,8 @@ export function AdminCrmView() {
                   <div>
                     <strong>{r.company}</strong>
                     <small>
-                      {r.contact} · {r.owner || "Unassigned"}
+                      {r.contact} · {r.industry} ({r.city}, {r.country}) ·{" "}
+                      {r.owner || "Unassigned"}
                     </small>
                   </div>
                   <Pill tone="amber">
@@ -651,11 +1147,13 @@ export function AdminCrmView() {
             <div>
               <h2>CRM record registry</h2>
               <p>
-                Inspect client-owned records, assignments, and pipeline stages.
+                Inspect client-owned records, industries, categories, locations,
+                and pipeline stages.
               </p>
             </div>
             <button onClick={exportRecords}>
-              <ArrowDownToLine size={16} /> Export filtered records
+              <ArrowDownToLine size={16} /> Export filtered records (
+              {filtered.length})
             </button>
           </div>
           <div className="sl-filters">
@@ -663,7 +1161,7 @@ export function AdminCrmView() {
               <Search size={16} />
               <input
                 aria-label="Search CRM records"
-                placeholder="Search company, contact, owner, or ID…"
+                placeholder="Search company, contact, industry, category, city, country, or ID…"
                 value={query}
                 onChange={(e) => {
                   setQuery(e.target.value);
@@ -761,6 +1259,8 @@ export function AdminCrmView() {
                     />
                   </th>
                   <th>Record / client</th>
+                  <th>Industry & category</th>
+                  <th>Location</th>
                   <th>Owner</th>
                   <th>Stage</th>
                   <th>Estimated value</th>
@@ -787,10 +1287,20 @@ export function AdminCrmView() {
                     </td>
                     <td>
                       <strong>{r.company}</strong>
-                      <small>{r.contact}</small>
+                      <small>
+                        {r.contact} · {r.role}
+                      </small>
                       <span className="sl-client-label">
                         {name(r.businessId)} · {r.id}
                       </span>
+                    </td>
+                    <td>
+                      <strong>{r.industry}</strong>
+                      <small>{r.category}</small>
+                    </td>
+                    <td>
+                      <strong>{r.city}</strong>
+                      <small>{r.country}</small>
                     </td>
                     <td>
                       {r.owner || "Unassigned"}
@@ -832,14 +1342,17 @@ export function AdminCrmView() {
             <div className="sl-empty">
               <Database size={30} />
               <h3>No records match these filters</h3>
-              <p>Choose another stage, source, or search term.</p>
+              <p>
+                Choose another industry, category, country, city, stage, source,
+                or search term.
+              </p>
               <button
                 onClick={() => {
                   setQuery("");
                   setStage("all");
                   setSource("all");
                   setVisibility("active");
-                  filterChanged();
+                  resetScopeFilters();
                 }}
               >
                 Reset filters
@@ -849,7 +1362,7 @@ export function AdminCrmView() {
           <div className="sl-pagination">
             <span>
               {filtered.length
-                ? `${(safePage - 1) * 6 + 1}–${Math.min(safePage * 6, filtered.length)}`
+                ? `${(safePage - 1) * PAGE_SIZE + 1}–${Math.min(safePage * PAGE_SIZE, filtered.length)}`
                 : "0"}{" "}
               of {filtered.length} records
             </span>
@@ -914,6 +1427,7 @@ export function AdminCrmView() {
               <thead>
                 <tr>
                   <th>Record</th>
+                  <th>Industry & location</th>
                   <th>Client business</th>
                   <th>Issues</th>
                   <th>Recommended review</th>
@@ -933,6 +1447,12 @@ export function AdminCrmView() {
                         <strong>{r.company}</strong>
                         <small>
                           {r.id} · {r.contact}
+                        </small>
+                      </td>
+                      <td>
+                        <strong>{r.industry}</strong>
+                        <small>
+                          {r.category} · {r.city}, {r.country}
                         </small>
                       </td>
                       <td>{name(r.businessId)}</td>
@@ -1015,8 +1535,8 @@ export function AdminCrmView() {
                   <div>
                     <strong>{r.nextAction}</strong>
                     <small>
-                      {r.company} · {name(r.businessId)} ·{" "}
-                      {r.owner || "Unassigned"}
+                      {r.company} · {r.industry} ({r.city}, {r.country}) ·{" "}
+                      {name(r.businessId)} · {r.owner || "Unassigned"}
                     </small>
                   </div>
                   <Pill tone={isOverdue(r) ? "amber" : "neutral"}>
@@ -1154,6 +1674,7 @@ export function AdminCrmView() {
     </div>
   );
 }
+
 function PolicyDialog({
   business,
   onClose,
