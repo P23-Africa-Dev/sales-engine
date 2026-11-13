@@ -48,6 +48,7 @@ import {
 } from "@/lib/admin/admin-crm";
 import { CrmCharts } from "./crm-charts";
 import { CrmRecordDrawer } from "./crm-record-drawer";
+import { SearchableSelectField } from "@/components/ui/searchable-select-field";
 
 type View =
   | "Overview"
@@ -399,123 +400,148 @@ export function AdminCrmView() {
       </header>
       <div className="sl-context crm-scope-bar">
         <div className="crm-scope-filters">
-          <div className="crm-scope-field">
-            <label htmlFor="crm-scope">
-              <Building2 size={14} /> Business scope
-            </label>
-            <select
-              id="crm-scope"
-              value={scope}
-              onChange={(e) => changeScope(e.target.value)}
-            >
-              <option value="all">
-                All client businesses ({businesses.length})
-              </option>
-              {businesses.map((b) => (
-                <option key={b.id} value={b.id}>
-                  {b.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="crm-scope-field">
-            <label htmlFor="crm-industry">
-              <Briefcase size={14} /> Industry
-            </label>
-            <select
-              id="crm-industry"
-              value={industry}
-              onChange={(e) => {
-                setIndustry(e.target.value);
-                filterChanged();
-              }}
-            >
-              <option value="all">
-                All industries ({CRM_INDUSTRIES.length})
-              </option>
-              {CRM_INDUSTRIES.map((ind) => (
-                <option key={ind} value={ind}>
-                  {ind} ({industryCounts.get(ind) ?? 0})
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="crm-scope-field">
-            <label htmlFor="crm-category">
-              <Tag size={14} /> Business category
-            </label>
-            <select
-              id="crm-category"
-              value={category}
-              onChange={(e) => {
-                setCategory(e.target.value);
-                filterChanged();
-              }}
-            >
-              <option value="all">
-                All categories ({CRM_BUSINESS_CATEGORIES.length})
-              </option>
-              {CRM_BUSINESS_CATEGORIES.map((cat) => (
-                <option key={cat} value={cat}>
-                  {cat} ({categoryCounts.get(cat) ?? 0})
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="crm-scope-field">
-            <label htmlFor="crm-country">
-              <Globe size={14} /> Country
-            </label>
-            <select
-              id="crm-country"
-              value={country}
-              onChange={(e) => {
-                const nextCountry = e.target.value;
-                setCountry(nextCountry);
-                if (
-                  nextCountry !== "all" &&
-                  city !== "all" &&
-                  !(CRM_CITIES_BY_COUNTRY[nextCountry] ?? []).includes(city)
-                ) {
-                  setCity("all");
-                }
-                filterChanged();
-              }}
-            >
-              <option value="all">
-                All countries ({CRM_COUNTRIES.length})
-              </option>
-              {CRM_COUNTRIES.map((c) => (
-                <option key={c} value={c}>
-                  {c} ({countryCounts.get(c) ?? 0})
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="crm-scope-field">
-            <label htmlFor="crm-city">
-              <MapPin size={14} /> City
-            </label>
-            <select
-              id="crm-city"
-              value={city}
-              onChange={(e) => {
-                setCity(e.target.value);
-                filterChanged();
-              }}
-            >
-              <option value="all">
-                {country === "all"
-                  ? `All cities (${availableCities.length})`
-                  : `All cities in ${country} (${availableCities.length})`}
-              </option>
-              {availableCities.map((c) => (
-                <option key={c} value={c}>
-                  {c} ({cityCounts.get(c) ?? 0})
-                </option>
-              ))}
-            </select>
-          </div>
+          <SearchableSelectField
+            id="crm-scope"
+            variant="scope"
+            clearable
+            label="Business scope"
+            icon={<Building2 size={14} />}
+            value={scope}
+            onChange={(nextScope) => changeScope(nextScope)}
+            searchPlaceholder="Search client business…"
+            emptyMessage="No client business matches your search."
+            options={[
+              {
+                value: "all",
+                label: "All client businesses",
+                count: businesses.length,
+              },
+              ...businesses.map((b) => ({
+                value: b.id,
+                label: b.name,
+                description: `${b.industry} · ${b.owner}`,
+                count: nonArchivedRecords.filter((r) => r.businessId === b.id)
+                  .length,
+              })),
+            ]}
+          />
+          <SearchableSelectField
+            id="crm-industry"
+            variant="scope"
+            clearable
+            label="Industry"
+            icon={<Briefcase size={14} />}
+            value={industry}
+            onChange={(nextIndustry) => {
+              setIndustry(nextIndustry);
+              filterChanged();
+            }}
+            searchPlaceholder="Search industries…"
+            emptyMessage="No industry matches your search."
+            options={[
+              {
+                value: "all",
+                label: "All industries",
+                count: CRM_INDUSTRIES.length,
+              },
+              ...CRM_INDUSTRIES.map((ind) => ({
+                value: ind,
+                label: ind,
+                count: industryCounts.get(ind) ?? 0,
+              })),
+            ]}
+          />
+          <SearchableSelectField
+            id="crm-category"
+            variant="scope"
+            clearable
+            label="Business category"
+            icon={<Tag size={14} />}
+            value={category}
+            onChange={(nextCategory) => {
+              setCategory(nextCategory);
+              filterChanged();
+            }}
+            searchPlaceholder="Search business categories…"
+            emptyMessage="No business category matches your search."
+            options={[
+              {
+                value: "all",
+                label: "All categories",
+                count: CRM_BUSINESS_CATEGORIES.length,
+              },
+              ...CRM_BUSINESS_CATEGORIES.map((cat) => ({
+                value: cat,
+                label: cat,
+                count: categoryCounts.get(cat) ?? 0,
+              })),
+            ]}
+          />
+          <SearchableSelectField
+            id="crm-country"
+            variant="scope"
+            clearable
+            label="Country"
+            icon={<Globe size={14} />}
+            value={country}
+            onChange={(nextCountry) => {
+              setCountry(nextCountry);
+              if (
+                nextCountry !== "all" &&
+                city !== "all" &&
+                !(CRM_CITIES_BY_COUNTRY[nextCountry] ?? []).includes(city)
+              ) {
+                setCity("all");
+              }
+              filterChanged();
+            }}
+            searchPlaceholder="Search countries…"
+            emptyMessage="No country matches your search."
+            options={[
+              {
+                value: "all",
+                label: "All countries",
+                count: CRM_COUNTRIES.length,
+              },
+              ...CRM_COUNTRIES.map((c) => ({
+                value: c,
+                label: c,
+                description: `${(CRM_CITIES_BY_COUNTRY[c] ?? []).length} cities`,
+                count: countryCounts.get(c) ?? 0,
+              })),
+            ]}
+          />
+          <SearchableSelectField
+            id="crm-city"
+            variant="scope"
+            clearable
+            label="City"
+            icon={<MapPin size={14} />}
+            value={city}
+            onChange={(nextCity) => {
+              setCity(nextCity);
+              filterChanged();
+            }}
+            searchPlaceholder={
+              country === "all"
+                ? "Search all cities…"
+                : `Search cities in ${country}…`
+            }
+            emptyMessage="No city matches your search."
+            options={[
+              {
+                value: "all",
+                label:
+                  country === "all" ? "All cities" : `All cities in ${country}`,
+                count: availableCities.length,
+              },
+              ...availableCities.map((c) => ({
+                value: c,
+                label: c,
+                count: cityCounts.get(c) ?? 0,
+              })),
+            ]}
+          />
         </div>
         <div className="crm-scope-meta">
           <div className="crm-scope-tags">
@@ -1168,54 +1194,82 @@ export function AdminCrmView() {
                 }}
               />
             </div>
-            <select
-              aria-label="Filter CRM stage"
+            <SearchableSelectField
+              ariaLabel="Filter CRM stage"
+              variant="filter"
+              clearable
               value={stage}
-              onChange={(e) => {
-                setStage(e.target.value);
+              onChange={(nextStage) => {
+                setStage(nextStage);
                 filterChanged();
               }}
-            >
-              <option value="all">All stages</option>
-              {CRM_STAGES.map((s) => (
-                <option key={s}>{s}</option>
-              ))}
-            </select>
-            <select
-              aria-label="Filter CRM source"
+              searchPlaceholder="Search stage…"
+              options={[
+                { value: "all", label: "All stages", count: active.length },
+                ...CRM_STAGES.map((s) => ({
+                  value: s,
+                  label: s,
+                  count: active.filter((r) => r.stage === s).length,
+                })),
+              ]}
+            />
+            <SearchableSelectField
+              ariaLabel="Filter CRM source"
+              variant="filter"
+              clearable
               value={source}
-              onChange={(e) => {
-                setSource(e.target.value);
+              onChange={(nextSource) => {
+                setSource(nextSource);
                 filterChanged();
               }}
-            >
-              <option value="all">All sources</option>
-              {CRM_SOURCES.map((s) => (
-                <option key={s}>{s}</option>
-              ))}
-            </select>
-            <select
-              aria-label="Record visibility"
+              searchPlaceholder="Search source…"
+              options={[
+                { value: "all", label: "All sources", count: active.length },
+                ...CRM_SOURCES.map((s) => ({
+                  value: s,
+                  label: s,
+                  count: active.filter((r) => r.source === s).length,
+                })),
+              ]}
+            />
+            <SearchableSelectField
+              ariaLabel="Record visibility"
+              variant="filter"
+              defaultValue="active"
               value={visibility}
-              onChange={(e) => {
-                setVisibility(e.target.value);
+              onChange={(nextVisibility) => {
+                setVisibility(nextVisibility);
                 filterChanged();
               }}
-            >
-              <option value="active">Active records</option>
-              <option value="archived">Archived records</option>
-            </select>
-            <select
-              aria-label="Sort CRM records"
+              searchPlaceholder="Search visibility…"
+              options={[
+                {
+                  value: "active",
+                  label: "Active records",
+                  count: scoped.filter((r) => !r.archived).length,
+                },
+                {
+                  value: "archived",
+                  label: "Archived records",
+                  count: scoped.filter((r) => r.archived).length,
+                },
+              ]}
+            />
+            <SearchableSelectField
+              ariaLabel="Sort CRM records"
+              variant="filter"
+              defaultValue="newest"
               value={sort}
-              onChange={(e) => {
-                setSort(e.target.value);
+              onChange={(nextSort) => {
+                setSort(nextSort);
                 filterChanged();
               }}
-            >
-              <option value="newest">Newest first</option>
-              <option value="value">Highest value</option>
-            </select>
+              searchPlaceholder="Search sort order…"
+              options={[
+                { value: "newest", label: "Newest first" },
+                { value: "value", label: "Highest value" },
+              ]}
+            />
           </div>
           {selected.length > 0 && (
             <div className="sl-bulk">
@@ -1508,14 +1562,27 @@ export function AdminCrmView() {
                   the client’s behalf.
                 </p>
               </div>
-              <select
-                aria-label="Follow-up urgency"
+              <SearchableSelectField
+                ariaLabel="Follow-up urgency"
+                variant="filter"
+                defaultValue="all"
                 value={activityFilter}
-                onChange={(e) => setActivityFilter(e.target.value)}
-              >
-                <option value="all">All scheduled</option>
-                <option value="overdue">Overdue only</option>
-              </select>
+                onChange={(nextFilter) => setActivityFilter(nextFilter)}
+                searchPlaceholder="Filter follow-ups…"
+                options={[
+                  {
+                    value: "all",
+                    label: "All scheduled",
+                    count: active.filter((r) => isOpen(r) && Boolean(r.due))
+                      .length,
+                  },
+                  {
+                    value: "overdue",
+                    label: "Overdue only",
+                    count: overdue.length,
+                  },
+                ]}
+              />
             </div>
             {active
               .filter(
@@ -1717,19 +1784,18 @@ function PolicyDialog({
         <p>
           Flag open records when their last update is older than this threshold.
         </p>
-        <label className="sl-field">
-          Stale-deal threshold
-          <select
-            value={days}
-            onChange={(e) => setDays(Number(e.target.value))}
-          >
-            {[3, 7, 14, 30].map((n) => (
-              <option key={n} value={n}>
-                {n} days
-              </option>
-            ))}
-          </select>
-        </label>
+        <SearchableSelectField
+          label="Stale-deal threshold"
+          variant="form"
+          defaultValue=""
+          value={String(days)}
+          onChange={(nextDays) => setDays(Number(nextDays))}
+          searchPlaceholder="Search threshold days…"
+          options={[3, 7, 14, 30].map((n) => ({
+            value: String(n),
+            label: `${n} days`,
+          }))}
+        />
         <label className="sl-field">
           Reason for policy change
           <textarea

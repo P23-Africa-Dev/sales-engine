@@ -9,6 +9,7 @@ import {
   type CrmBusiness,
   type CrmRecord,
 } from "@/lib/admin/admin-crm";
+import { SearchableSelectField } from "@/components/ui/searchable-select-field";
 export function CrmRecordDrawer({
   record,
   business,
@@ -125,34 +126,40 @@ export function CrmRecordDrawer({
           }}
         >
           <div className="sl-form-grid">
-            <label className="sl-field">
-              Client record owner
-              <select
-                value={draft.owner}
-                onChange={(e) => setDraft({ ...draft, owner: e.target.value })}
-              >
-                <option value="">Unassigned</option>
-                {business.team.map((owner) => (
-                  <option key={owner}>{owner}</option>
-                ))}
-              </select>
-            </label>
-            <label className="sl-field">
-              Pipeline stage
-              <select
-                value={draft.stage}
-                onChange={(e) =>
-                  setDraft({
-                    ...draft,
-                    stage: e.target.value as CrmRecord["stage"],
-                  })
-                }
-              >
-                {CRM_STAGES.map((stage) => (
-                  <option key={stage}>{stage}</option>
-                ))}
-              </select>
-            </label>
+            <SearchableSelectField
+              label="Client record owner"
+              variant="form"
+              defaultValue=""
+              value={draft.owner}
+              onChange={(nextOwner) =>
+                setDraft({ ...draft, owner: nextOwner })
+              }
+              searchPlaceholder="Search team member…"
+              options={[
+                { value: "", label: "Unassigned" },
+                ...business.team.map((owner) => ({
+                  value: owner,
+                  label: owner,
+                })),
+              ]}
+            />
+            <SearchableSelectField
+              label="Pipeline stage"
+              variant="form"
+              defaultValue=""
+              value={draft.stage}
+              onChange={(nextStage) =>
+                setDraft({
+                  ...draft,
+                  stage: nextStage as CrmRecord["stage"],
+                })
+              }
+              searchPlaceholder="Search pipeline stage…"
+              options={CRM_STAGES.map((stage) => ({
+                value: stage,
+                label: stage,
+              }))}
+            />
           </div>
           <label className="sl-field">
             Contact email
