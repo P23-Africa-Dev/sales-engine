@@ -126,7 +126,7 @@ class SocialListeningOrchestrator
         $this->budgetExhausted = false;
         $this->apiCallsThisRun = 0;
         $this->queryLog = [];
-        $this->dailyCap = (int) config('services.social_listening.daily_api_cap', 200);
+        $this->dailyCap = (int) config('services.social_listening.daily_api_cap', 600);
         $this->usageAtStart = 0;
         if ($this->dailyCap > 0) {
             $this->usageAtStart = ApiUsage::query()
@@ -654,7 +654,12 @@ class SocialListeningOrchestrator
                 }
             }
 
-            $settings->update(['last_run_at' => now()]);
+            // A scan the daily limit stopped before it searched anything has not
+            // looked at this ICP: leave it due so tomorrow's scheduled scan runs it
+            // instead of waiting a full cadence (13 Nov 2026: a new ICP got nothing).
+            if (! ($this->budgetExhausted && $this->apiCallsThisRun === 0)) {
+                $settings->update(['last_run_at' => now()]);
+            }
 
             $groundingRejectedTotal = array_sum($groundingRejected);
 

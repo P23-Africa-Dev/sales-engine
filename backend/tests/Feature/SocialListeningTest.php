@@ -1702,5 +1702,7 @@ class SocialListeningTest extends TestCase
         $this->assertNull($run->error);
         $this->assertTrue($run->result_summary['budget_exhausted']);
         $this->assertSame(0, $run->signals_created);
+        // Nothing was searched, so the ICP stays due for the next scheduled scan.
+        $this->assertNull($settings->fresh()->last_run_at);
     }
 }

@@ -27,6 +27,21 @@ describe("social-listening-empty-state", () => {
     expect(state?.showActions).toBe(true);
   });
 
+  it("says plainly when the daily limit stopped the scan before it searched", () => {
+    const latestRun = {
+      id: 3,
+      status: "completed",
+      signals_created: 0,
+      result_summary: { totalChecked: 0, budget_exhausted: true },
+    } as SocialListeningRunStatus;
+
+    const state = getSocialListeningEmptyState(latestRun, "2026-01-01T00:00:00Z", false);
+
+    expect(state?.title).toBe("Today's scan limit reached");
+    expect(state?.description).toContain("resumes automatically tomorrow");
+    expect(state?.showActions).toBe(false);
+  });
+
   it("returns filters_no_match when filters are active", () => {
     const state = getSocialListeningEmptyState(null, "2026-01-01T00:00:00Z", false, true);
 

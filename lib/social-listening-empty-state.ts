@@ -103,6 +103,16 @@ export function getSocialListeningEmptyState(
         showActions: true,
       };
     }
+    if (summary?.budget_exhausted && checked === 0) {
+      return {
+        variant: "no_match_after_scan",
+        title: "Today's scan limit reached",
+        description:
+          "Your account has used today's search allowance, so this scan couldn't look for posts. Scanning resumes automatically tomorrow.",
+        tip,
+        showActions: false,
+      };
+    }
     if (summary?.model_unavailable) {
       description = "We couldn't review new posts just now. Try Scan now again shortly.";
     } else if (summary?.budget_exhausted) {

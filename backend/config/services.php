@@ -158,7 +158,9 @@ return [
     ],
 
     'social_listening' => [
-        'daily_api_cap' => (int) env('SOCIAL_LISTENING_DAILY_API_CAP', 200),
+        // Search calls per organisation per day, shared by all its ICPs. A full scan
+        // uses up to ~100, so 200 allowed only two scans a day.
+        'daily_api_cap' => (int) env('SOCIAL_LISTENING_DAILY_API_CAP', 600),
         // Stage 2 discrete signal-type detection: how many active signal types (from
         // SignalTypeRegistry) get their own dedicated search query per run. Each one
         // is searched across every enabled source, so this directly multiplies API
