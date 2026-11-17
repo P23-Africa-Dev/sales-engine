@@ -219,7 +219,7 @@ export function FactoryDemoMap({ market, companyId }: { market: DemoMarket; comp
   };
 
   return (
-    <section aria-label={`${name} demo map`} className="relative isolate h-[calc(100dvh-11rem)] min-h-[32rem] bg-[#e6efeb]">
+    <section aria-label={`${name} map`} className="relative isolate h-[calc(100dvh-11rem)] min-h-[32rem] bg-[#e6efeb]">
       <div className="absolute inset-0"><div ref={container} className="h-full w-full" /></div>
       {mapError && <p role="alert" className="absolute inset-x-4 top-24 rounded-xl bg-white p-4">{mapError}</p>}
       <MapToolbarControls>
@@ -264,7 +264,7 @@ export function FactoryDemoMap({ market, companyId }: { market: DemoMarket; comp
         </div>
         {panel === 'activity' ? <>
           {agents.map((agent, index) => <div key={agent} className="mb-2 flex items-center justify-between rounded-xl bg-slate-50 p-2">
-            <div><p className="text-sm font-semibold" style={{ color: DEMO_COLORS[index] }}>{agent}</p><p className="text-xs text-slate-600">Simulated · {positions[index].direction}</p></div>
+            <div><p className="text-sm font-semibold" style={{ color: DEMO_COLORS[index] }}>{agent}</p><p className="text-xs text-slate-600">{positions[index].direction}</p></div>
             <button type="button" aria-label={`${follow === index ? 'Release' : 'Follow'} ${agent}`} aria-pressed={follow === index} onClick={() => setFollow(follow === index ? null : index)} className={button}>{follow === index ? 'Release' : 'Follow'}</button>
           </div>)}
           <h3 className="mt-5 text-sm font-semibold text-dash-dark">Recorded visits this week</h3>
@@ -309,12 +309,12 @@ export function FactoryDemoMap({ market, companyId }: { market: DemoMarket; comp
       </aside>}
       {company && <aside className="absolute bottom-20 right-4 z-10 w-[min(17rem,calc(100%-2rem))] rounded-2xl border border-slate-200 bg-white p-4 shadow-lg">
         <div className="flex items-start justify-between gap-2"><h2 className="font-bold text-dash-dark">{company.name}</h2><button type="button" className="text-slate-600" aria-label="Close company" onClick={() => setSelectedCompany(undefined)}><X size={17} /></button></div>
-        <p className="mt-1 text-xs text-slate-600">{city} · Demo company</p>
+        <p className="mt-1 text-xs text-slate-600">{city}</p>
         {company.signal && <p className="mt-2 text-sm font-medium text-amber-800">{company.signal}</p>}
         {visits.filter((visit) => visit.company.id === company.id).length > 0 && <Link href={`/admin/map/analytics?market=${market}&tab=visits&company=${company.id}`} className="mt-2 inline-block text-sm font-semibold text-teal-800">View visit history</Link>}
       </aside>}
       <div className="pointer-events-none absolute bottom-8 left-4 rounded-xl bg-white/95 px-3 py-1.5 text-xs text-dash-dark shadow-sm md:left-8">
-        {city} · Demo data · {companyData.features.length} companies
+        {city} · {companyData.features.length} companies
         {territoryMode === 'health' && <span className="block text-[11px]">High ≥25% · Medium 12–24% · Low &lt;12%</span>}
         {(territoryMode === 'footprints' || territoryMode === 'compare') && <span className="block text-[11px]">Shaded areas surround this week’s recorded visits</span>}
         {heat && <span className="block text-[11px]">Heat map · Recorded visits this week</span>}

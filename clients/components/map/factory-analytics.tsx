@@ -47,7 +47,7 @@ export function FactoryAnalytics({ market, companyId, initialTab }: { market: De
       const storedTerritories = localStorage.getItem(`factory-map-territories-${market}`);
       if (storedTerritories) setTerritories(JSON.parse(storedTerritories));
     } catch {
-      setArchiveError('Saved demo data could not be loaded in this browser.');
+      setArchiveError('Saved activity data could not be loaded in this browser.');
     }
   }, [archiveKey, market]);
 
@@ -98,7 +98,7 @@ export function FactoryAnalytics({ market, companyId, initialTab }: { market: De
       <div className="mx-auto max-w-7xl">
         <Link href={`/admin/map?market=${market}`} className="inline-flex items-center gap-2 text-sm font-semibold text-teal-800"><ArrowLeft size={16} /> Operational map</Link>
         <div className="mt-4 flex flex-wrap items-end justify-between gap-4">
-          <div><p className="text-xs font-semibold text-teal-800">{name} · Factory 23 demo data</p><h1 className="mt-1 text-3xl font-bold tracking-tight">Field activity analytics</h1></div>
+          <div><p className="text-xs font-semibold text-teal-800">{name}</p><h1 className="mt-1 text-3xl font-bold tracking-tight">Field activity analytics</h1></div>
           <FactoryDemoTabs market={market} analytics />
         </div>
         <nav aria-label="Analytics views" className="mt-6 flex flex-wrap gap-1 border-b border-slate-200">
@@ -111,7 +111,7 @@ export function FactoryAnalytics({ market, companyId, initialTab }: { market: De
         {tab === 'archive' ? (
           <section className={`${card} mt-5`}>
             <h2 className="font-bold">Weekly archive</h2>
-            <p className="mb-4 mt-1 text-sm text-slate-600">The latest {RETENTION_WEEKS} demo weeks stay active. Older weeks can be archived and restored in this browser.</p>
+            <p className="mb-4 mt-1 text-sm text-slate-600">The latest {RETENTION_WEEKS} weeks stay active. Older weeks can be archived and restored in this browser.</p>
             {archiveError && <p role="alert" className="text-sm text-red-700">{archiveError}</p>}
             {DEMO_WEEKS.map((item, index) => (
               <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 py-3" key={item}>

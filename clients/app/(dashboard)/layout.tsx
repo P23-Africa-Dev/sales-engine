@@ -1,4 +1,5 @@
 import "../client-styles.css";
+import { FloatingAIButton } from "@/components/layout/floating-ai-button";
 import { Navbar } from "@/components/layout/navbar";
 import { AUTH_TOKEN_COOKIE } from "@/lib/auth/session";
 import { cookies } from "next/headers";
@@ -20,6 +21,7 @@ export default async function DashboardLayout({
     <div className="dashboard-shell w-full min-h-screen flex flex-col">
       <Navbar />
       <main className="flex-1 w-full overflow-auto">{children}</main>
+      <FloatingAIButton />
     </div>
   );
 }

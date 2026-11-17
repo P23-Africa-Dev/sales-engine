@@ -40,7 +40,7 @@ export function LagosMapAnalytics({ agentId, initialTab }: { agentId?: number; i
       <div className="mx-auto max-w-7xl">
         <Link href="/admin/map?market=lagos" className="inline-flex items-center gap-2 text-sm font-semibold text-teal-800"><ArrowLeft size={16} /> Operational map</Link>
         <div className="mb-5 mt-4 flex flex-wrap items-end justify-between gap-4">
-          <div><p className="text-xs font-semibold text-teal-800">Lagos · Demo data</p><h1 className="mt-1 text-3xl font-bold tracking-tight">Field activity analytics</h1></div>
+          <div><p className="text-xs font-semibold text-teal-800">Lagos</p><h1 className="mt-1 text-3xl font-bold tracking-tight">Field activity analytics</h1></div>
           <FactoryDemoTabs analytics />
         </div>
         <section className="mb-4 rounded-2xl border border-slate-200 bg-white p-4">
