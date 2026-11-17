@@ -1,19 +1,9 @@
-'use client';
+import { isDemoMarket } from '@/lib/map/factory-demo';
+import { MapScreens } from './map-screens';
 
-import dynamic from 'next/dynamic';
-import { MapDemoBridge } from '@/components/map/map-demo-bridge';
-
-// Mapbox GL JS uses browser-only APIs, so the map renders on the client only.
-const MapView = dynamic(
-  () => import('@/components/map/map-view').then((m) => m.MapView),
-  { ssr: false, loading: () => <div style={{ height: 'calc(100vh - 64px)' }} className="bg-[#e8ecef] animate-pulse" /> }
-);
-
-export default function MapPage() {
-  return (
-    <>
-      <MapDemoBridge />
-      <MapView />
-    </>
-  );
+export default async function MapPage({ searchParams }: { searchParams: Promise<{ market?: string; company?: string }> }) {
+  const { market, company } = await searchParams;
+  const selectedMarket = market === 'lagos' ? undefined : market && isDemoMarket(market) ? market : 'ghana';
+  const companyId = company && /^\d+$/.test(company) ? Number(company) : undefined;
+  return <MapScreens key={selectedMarket ?? 'lagos'} market={selectedMarket} companyId={companyId} />;
 }

@@ -38,6 +38,7 @@ import {
 } from "@/store/map-analytics";
 
 export type MapAnalyticsHistoryDrawerProps = {
+  standalone?: boolean;
   onFlyToCoordinate: (lng: number, lat: number, zoom?: number) => void;
   onFitCoordinates: (coords: [number, number][]) => void;
 };
@@ -61,6 +62,7 @@ function formatTimeShort(iso: string): string {
 }
 
 export function MapAnalyticsHistoryDrawer({
+  standalone = false,
   onFlyToCoordinate,
   onFitCoordinates,
 }: MapAnalyticsHistoryDrawerProps) {
@@ -261,10 +263,10 @@ export function MapAnalyticsHistoryDrawer({
     toast.success(`Exported ${currentMonth.label} summary CSV`);
   };
 
-  if (!drawerOpen) return null;
+  if (!standalone && !drawerOpen) return null;
 
   return (
-    <div className="absolute top-20 right-4 bottom-20 z-30 w-[min(94vw,430px)] rounded-[32px] border border-slate-200/80 bg-white/98 shadow-[0_24px_60px_rgba(15,23,42,0.22)] backdrop-blur-xl flex flex-col overflow-hidden">
+    <div className={standalone ? "flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white" : "absolute top-20 right-4 bottom-20 z-30 w-[min(94vw,430px)] rounded-[32px] border border-slate-200/80 bg-white/98 shadow-[0_24px_60px_rgba(15,23,42,0.22)] backdrop-blur-xl flex flex-col overflow-hidden"}>
       {/* Drawer Header */}
       <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4 shrink-0 bg-gradient-to-r from-[#0A192F] to-[#132B4A] text-white">
         <div className="min-w-0">
@@ -278,6 +280,7 @@ export function MapAnalyticsHistoryDrawer({
             Visit histories, weekly routes, monthly rollups & archive vault
           </p>
         </div>
+        {!standalone && (
         <button
           type="button"
           onClick={() => setDrawerOpen(false)}
@@ -286,6 +289,7 @@ export function MapAnalyticsHistoryDrawer({
         >
           <X size={15} />
         </button>
+        )}
       </div>
 
       {/* 4-Tab Navigation Bar */}
@@ -388,6 +392,7 @@ export function MapAnalyticsHistoryDrawer({
       {drawerTab === "visits" && (
         <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3 min-h-0">
           {/* Route Playback Scrubber Card */}
+          {!standalone && (
           <div className="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-3 space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-[11px] font-bold text-slate-700">
@@ -460,6 +465,8 @@ export function MapAnalyticsHistoryDrawer({
               </span>
             </div>
           </div>
+
+          )}
 
           {/* Summary KPI Grid */}
           <div className="grid grid-cols-4 gap-2 text-center">
