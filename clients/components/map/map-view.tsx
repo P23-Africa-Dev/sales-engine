@@ -1,9 +1,9 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import mapboxgl from 'mapbox-gl';
-import { Search, Eye, EyeOff, RefreshCcw, LocateFixed, X, Flame, History } from 'lucide-react';
+import { Search, Eye, EyeOff, RefreshCcw, LocateFixed, X, History } from 'lucide-react';
 import {
   getGoogleMapsPublicApiKey,
   MAPBOX_PUBLIC_TOKEN_ENV,
@@ -327,6 +327,8 @@ interface MapViewProps {
 
 export function MapboxMapView({ compact = false, providerState }: MapViewProps & { providerState: EffectiveMapProviderState }) {
   const searchParams = useSearchParams();
+  const isAdminMap = usePathname() === '/admin/map';
+  const router = useRouter();
   const initialTab = searchParams.get('tab');
   const initialAgentId = Number.parseInt(searchParams.get('agent') ?? '', 10);
   const taskFocus = useMemo(
@@ -367,6 +369,7 @@ export function MapboxMapView({ compact = false, providerState }: MapViewProps &
   const searchSessionTokenRef = useRef<string>(createSearchSessionToken());
   const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null);
   const [followAllActive, setFollowAllActive] = useState(false);
+  const [activityPanelOpen, setActivityPanelOpen] = useState(false);
   const [showHistoryFeeds, setShowHistoryFeeds] = useState(false);
   const followAllLastFitRef = useRef(0);
   // Camera follow mode: keeps tracking the selected agent until the user pans away.
@@ -577,8 +580,6 @@ export function MapboxMapView({ compact = false, providerState }: MapViewProps &
   const openDrawerToTab = useMapAnalyticsStore((s) => s.openDrawerToTab);
   const analyticsDrawerOpen = useMapAnalyticsStore((s) => s.drawerOpen);
   const setAnalyticsDrawerOpen = useMapAnalyticsStore((s) => s.setDrawerOpen);
-  const heatmapEnabled = useMapAnalyticsStore((s) => s.heatmapEnabled);
-  const setHeatmapEnabled = useMapAnalyticsStore((s) => s.setHeatmapEnabled);
   const initialFleetFittedRef = useRef(false);
 
   const handleFlyToCoordinate = useCallback(
@@ -611,6 +612,29 @@ export function MapboxMapView({ compact = false, providerState }: MapViewProps &
     });
   }, []);
 
+  useEffect(() => {
+    if (mapVersion === 0 || !isAdminMap) return;
+    const boundsParam = searchParams.get('visitBounds');
+    const bounds = boundsParam?.split(',').map(Number);
+    if (bounds?.length === 4 && bounds.every(Number.isFinite)
+      && Math.abs(bounds[0]) <= 180 && Math.abs(bounds[2]) <= 180
+      && Math.abs(bounds[1]) <= 85 && Math.abs(bounds[3]) <= 85) {
+      handleFitCoordinates([[bounds[0], bounds[1]], [bounds[2], bounds[3]]]);
+      return;
+    }
+    const longitude = searchParams.get('visitLng');
+    const latitude = searchParams.get('visitLat');
+    const zoom = Math.min(18, Math.max(1, Number(searchParams.get('visitZoom')) || 15));
+    if (longitude && latitude && Math.abs(Number(longitude)) <= 180 && Math.abs(Number(latitude)) <= 85) {
+      handleFlyToCoordinate(Number(longitude), Number(latitude), zoom);
+    }
+  }, [mapVersion, isAdminMap, searchParams, handleFitCoordinates, handleFlyToCoordinate]);
+
+  const openAgentHistory = useCallback((userId: number | null) => {
+    if (isAdminMap) router.push(`/admin/map/analytics?tab=visits&agent=${userId ?? ""}`);
+    else openDrawerToTab('visits', userId);
+  }, [isAdminMap, router, openDrawerToTab]);
+
   const handleFitLagosFleet = useCallback(() => {
     handleFitCoordinates(getLagosFleetCoordinates());
   }, [handleFitCoordinates]);
@@ -623,15 +647,16 @@ export function MapboxMapView({ compact = false, providerState }: MapViewProps &
     if (Number.isFinite(initialAgentId) && initialAgentId > 0) return;
     initialFleetFittedRef.current = true;
     handleFitLagosFleet();
-  }, [mapVersion, taskFocus, deepLinkTaskId, initialAgentId, handleFitLagosFleet]);
+  }, [mapVersion, taskFocus, deepLinkTaskId, initialAgentId, handleFitLagosFleet, searchParams]);
 
   const handleViewHistoryTask = useCallback((task: LiveTaskState) => {
-    openDrawerToTab('visits', task.userId);
+    openAgentHistory(task.userId);
+    if (isAdminMap) return;
     const poly = task.polyline ?? [];
     if (poly.length > 0) {
       handleFitCoordinates(poly);
     }
-  }, [openDrawerToTab, handleFitCoordinates]);
+  }, [openAgentHistory, isAdminMap, handleFitCoordinates]);
 
   const handleToggleFollowAll = useCallback(() => {
     setFollowAllActive((prev) => {
@@ -1916,8 +1941,11 @@ export function MapboxMapView({ compact = false, providerState }: MapViewProps &
         </div>
       )}
 
-      {/* Analytical Mode Switcher & KPI Ribbon */}
-      <MapAnalyticalModeHeader onFitLagosFleet={handleFitLagosFleet} />
+      <MapAnalyticalModeHeader
+        onFitLagosFleet={handleFitLagosFleet}
+        activityPanelOpen={activityPanelOpen && !fieldFocusMode}
+        onToggleActivity={fieldFocusMode ? undefined : () => setActivityPanelOpen((open) => !open)}
+      />
 
       {/* Search — top, full-width on mobile / top-right on desktop */}
       <div className="absolute top-20 left-4 right-4 md:top-6 md:right-8 md:left-auto md:w-[300px] xl:w-[340px] z-20">
@@ -2030,8 +2058,8 @@ export function MapboxMapView({ compact = false, providerState }: MapViewProps &
       </div>
 
       {/* Left panel — agent/business search + tabs */}
-      {!fieldFocusMode && (
-      <div className="absolute top-20 left-4 right-4 md:top-8 md:left-8 md:right-auto md:w-[340px] z-20 bg-white rounded-[32px] shadow-2xl shadow-black/10 overflow-hidden flex flex-col max-h-[calc(100vh-120px)]">
+      {!fieldFocusMode && activityPanelOpen && (
+      <div className="absolute top-[8.25rem] left-4 right-4 md:top-20 md:left-8 md:right-auto md:w-[340px] z-20 bg-white rounded-[32px] shadow-2xl shadow-black/10 overflow-hidden flex flex-col max-h-[calc(100vh-120px)]">
         {/* Dynamic search filter */}
         <div className="px-4 pt-4 pb-2 shrink-0">
           <div className="relative">
@@ -2109,7 +2137,7 @@ export function MapboxMapView({ compact = false, providerState }: MapViewProps &
             }}
             onToggleFollowAll={() => setFieldFollowAll(!fieldFollowAll)}
             onToggleFocusMode={() => setFieldFocusMode(!fieldFocusMode)}
-            onViewHistory={(userId) => openDrawerToTab('visits', userId)}
+            onViewHistory={openAgentHistory}
           />
         ) : (
           <BusinessListPanel
@@ -2226,10 +2254,10 @@ export function MapboxMapView({ compact = false, providerState }: MapViewProps &
         getMapboxMap={() => mapRef.current}
       />
 
-      <MapAnalyticsHistoryDrawer
+      {!isAdminMap && <MapAnalyticsHistoryDrawer
         onFlyToCoordinate={handleFlyToCoordinate}
         onFitCoordinates={handleFitCoordinates}
-      />
+      />}
 
       {selectedTask && (() => {
         const operationalStatus = resolveOperationalStatusFromTask(selectedTask, nowMs, STALE_MS);
@@ -2361,30 +2389,6 @@ export function MapboxMapView({ compact = false, providerState }: MapViewProps &
           {showBusinessPins ? 'Hide Pins' : 'Show Pins'}
         </button>
 
-        {/* Toggle Heat Map */}
-        <button
-          onClick={() => setHeatmapEnabled(!heatmapEnabled)}
-          title={heatmapEnabled ? 'Hide field activity heat map' : 'Show field activity heat map'}
-          className={`h-10 rounded-full backdrop-blur shadow-lg border px-4 flex items-center gap-2 text-[12px] font-semibold active:scale-95 transition-all ${
-            heatmapEnabled
-              ? 'bg-gradient-to-r from-amber-500 to-rose-500 text-white border-amber-500'
-              : 'bg-white/95 border-slate-200 text-dash-dark hover:bg-slate-50'
-          }`}
-        >
-          <Flame size={16} className={heatmapEnabled ? 'text-white' : 'text-amber-500'} />
-          Heat Map
-        </button>
-
-        {/* Toggle Visit History & Analytics Drawer */}
-        <button
-          onClick={() => openDrawerToTab('visits')}
-          title="Open Visit History, Weekly & Monthly Analytics"
-          className="h-10 rounded-full bg-white/95 backdrop-blur shadow-lg border border-slate-200 px-4 flex items-center gap-2 text-[12px] font-semibold text-dash-dark hover:bg-slate-50 active:scale-95 transition-all"
-        >
-          <History size={16} className="text-dash-teal" />
-          History
-        </button>
-
         {/* Locate me */}
         <button
           onClick={handleLocateMe}
@@ -2427,6 +2431,8 @@ export function MapboxMapView({ compact = false, providerState }: MapViewProps &
 
 function GoogleMapView({ compact = false, providerState }: MapViewProps & { providerState: EffectiveMapProviderState }) {
   const searchParams = useSearchParams();
+  const isAdminMap = usePathname() === '/admin/map';
+  const router = useRouter();
   const initialTab = searchParams.get('tab');
   const initialAgentId = Number.parseInt(searchParams.get('agent') ?? '', 10);
   const taskFocus = useMemo(
@@ -2452,6 +2458,7 @@ function GoogleMapView({ compact = false, providerState }: MapViewProps & { prov
   const [leftSearchQuery, setLeftSearchQuery] = useState('');
   const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null);
   const [followAllActive, setFollowAllActive] = useState(false);
+  const [activityPanelOpen, setActivityPanelOpen] = useState(false);
   const [showHistoryFeeds, setShowHistoryFeeds] = useState(false);
   const followAllLastFitRef = useRef(0);
   // Camera follow mode: keeps tracking the selected agent until the user pans away.
@@ -2642,17 +2649,41 @@ function GoogleMapView({ compact = false, providerState }: MapViewProps & { prov
     map.fitBounds(bounds, 80);
   }, []);
 
+  useEffect(() => {
+    if (!googleReady || !isAdminMap) return;
+    const boundsParam = searchParams.get('visitBounds');
+    const bounds = boundsParam?.split(',').map(Number);
+    if (bounds?.length === 4 && bounds.every(Number.isFinite)
+      && Math.abs(bounds[0]) <= 180 && Math.abs(bounds[2]) <= 180
+      && Math.abs(bounds[1]) <= 85 && Math.abs(bounds[3]) <= 85) {
+      handleFitCoordinatesGoogle([[bounds[0], bounds[1]], [bounds[2], bounds[3]]]);
+      return;
+    }
+    const longitude = searchParams.get('visitLng');
+    const latitude = searchParams.get('visitLat');
+    const zoom = Math.min(18, Math.max(1, Number(searchParams.get('visitZoom')) || 15));
+    if (longitude && latitude && Math.abs(Number(longitude)) <= 180 && Math.abs(Number(latitude)) <= 85) {
+      handleFlyToCoordinateGoogle(Number(longitude), Number(latitude), zoom);
+    }
+  }, [googleReady, isAdminMap, searchParams, handleFitCoordinatesGoogle, handleFlyToCoordinateGoogle]);
+
+  const openAgentHistoryGoogle = useCallback((userId: number | null) => {
+    if (isAdminMap) router.push(`/admin/map/analytics?tab=visits&agent=${userId ?? ""}`);
+    else openDrawerToTabGoogle('visits', userId);
+  }, [isAdminMap, router, openDrawerToTabGoogle]);
+
   const handleFitLagosFleetGoogle = useCallback(() => {
     handleFitCoordinatesGoogle(getLagosFleetCoordinates());
   }, [handleFitCoordinatesGoogle]);
 
   const handleViewHistoryTask = useCallback((task: LiveTaskState) => {
-    openDrawerToTabGoogle('visits', task.userId);
+    openAgentHistoryGoogle(task.userId);
+    if (isAdminMap) return;
     const poly = task.polyline ?? [];
     if (poly.length > 0) {
       handleFitCoordinatesGoogle(poly);
     }
-  }, [openDrawerToTabGoogle, handleFitCoordinatesGoogle]);
+  }, [openAgentHistoryGoogle, isAdminMap, handleFitCoordinatesGoogle]);
 
   const handleToggleFollowAll = useCallback(() => {
     setFollowAllActive((prev) => {
@@ -3412,8 +3443,11 @@ function GoogleMapView({ compact = false, providerState }: MapViewProps & { prov
         </div>
       )}
 
-      {/* Analytical Mode Switcher & KPI Ribbon */}
-      <MapAnalyticalModeHeader onFitLagosFleet={handleFitLagosFleetGoogle} />
+      <MapAnalyticalModeHeader
+        onFitLagosFleet={handleFitLagosFleetGoogle}
+        activityPanelOpen={activityPanelOpen && !fieldFocusMode}
+        onToggleActivity={fieldFocusMode ? undefined : () => setActivityPanelOpen((open) => !open)}
+      />
 
       <div className="absolute top-20 left-4 right-4 md:top-6 md:right-8 md:left-auto md:w-[300px] xl:w-[340px] z-20">
         <div className="relative">
@@ -3447,8 +3481,8 @@ function GoogleMapView({ compact = false, providerState }: MapViewProps & { prov
       </div>
 
       {/* Left panel — agent/business search + tabs */}
-      {!fieldFocusMode && (
-      <div className="absolute top-20 left-4 right-4 md:top-8 md:left-8 md:right-auto md:w-[340px] z-20 bg-white rounded-[32px] shadow-2xl shadow-black/10 overflow-hidden flex flex-col max-h-[calc(100vh-120px)]">
+      {!fieldFocusMode && activityPanelOpen && (
+      <div className="absolute top-[8.25rem] left-4 right-4 md:top-20 md:left-8 md:right-auto md:w-[340px] z-20 bg-white rounded-[32px] shadow-2xl shadow-black/10 overflow-hidden flex flex-col max-h-[calc(100vh-120px)]">
         {/* Dynamic search filter */}
         <div className="px-4 pt-4 pb-2 shrink-0">
           <div className="relative">
@@ -3526,7 +3560,7 @@ function GoogleMapView({ compact = false, providerState }: MapViewProps & { prov
             }}
             onToggleFollowAll={() => setFieldFollowAll(!fieldFollowAll)}
             onToggleFocusMode={() => setFieldFocusMode(!fieldFocusMode)}
-            onViewHistory={(userId) => openDrawerToTabGoogle('visits', userId)}
+            onViewHistory={openAgentHistoryGoogle}
           />
         ) : (
           <BusinessListPanel
@@ -3628,10 +3662,10 @@ function GoogleMapView({ compact = false, providerState }: MapViewProps & { prov
         getGoogleMap={() => (mapRef.current ? { map: mapRef.current } : null)}
       />
 
-      <MapAnalyticsHistoryDrawer
+      {!isAdminMap && <MapAnalyticsHistoryDrawer
         onFlyToCoordinate={handleFlyToCoordinateGoogle}
         onFitCoordinates={handleFitCoordinatesGoogle}
-      />
+      />}
 
       {/* Route history slide-in disabled — see docs/map-route-history-panel.md
       {historyTask && (

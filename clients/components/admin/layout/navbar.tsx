@@ -175,17 +175,17 @@ export function Navbar() {
               </div>
 
               {/* Menu Items */}
-              <div className="p-2">
+              {/* <div className="p-2">
                 <ViewModeToggle mode="admin" />
-                {/* <Link
+                <Link
                   href="/admin/account-management"
                   className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-white/80 hover:bg-white/5 hover:text-white transition-colors"
                   onClick={() => setIsDropdownOpen(false)}
                 >
                   <Users className="w-4 h-4" />
                   Account Management
-                </Link> */}
-              </div>
+                </Link>
+              </div> */}
 
               {/* Logout */}
               <div className="p-2 border-t border-white/10">

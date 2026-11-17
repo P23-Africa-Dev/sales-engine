@@ -137,7 +137,7 @@ export const useMapAnalyticsStore = create<MapAnalyticsStore>((set, get) => ({
 
   territoryVisualMode: "boundaries",
   territoryColorScheme: "agent",
-  territoryLayerEnabled: true,
+  territoryLayerEnabled: false,
   territoryLegendOpen: false,
 
   weeklyRecords: getInitialWeeklyActivityRecords(),
