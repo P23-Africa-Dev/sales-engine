@@ -99,7 +99,7 @@ export function FactoryAnalytics({ market, companyId, initialTab }: { market: De
         <Link href={`/admin/map?market=${market}`} className="inline-flex items-center gap-2 text-sm font-semibold text-teal-800"><ArrowLeft size={16} /> Operational map</Link>
         <div className="mt-4 flex flex-wrap items-end justify-between gap-4">
           <div><p className="text-xs font-semibold text-teal-800">{name}</p><h1 className="mt-1 text-3xl font-bold tracking-tight">Field activity analytics</h1></div>
-          <FactoryDemoTabs market={market} analytics />
+          {/* <FactoryDemoTabs market={market} analytics /> */}
         </div>
         <nav aria-label="Analytics views" className="mt-6 flex flex-wrap gap-1 border-b border-slate-200">
           {tabs.map(([id, label]) => <button type="button" key={id} aria-current={tab === id ? 'page' : undefined}
