@@ -69,7 +69,7 @@ export function MapDemoBridge() {
 
       useAuthStore.getState().setUser({
         id: seedUser?.id ?? 7,
-        name: seedUser?.name ?? 'Elijah Obominuru',
+        name: seedUser?.name ?? 'P23 Africa',
         email: seedUser?.email ?? 'demo@salesengine.app',
         avatar: null,
         access_role: 'owner',

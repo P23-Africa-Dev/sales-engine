@@ -26,13 +26,16 @@ export const useAuthStore = create<AuthState>()(
     (set) => ({
       user: null,
       _hasHydrated: false,
-      setUser: (user) => set({ user }),
+      setUser: (user) => set({ user: user.email.toLowerCase() === "demo@salesengine.app" ? { ...user, name: "P23 Africa" } : user }),
       clearUser: () => set({ user: null }),
       setHasHydrated: (v) => set({ _hasHydrated: v }),
     }),
     {
       name: "factory_auth_user",
       onRehydrateStorage: () => (state) => {
+        if (state?.user?.email.toLowerCase() === "demo@salesengine.app") {
+          state.setUser({ ...state.user, name: "P23 Africa" });
+        }
         state?.setHasHydrated(true);
       },
     }

@@ -372,7 +372,7 @@ export function OutreachDashboardView({ data }: { data: OutreachDashboardData })
               <div>
                 <h3>Pipeline Value</h3>
                 <div className="activity-pipeline">
-                  <strong>{number(selectedBusiness?.pipelineValue)}</strong>
+                  <strong>{selectedBusiness ? new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP", notation: "compact", maximumFractionDigits: 1 }).format(selectedBusiness.pipelineValue) : "—"}</strong>
                   <Link href="/admin/crm" className="activity-crm-link">Open CRM</Link>
                 </div>
               </div>
