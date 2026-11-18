@@ -121,7 +121,7 @@ export function FactoryDemoMap({ market, companyId }: { market: DemoMarket; comp
     let instance: maplibregl.Map;
     try {
       instance = new maplibregl.Map({
-        container: container.current, center: [center[0], center[1]], zoom: 11.2,
+        container: container.current, center: [center[0], center[1]], zoom: 13.2,
         style: createGreenStreetStyle(),
       });
     } catch {
