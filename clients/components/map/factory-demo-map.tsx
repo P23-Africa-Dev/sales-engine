@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import maplibregl, { type GeoJSONSource, type LayerSpecification } from 'maplibre-gl';
 import type { FeatureCollection, Point } from 'geojson';
 import Link from 'next/link';
+import { createGreenStreetStyle } from '@/lib/map/green-street-style';
 import { MapExploreControls } from './map-explore-controls';
 import { Search, X } from 'lucide-react';
 import {
@@ -121,15 +122,7 @@ export function FactoryDemoMap({ market, companyId }: { market: DemoMarket; comp
     try {
       instance = new maplibregl.Map({
         container: container.current, center: [center[0], center[1]], zoom: 11.2,
-        style: {
-          version: 8,
-          glyphs: 'https://fonts.openmaptiles.org/{fontstack}/{range}.pbf',
-          sources: {
-            streets: { type: 'raster', tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'], tileSize: 256, maxzoom: 19,
-              attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>' },
-          },
-          layers: [{ id: 'streets', type: 'raster', source: 'streets' }],
-        },
+        style: createGreenStreetStyle(),
       });
     } catch {
       setMapError('The map could not start. A browser with WebGL is required.');
