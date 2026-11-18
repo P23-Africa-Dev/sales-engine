@@ -17,7 +17,7 @@ export function MapScreens({ market, companyId }: { market?: DemoMarket; company
   const [toolbarTarget, setToolbarTarget] = useState<HTMLDivElement | null>(null);
   return (
     <MapToolbarTarget.Provider value={toolbarTarget}>
-      <div className="relative z-50 flex items-center gap-2 border-b border-slate-200 bg-[#f6faf9] px-2 py-2 md:gap-3 md:px-8">
+      <div className={market ? "hidden" : "relative z-50 flex items-center gap-2 border-b border-slate-200 bg-[#f6faf9] px-2 py-2 md:gap-3 md:px-8"}>
         {/* <FactoryDemoTabs market={market} /> */}
         <div ref={setToolbarTarget} className={market ? "min-w-0 overflow-x-auto py-1" : undefined} />
         <Link aria-label="History & analytics" className="ml-auto shrink-0 rounded-xl px-2 py-2 text-sm font-semibold text-[#105c60] hover:bg-teal-100 sm:px-3" href={`/admin/map/analytics${market ? `?market=${market}` : ''}`}>

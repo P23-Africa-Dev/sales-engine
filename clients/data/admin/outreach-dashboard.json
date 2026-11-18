@@ -9,7 +9,7 @@
     {
       "id": "email",
       "title": "No of company contacted",
-      "total": 220000,
+      "total": 280,
       "primaryLabel": "Sent",
       "secondaryLabel": "Received",
       "primaryPercent": 55.333333,
@@ -19,7 +19,7 @@
     {
       "id": "sms",
       "title": "No of meetings and site visits",
-      "total": 20090,
+      "total": 489,
       "primaryLabel": "Sent",
       "secondaryLabel": "Received",
       "primaryPercent": 55.333333,
@@ -29,7 +29,7 @@
     {
       "id": "in-person",
       "title": "No of Outreach",
-      "total": 120009,
+      "total": 1500,
       "primaryLabel": "Calls",
       "secondaryLabel": "WhatsApp",
       "primaryPercent": 55.333333,
@@ -69,11 +69,11 @@
       "company": "Nord Tech",
       "emailsSent": 50000,
       "prospects": 10000,
-      "followUpsCompleted": 27,
+      "followUpsCompleted": 754,
       "contact": "michael.weber@example.com",
       "readinessPercent": 73,
-      "pipelineValue": 50000,
-      "outreachCount": 10000
+      "pipelineValue": 15000000,
+      "outreachCount": 950
     },
     {
       "id": "meridian",
