@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import maplibregl, { type GeoJSONSource } from 'maplibre-gl';
+import maplibregl, { type GeoJSONSource, type LayerSpecification } from 'maplibre-gl';
 import type { FeatureCollection, Point } from 'geojson';
 import Link from 'next/link';
 import { MapExploreControls } from './map-explore-controls';
@@ -50,6 +50,7 @@ export function FactoryDemoMap({ market, companyId }: { market: DemoMarket; comp
   const [activityTab, setActivityTab] = useState<'feeds' | 'clocked-in' | 'businesses'>('feeds');
   const [activitySearch, setActivitySearch] = useState('');
   const [showPins, setShowPins] = useState(true);
+  const [clusterCompanies, setClusterCompanies] = useState(false);
   const [mapMode, setMapMode] = useState<'2d' | '3d'>('2d');
   const [locating, setLocating] = useState(false);
   const [locationError, setLocationError] = useState('');
@@ -139,6 +140,7 @@ export function FactoryDemoMap({ market, companyId }: { market: DemoMarket; comp
       for (const id of ['territories', 'routes', 'visits', 'agents', 'coverage']) {
         instance.addSource(id, { type: 'geojson', data: collection([]) });
       }
+      instance.addSource('company-points', { type: 'geojson', data: collection([]) });
       instance.addSource('companies', { type: 'geojson', data: collection([]), cluster: true, clusterRadius: 43, clusterMaxZoom: 15 });
       instance.addLayer({ id: 'zones', source: 'territories', type: 'fill', paint: { 'fill-color': ['get', 'color'], 'fill-opacity': ['get', 'opacity'], 'fill-outline-color': ['get', 'color'] } });
       instance.addLayer({ id: 'coverage', source: 'coverage', type: 'circle', paint: {
@@ -149,18 +151,22 @@ export function FactoryDemoMap({ market, companyId }: { market: DemoMarket; comp
       instance.addLayer({ id: 'routes', source: 'routes', type: 'line', paint: { 'line-color': ['get', 'color'], 'line-width': 3, 'line-opacity': 0.75 } });
       instance.addLayer({ id: 'clusters', source: 'companies', type: 'circle', filter: ['has', 'point_count'], paint: { 'circle-radius': 16, 'circle-color': '#084b5d', 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 } });
       instance.addLayer({ id: 'cluster-labels', source: 'companies', type: 'symbol', filter: ['has', 'point_count'], layout: { 'text-field': ['get', 'point_count_abbreviated'], 'text-font': ['Open Sans Regular'], 'text-size': 12 }, paint: { 'text-color': '#fff' } });
-      instance.addLayer({ id: 'company-pin', source: 'companies', type: 'circle', filter: ['!', ['has', 'point_count']], paint: { 'circle-radius': ['case', ['get', 'signal'], 7, 5], 'circle-color': ['case', ['get', 'signal'], '#c36a15', '#204e60'], 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 } });
+      instance.addLayer({ id: 'company-pin', source: 'company-points', type: 'circle', filter: ['!', ['has', 'point_count']], paint: { 'circle-radius': ['case', ['get', 'signal'], 7, 5], 'circle-color': ['case', ['get', 'signal'], '#c36a15', '#204e60'], 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 } });
       instance.addLayer({
-        id: 'company-label', type: 'symbol', source: 'companies', minzoom: 14,
+        id: 'company-label', type: 'symbol', source: 'company-points', minzoom: 14,
         filter: ['!', ['has', 'point_count']],
         layout: { 'text-field': ['get', 'name'], 'text-font': ['Open Sans Regular'], 'text-size': 12, 'text-anchor': 'bottom', 'text-offset': [0, -0.8] },
         paint: { 'text-color': '#0f172a', 'text-halo-color': '#fff', 'text-halo-width': 2.5 },
       });
+      for (const id of ['company-pin', 'company-label']) {
+        const layer = instance.getLayer(id)?.serialize();
+        if (layer) instance.addLayer({ ...layer, id: `clustered-${id}`, source: 'companies' } as LayerSpecification);
+      }
       instance.addLayer({ id: 'visit-pin', source: 'visits', type: 'circle', paint: { 'circle-radius': 8, 'circle-color': ['get', 'color'], 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 } });
       instance.addLayer({ id: 'agent-pin', source: 'agents', type: 'circle', paint: { 'circle-radius': 20, 'circle-color': '#dff4ff', 'circle-stroke-color': '#0ea5e9', 'circle-stroke-width': 3 } });
       instance.addLayer({ id: 'agent-label', source: 'agents', type: 'symbol', layout: { 'text-field': ['get', 'initials'], 'text-font': ['Open Sans Regular'], 'text-size': 12, 'text-allow-overlap': true }, paint: { 'text-color': '#0c4a6e' } });
       instance.on('dragstart', () => setFollow(null));
-      for (const layer of ['company-pin', 'company-label']) {
+      for (const layer of ['company-pin', 'company-label', 'clustered-company-pin', 'clustered-company-label']) {
         instance.on('click', layer, ({ features }) => {
           if (features?.length) setSelectedCompany(Number(features[0].properties.id));
         });
@@ -178,7 +184,7 @@ export function FactoryDemoMap({ market, companyId }: { market: DemoMarket; comp
           .then((zoom) => instance.easeTo({ center: (cluster.geometry as Point).coordinates as Coordinate, zoom }))
           .catch(() => {});
       });
-      for (const layer of ['clusters', 'company-pin', 'company-label', 'agent-pin', 'visit-pin']) {
+      for (const layer of ['clusters', 'company-pin', 'company-label', 'clustered-company-pin', 'clustered-company-label', 'agent-pin', 'visit-pin']) {
         instance.on('mouseenter', layer, () => { instance.getCanvas().style.cursor = 'pointer'; });
         instance.on('mouseleave', layer, () => { instance.getCanvas().style.cursor = ''; });
       }
@@ -208,6 +214,7 @@ export function FactoryDemoMap({ market, companyId }: { market: DemoMarket; comp
     : []), [territoryMode, currentVisits]);
   useSource(map, 'coverage', coverageData);
   useSource(map, 'companies', companyData);
+  useSource(map, 'company-points', companyData);
   useSource(map, 'visits', visitData);
   useSource(map, 'territories', territoryData);
   useSource(map, 'routes', routeData);
@@ -217,10 +224,13 @@ export function FactoryDemoMap({ market, companyId }: { market: DemoMarket; comp
     map.setLayoutProperty('heat', 'visibility', heat ? 'visible' : 'none');
     map.setLayoutProperty('visit-pin', 'visibility', showVisits ? 'visible' : 'none');
     map.setLayoutProperty('routes', 'visibility', showRoutes ? 'visible' : 'none');
-    for (const layer of ['clusters', 'cluster-labels', 'company-pin', 'company-label']) {
-      map.setLayoutProperty(layer, 'visibility', showPins ? 'visible' : 'none');
+    for (const layer of ['company-pin', 'company-label']) {
+      map.setLayoutProperty(layer, 'visibility', showPins && !clusterCompanies ? 'visible' : 'none');
     }
-  }, [map, heat, showVisits, showRoutes, showPins]);
+    for (const layer of ['clusters', 'cluster-labels', 'clustered-company-pin', 'clustered-company-label']) {
+      map.setLayoutProperty(layer, 'visibility', showPins && clusterCompanies ? 'visible' : 'none');
+    }
+  }, [map, heat, showVisits, showRoutes, showPins, clusterCompanies]);
 
   useEffect(() => {
     if (!map?.style) return;
@@ -368,6 +378,7 @@ export function FactoryDemoMap({ market, companyId }: { market: DemoMarket; comp
           <button type="button" aria-expanded={openControls === 'filters'} aria-controls="map-filters-panel" className={mapControlClass} onClick={() => setOpenControls(openControls === 'filters' ? null : 'filters')}>Filters</button>
           {openControls === 'filters' && (
             <div id="map-filters-panel" role="group" aria-label="Territory and company filters" className="absolute bottom-full right-0 mb-3 max-h-[60dvh] w-64 space-y-3 overflow-y-auto rounded-2xl border border-slate-200 bg-white p-4 text-sm text-dash-dark shadow-xl">
+              <label className="flex cursor-pointer items-center justify-between gap-3 rounded-xl px-3 py-2 hover:bg-slate-50">Group nearby companies<input type="checkbox" checked={clusterCompanies} onChange={(event) => setClusterCompanies(event.target.checked)} /></label>
               <label className="block space-y-1"><span>Territory overlay</span>
                 <select className={field} value={territoryMode} onChange={(event) => setTerritoryMode(event.target.value)}>
                   {territoryOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
@@ -384,7 +395,7 @@ export function FactoryDemoMap({ market, companyId }: { market: DemoMarket; comp
                 if (territoryMode === 'off' || territoryMode === 'footprints') setTerritoryMode('boundaries');
               }}>Manage territories</button>
               <button type="button" className="block w-full rounded-xl px-3 py-2 text-left hover:bg-slate-50" onClick={() => {
-                setQuery(''); setSignal('all'); setTerritoryMode('off'); setHeat(false); setShowVisits(false); setShowRoutes(false);
+                setClusterCompanies(false); setQuery(''); setSignal('all'); setTerritoryMode('off'); setHeat(false); setShowVisits(false); setShowRoutes(false);
               }}>Clear filters</button>
               <Link href={`/admin/map/analytics?market=${market}`} className="block rounded-xl bg-[#103644] px-3 py-2 text-center font-semibold text-white">History &amp; analytics</Link>
             </div>
