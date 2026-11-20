@@ -290,7 +290,7 @@ export function FactoryDemoMap({ market, companyId }: { market: DemoMarket; comp
               setShowRoutes(id === 'history' && panel !== id); setShowVisits(id === 'history' && panel !== id);
             }}>{label}</button>)}
           </nav>
-          <p className="rounded-full bg-white/90 px-3 py-1 text-[11px] font-semibold text-teal-800">Simulated demo · Road routes © OpenStreetMap / OSRM</p>
+          {/* <p className="rounded-full bg-white/90 px-3 py-1 text-[11px] font-semibold text-teal-800">Simulated demo · Road routes © OpenStreetMap / OSRM</p> */}
         </div>
       </div>
       <div className="absolute inset-0"><div ref={container} className="h-full w-full" /></div>
